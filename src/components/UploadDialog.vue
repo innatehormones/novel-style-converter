@@ -2,10 +2,12 @@
   <Dialog v-model:open="open" title="上传 .txt 文件" :width="480">
     <div class="row">
       <label>文本文件 *</label>
-      <input ref="fileInput" type="file" accept=".txt" @change="onFile" />
+      <Button kind="primary" :disabled="picking" @click="onPick">
+        {{ picking ? '选择中...' : (filePath ? '重新选择' : '选择文件') }}
+      </Button>
     </div>
     <div v-if="fileInfo" class="file-info">
-      {{ fileInfo.name }} · {{ (fileInfo.size / 1024).toFixed(1) }} KB
+      {{ fileInfo.name }} · {{ fileInfo.path }}
     </div>
     <div v-if="error" class="error">{{ error }}</div>
     <template #footer>
@@ -17,60 +19,63 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
 
 const open = defineModel<boolean>('open', { required: true });
-const emit = defineEmits<{ submit: [{ filename: string; bytes: number[] }] }>();
+const emit = defineEmits<{ submit: [{ filePath: string; filename: string }] }>();
 
+const filePath = ref('');
 const filename = ref('');
-const fileSize = ref(0);
-const bytes = ref<number[] | null>(null);
 const error = ref<string | null>(null);
 const submitting = ref(false);
-const fileInput = ref<HTMLInputElement | null>(null);
+const picking = ref(false);
 
 const fileInfo = computed(() =>
-  filename.value ? { name: filename.value, size: fileSize.value } : null,
+  filePath.value ? { name: filename.value, path: filePath.value } : null,
 );
 
-const canSubmit = computed(() => bytes.value !== null);
+const canSubmit = computed(() => filePath.value !== '');
 
 watch(open, (v) => {
   if (v) {
+    filePath.value = '';
     filename.value = '';
-    fileSize.value = 0;
-    bytes.value = null;
     error.value = null;
     submitting.value = false;
-    if (fileInput.value) fileInput.value.value = '';
+    picking.value = false;
   }
 });
 
-function onFile(e: Event) {
-  const f = (e.target as HTMLInputElement).files?.[0];
-  if (!f) return;
-  filename.value = f.name;
-  fileSize.value = f.size;
-  const reader = new FileReader();
-  reader.onload = () => {
-    const buf = reader.result;
-    if (buf instanceof ArrayBuffer) {
-      bytes.value = Array.from(new Uint8Array(buf));
-    } else {
-      error.value = '读文件失败';
+async function onPick() {
+  error.value = null;
+  picking.value = true;
+  try {
+    const selected = await openDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'Text', extensions: ['txt'] }],
+    });
+    if (typeof selected === 'string') {
+      filePath.value = selected;
+      // use last path segment as default display name
+      const segs = selected.split(/[\\\\/]/);
+      filename.value = segs[segs.length - 1] || 'uploaded.txt';
     }
-  };
-  reader.onerror = () => { error.value = '读文件失败'; };
-  reader.readAsArrayBuffer(f);
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    picking.value = false;
+  }
 }
 
-async function onSubmit() {
-  if (bytes.value === null) return;
+function onSubmit() {
+  if (!canSubmit.value) return;
   error.value = null;
   submitting.value = true;
   try {
-    emit('submit', { filename: filename.value, bytes: bytes.value });
+    emit('submit', { filePath: filePath.value, filename: filename.value });
     open.value = false;
   } finally {
     submitting.value = false;
@@ -91,13 +96,11 @@ async function onSubmit() {
   color: var(--text-secondary);
   flex-shrink: 0;
 }
-.row input[type=file] {
-  flex: 1;
-}
 .file-info {
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 12px;
+  word-break: break-all;
 }
 .error {
   color: var(--danger);
