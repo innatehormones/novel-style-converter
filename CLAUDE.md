@@ -83,3 +83,80 @@ Key routing rules:
 - Resume context → invoke /context-restore
 - Author a backlog-ready spec/issue → invoke /spec
 
+## Project: novel-style-converter
+
+Windows desktop app that imports a novel (`.txt`), auto-splits by chapter, then runs LLM-based compression or style-transfer on each chapter via any OpenAI-compatible HTTP API. Stack: **Tauri 2** (Rust backend) + **Vue 3**, packaged as MSI on Windows.
+
+### Build & Run
+
+```bash
+# Frontend deps (pnpm 11+; first run needs `pnpm approve-builds` for esbuild + vue-demi)
+pnpm install
+
+# Dev: starts Vite (port 43801) + Tauri window
+pnpm tauri dev
+
+# Frontend only (no Tauri window)
+pnpm dev
+
+# Release MSI bundle → target/release/bundle/msi/
+pnpm tauri build --bundles msi
+
+# Release smoke test (4s, GUI-independent)
+pwsh scripts/smoke.ps1
+```
+
+### Tests
+
+```bash
+# Frontend unit tests (vitest, mocks @tauri-apps/api/core)
+pnpm test
+
+# E2E (Playwright; specs are currently test.skip placeholders — require real Tauri runtime + fake LLM)
+pnpm e2e
+
+# Rust core: db/repos, splitter, prompts, ai_openai (wiremock), transformer, queue
+cargo test -p nsc-core
+
+# Single test file
+cargo test -p nsc-core --test splitter
+cargo test -p nsc-core --test queue
+cargo test -p nsc-core --test ai_openai
+```
+
+### Architecture (current — post-Phase 11)
+
+- **Cargo workspace** at root: `crates/nsc-core` (pure lib) + `src-tauri` (shell). Single pnpm package at root.
+- **`crates/nsc-core/src/`** — no Tauri deps. Modules:
+  - `db/` (`pool`, `migrate`, 6 repos in `repo/`) · `models/` (Novel/Chapter/Prompt/ModelConfig/DataAsset/TransformationNovel/TransformationChapter)
+  - `ai/` (`AiProvider` trait + `OpenAiProvider` only) · `splitter/rules.rs` (zh/en chapter regex + blank-line fallback + zh-aware word_count)
+  - `prompts/` (builtin templates + `render` / `render_raw`) · `transformer/` (`JobQueue` worker pool + `DefaultTransformer`)
+  - `cleaner/` (清洗规则; see README) · `encoding/` (BOM/UTF-8/GBK/chardetng) · `text/` · `error.rs` (8 variants)
+- **`src-tauri/`** — Tauri 2 shell. `lib.rs` opens `%APPDATA%/novel-style-converter/data.db`, starts `JobQueue` (2 workers), seeds default `ModelConfig` from `.env`, then registers all commands. `commands/` modules: `models`, `uploads`, `chapters`, `cleaning`, `data_assets`, `transformation_novels`, `transformations`.
+- **`src/`** — Vue 3 frontend. Views: `Library` (uploads / data-assets / transformations tabs), `Models`, `Upload`, `parse` (chapter wizard), `DataAsset`, `Transform`. Stores: `library`, `models`, `chapters`, `dataAsset`, `transformView`, `theme`. Components in `src/components/`: dialogs, `Sidebar`, transform sub-components. IPC bindings live in `src/ipc/{commands.ts, types.ts}` — **hand-written, not generated**. Router: `src/router/index.ts` (`/uploads`, `/data-assets`, `/library/upload/:id`, `/library/upload/:id/parse`, `/library/data/:id`, `/library/transform/:chapterId`, `/models`).
+
+### Critical invariants
+
+- **`Db` is `Send` but NOT `Sync`** (rusqlite `Connection` has internal `RefCell`).
+  - **Never** capture `Arc<Db>` into `tokio::spawn` / `spawn_blocking` closures or `Task::perform` futures.
+  - **Always** capture `db_path: PathBuf` and call `Db::open(&path)` inside the worker to get an owned `Db`.
+- **`JobQueue`** requires two factories: `db_factory()` returning owned `Result<Db>`, and `provider_factory(&ModelConfig)` returning owned `Box<dyn AiProvider>` (NOT a reference — `DefaultTransformer` owns the provider so it fits in `Box<dyn Transformer>`).
+- **Schema migrations** in `migrations/` (`0001_init.sql` … `0006_transformation_novels_data_asset_fk.sql`). All `CREATE TABLE` / `CREATE INDEX` use `IF NOT EXISTS` because worker factories reopen the same DB file repeatedly — must stay idempotent.
+- **IPC payload convention (Tauri 2)**:
+  - **Outer invoke args** are camelCased automatically by Tauri (e.g. `dataAssetId`, `chapterIds`, `promptId`, `modelConfigId`, `ctxPrev*`, `ctxNext*`, `baseUrl`, `apiKey`, `maxTokens`).
+  - **Inner DTOs** (e.g. `ModelConfigInput`, `EnqueuePayload`) keep snake_case fields (`base_url`, `api_key`, `max_tokens`, etc.) — backend uses explicit `#[serde(rename_all = "snake_case")]`. Frontend must NOT inline-rename these.
+  - **Response types** keep snake_case (match nsc-core model fields).
+  - See header comment of `src/ipc/commands.ts` for the canonical reference.
+- **API key**: plaintext in SQLite at `%APPDATA%/novel-style-converter/data.db`. Single-machine use. `.env` is gitignored; never commit real keys.
+- **JobQueue workers**: 2 default (lib.rs), 4 max. `ModelConfig.concurrency` field exists but unused — reserved for future per-model throttling.
+- **Failure handling**: worker does NOT auto-retry. Failed jobs stay `Failed` until user manually re-enqueues.
+
+### Common pitfalls
+
+- **`crates/nsc-desktop/` is an empty directory** (legacy from Phase 7-9). Don't add code here — the live shell is `src-tauri/`.
+- **`tauri.conf.json`** historically had wrong absolute paths (`D:/NewCode/...`) in `beforeDevCommand` / `beforeBuildCommand`. Must be `pnpm dev` / `pnpm build` (run from repo root).
+- **`vite.config.ts`** excludes `**/target/**`, `**/crates/**`, `**/src-tauri/**`, `**/migrations/**` from Vite watch — without this, cargo's rustdoc HTML triggers dep-scan explosion.
+- **`playwright.config.ts`** uses `reuseExistingServer: true` and points at the Vite dev port (43801). E2E specs are placeholder (`test.skip`) — they cannot mock LLM or trigger Tauri IPC from the Vite dev server alone.
+- **Adding a new IPC command**: implement in `src-tauri/src/commands/<module>.rs`, register in `src-tauri/src/lib.rs` `invoke_handler!`, add typed wrapper to `src/ipc/commands.ts` (camelCase outer args, snake_case inner DTO), extend `src/ipc/types.ts` if needed, then write a `vitest` mock asserting the exact `invoke` call shape — the camelCase translation is easy to break silently (mocked IPC won't catch it).
+- **Adding a schema change**: bump `migrations/000N_*.sql` (never edit applied migrations); all DDL must remain `IF NOT EXISTS`; add a corresponding repo function in `crates/nsc-core/src/db/repo/`; export from `crates/nsc-core/src/db/mod.rs`; surface via a Tauri command only if frontend needs it.
+

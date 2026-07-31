@@ -1,6 +1,6 @@
 # Novel Style Converter
 
-一个 Windows 桌面应用，用大语言模型把导入的小说按章节做**内容压缩**和**文风转换**。底层使用任意 OpenAI 兼容 HTTP API，桌面壳基于 [Tauri 1.x](https://tauri.app/)（Rust 后端 + WebView 前端），前端用 Vue 3 + Element Plus。早期版本用 Rust + [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) + [gpui-component](https://github.com/longbridge/gpui-component)，从 iced 0.13 → gpui → Tauri 三次迁移完成。
+一个 Windows 桌面应用，用大语言模型把导入的小说按章节做**内容压缩**和**文风转换**。底层使用任意 OpenAI 兼容 HTTP API，桌面壳基于 [Tauri 2.x](https://tauri.app/)（Rust 后端 + WebView 前端），前端用 Vue 3 + Element Plus。早期版本用 Rust + [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) + [gpui-component](https://github.com/longbridge/gpui-component)，从 iced 0.13 → gpui → Tauri 三次迁移完成。
 
 主要动机是把"coding plan"中未用完的 token 额度消耗在长文本处理上：核心工作就是把长正文交给 LLM，结构与界面只求最小可用。
 
@@ -13,7 +13,7 @@
 - **Prompt 模板管理**：内置 `compress_default`、`style_default` 两条模板，支持复制内置、新建自定义、模板预览（调用 `prompts::render` 实时看渲染结果）
 - **模型配置管理**：支持任意 OpenAI 兼容 base_url + api_key + model，可一键测试连接（实际发起一次 `chat` 调用）
 - **按章节批量转换**：勾选章节 → 弹参数对话框（prompt / model / 前文原文 / 前文已转换 / 后文 上下文数） → 入队 → worker pool 并发执行
-- **多次转换结果保留**：同一章节可保留多条 `transformation` 记录，Transform 页用 tab 切换，底部显示 tokens_in / tokens_out / status / error
+- **多次转换结果保留**：同一章节可保留多条 `transformation_chapters` 记录，Transform 页用 tab 切换，底部显示 tokens_in / tokens_out / status / error
 - **队列状态查看**：1 秒自动刷新，分 Pending / Running / Done / Failed 四组，Failed 项可点 [↺ 重试]（重置状态为 pending 并重新入队）
 - **失败不重试**：worker 不会自动重试失败的转换，避免 token 失控；用户手动决定
 
@@ -24,7 +24,7 @@
 | 层 | 技术 |
 |---|---|
 | 语言 | Rust 2021 edition，最低 1.75 |
-| UI | Tauri 1.x 桌面壳 + Vue 3.5 + Vite 6 + TypeScript 5.6 + Pinia 2.3 + vue-router 4.6 + Element Plus 2.14（前端在 `web/`；`crates/gpui-prototype/` 仍保留 gpui playground） |
+| UI | Tauri 2.x 桌面壳 + Vue 3.5 + Vite 6 + TypeScript 5.6 + Pinia 2.3 + vue-router 4.6 + Element Plus 2.14（前端在 `src/`） |
 | 异步运行时 | `tokio`（`rt` + `rt-multi-thread`） |
 | HTTP | `reqwest = "0.12"`（`json` + `rustls-tls`，不依赖 OpenSSL） |
 | 数据库 | `rusqlite = "0.31"`（`bundled` + `chrono`，自带 SQLite） |
@@ -51,74 +51,103 @@ novel-style-converter/
 ├─ playwright.config.ts
 ├─ index.html
 ├─ migrations/
-│  └─ 0001_init.sql            # SQLite schema（5 表 + IF NOT EXISTS）
+│  ├─ 0001_init.sql            # novels / chapters / transformations / prompts / model_configs
+│  ├─ 0002_split_uploads.sql   # uploads（原始 .txt 文件存档）
+│  ├─ 0003_chapter_byte_ranges.sql   # chapters 增加 byte_start / byte_end
+│  ├─ 0004_data_assets.sql     # data_assets（章节解析后的不可变资产）
+│  ├─ 0005_chapters_data_asset_fk.sql   # chapters → data_assets FK
+│  └─ 0006_transformation_novels_data_asset_fk.sql   # transformation_novels（独立转换目标）
 ├─ src/                        # Vue 前端
 │  ├─ App.vue
 │  ├─ main.ts
-│  ├─ views/                   # Library / NovelDetail / Models / Prompts / Queue
-│  ├─ components/              # AppShell + Dialogs + RowActions + JobList
-│  ├─ stores/                  # pinia: library / models / prompts / novelDetail / queue / transforms
-│  ├─ ipc/                     # commands.ts + types.ts (hand-written IPC bindings)
+│  ├─ views/                   # Library / Models / Upload / parse / DataAsset / Transform
+│  ├─ components/              # AppShell + Sidebar + Dialogs + Transform 子组件
+│  ├─ stores/                  # pinia: library / models / chapters / dataAsset / transformView / theme
+│  ├─ ipc/                     # commands.ts + types.ts（手写 IPC bindings）
 │  ├─ router/
+│  ├─ composables/
 │  └─ __tests__/               # vitest
-├─ tests-e2e/                  # Playwright e2e 骨架
-├─ src-tauri/                  # Tauri 1.x 桌面壳（依赖 nsc-core）
+├─ tests-e2e/                  # Playwright e2e 骨架（test.skip 占位）
+├─ src-tauri/                  # Tauri 2.x 桌面壳（依赖 nsc-core）
 │  ├─ Cargo.toml
 │  ├─ build.rs                 # tauri_build::build()
+│  ├─ capabilities/            # Tauri 2 capability ACL
+│  ├─ gen/                     # Tauri 2 generated bindings（不要手动编辑）
 │  ├─ icons/                   # 多尺寸 .ico + png（打包用）
 │  ├─ tauri.conf.json
 │  └─ src/
-│     ├─ main.rs               # nsc_desktop::run() 入口
-│     ├─ lib.rs                # Db + JobQueue 启动 + 路由 Tauri 命令 + emit "queue_changed"
-│     └─ commands/             # novels / models / prompts / chapters / transforms
+│     ├─ main.rs               # nsc_lib::run() 入口
+│     ├─ lib.rs                # Db + JobQueue 启动 + 注册 Tauri 命令
+│     └─ commands/             # models / uploads / chapters / cleaning / data_assets / transformation_novels / transformations
 ├─ crates/
 │  ├─ nsc-core/                # 纯库，无 Tauri/gpui 依赖
 │  │  ├─ Cargo.toml
 │  │  └─ src/
 │  │     ├─ lib.rs
 │  │     ├─ error.rs           # 8 变体 Error 枚举
-│  │     ├─ models/            # Novel / Chapter / Transformation / Prompt / ModelConfig
-│  │     ├─ db/                # pool + migrate + 5 个 repo
+│  │     ├─ models/            # Novel / Chapter / Transformation / Prompt / ModelConfig / DataAsset / TransformationNovel
+│  │     ├─ db/                # pool + migrate + 6 个 repo
 │  │     ├─ ai/                # AiProvider trait + OpenAiProvider
 │  │     ├─ splitter/          # DefaultSplitter（正则分章）
 │  │     ├─ prompts/           # 内置模板 + render 函数
+│  │     ├─ cleaner/           # 文本清洗规则
+│  │     ├─ encoding/          # BOM/UTF-8/GBK/chardetng
+│  │     ├─ text/              # 文本工具
 │  │     └─ transformer/       # Transformer trait + DefaultTransformer + JobQueue
-│  └─ gpui-prototype/          # gpui playground（验证 API；不再用于产品）
 └─ docs/
-   └─ superpowers/             # 设计 spec + 实施 plan（过程文档）
-      ├─ specs/
-      └─ plans/
+   └─ 章节标题正则表达式.png    # 章节标题正则的视觉参考
 ```
 
 ---
 
 ## 数据模型
 
-5 张表，主外键 + `ON DELETE CASCADE`（删 novel 级联删 chapter 与 transformation）：
+7 张表（`migrations/0001_init.sql` … `0006_transformation_novels_data_asset_fk.sql`），主外键 + `ON DELETE CASCADE`（删 upload 级联删 data_asset / chapters / transformation_novels / transformation_chapters）：
+
+**当前核心模型**：原文一次上传（`uploads`），可被解析多次、生成多份「数据资产」（`data_assets`），每份资产下挂独立的章节（`chapters`）。同一份资产可以起多本「转换小说」（`transformation_novels`），每本下的章节转换任务（`transformation_chapters`）独立执行。
 
 ```sql
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE IF NOT EXISTS novels (
+CREATE TABLE IF NOT EXISTS uploads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sha256 TEXT NOT NULL UNIQUE,
+    filename TEXT NOT NULL,
+    byte_size INTEGER NOT NULL,
+    uploaded_at TEXT NOT NULL,         -- RFC3339
+    file_path TEXT NOT NULL,           -- 原始 .txt 存档路径
+    original_text TEXT NOT NULL DEFAULT ''   -- 原文全文；章节切片按 byte offset 取
+);
+
+CREATE TABLE IF NOT EXISTS data_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    upload_id INTEGER NOT NULL UNIQUE REFERENCES uploads(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
-    author TEXT,
-    source_path TEXT,
-    imported_at TEXT NOT NULL,        -- RFC3339
-    notes TEXT
+    parsed_at TEXT NOT NULL,
+    locked_at TEXT                     -- NULL = 未锁定（可重解析）；非 NULL = 已锁定（不可重解析）
 );
 
 CREATE TABLE IF NOT EXISTS chapters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
-    idx INTEGER NOT NULL,              -- 章序，章节重排时整本 renumber
+    data_asset_id INTEGER NOT NULL REFERENCES data_assets(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,              -- 章序；重排时整本 renumber
     title TEXT NOT NULL,
-    original_content TEXT NOT NULL,
-    word_count INTEGER NOT NULL        -- 由 word_count() 自动计算
+    byte_start INTEGER,                -- 在 data_asset.parsed_at 时的原文 offset；老数据可能 NULL
+    byte_end INTEGER,
+    word_count INTEGER NOT NULL,       -- 由 word_count() 自动计算
+    UNIQUE(data_asset_id, idx)
 );
 
-CREATE TABLE IF NOT EXISTS transformations (
+CREATE TABLE IF NOT EXISTS transformation_novels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    data_asset_id INTEGER NOT NULL REFERENCES data_assets(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS transformation_chapters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transformation_novel_id INTEGER NOT NULL REFERENCES transformation_novels(id) ON DELETE CASCADE,
     chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
     mode TEXT NOT NULL,                -- 'compress' | 'style'
     prompt_id INTEGER NOT NULL,
@@ -221,9 +250,23 @@ CREATE TABLE IF NOT EXISTS model_configs (
 - Node 20+ 与 npm（前端构建）
 - Windows 10+ / 11（其他平台没测过）
 
+### Per-machine 工具配置
+
+仓库不跟踪、每个开发者各自维护的本地配置文件(全部在 `.gitignore` 里):
+
+| 文件 / 目录 | 用途 | 模板 |
+|---|---|---|
+| `.env` | nsc-desktop 启动时 `dotenvy` 读取,作为 `model_configs` 表为空时的兜底种子(自动插入一条 ModelConfig) | `.env.example` |
+| `.mcp.json` | Claude Code 启动时加载的 MCP server 配置(例如 codegraph) | `.mcp.example.json` |
+| `.claude/` | Claude Code 项目级 settings / hooks / agents | — |
+| `.codegraph/` | CodeGraph 索引数据(`codegraph init` 生成) | — |
+| `.cursor/` | Cursor 编辑器本地配置 | — |
+
+模板文件(`.env.example` / `.mcp.example.json`)已提交,新 contributor 复制后改成本地值即可。
+
 ### 编译与运行
 
-项目用经典 Tauri 1.x 布局:`src-tauri/` 是 Rust 后端,`src/` 是 Vue 前端,`package.json` / `vite.config.ts` / `tsconfig.json` / `index.html` 在仓库根。
+项目用经典 Tauri 2.x 布局:`src-tauri/` 是 Rust 后端,`src/` 是 Vue 前端,`package.json` / `vite.config.ts` / `tsconfig.json` / `index.html` 在仓库根。
 
 ```bash
 # 安装前端依赖（pnpm 11+）
@@ -239,7 +282,12 @@ pnpm dev
 pnpm tauri build --bundles msi
 ```
 
-首次启动会在 `%APPDATA%/novel-style-converter/` 下创建 `data.db` 并自动 seed 两条内置 prompt。
+> **pnpm 10+ 的 `approve-builds` 机制**:`pnpm install` 第一次会提示
+> `[ esbuild, vue-demi ]` 是否允许运行 postinstall。这是 pnpm 默认拒绝运行
+> 任意 postinstall 以防供应链攻击的安全机制 —— 必须输入 `y` 或事先在
+> `pnpm-workspace.yaml` 的 `allowBuilds` 里列白名单(本仓库已配置)。
+> esbuild 用来预编译 native binary,vue-demi 给 Vue 2/3 兼容层打补丁。
+> 拒绝会导致 `pnpm dev` / `pnpm tauri dev` 启动失败(找不到 esbuild 可执行)。
 
 首次启动会在 `%APPDATA%/novel-style-converter/` 下创建 `data.db` 并自动 seed 两条内置 prompt。
 
@@ -308,7 +356,7 @@ Phase 7(已完成):移除 gpui
 - `nsc-desktop/Cargo.toml` 去掉 `gpui` / `gpui-component` / `gpui-component-assets` / `rfd` / `chardetng` / `encoding_rs` / `tokio` 直接依赖
 - 删除 `crates/nsc-desktop/src/{ui,actions.rs,state.rs,page.rs}`
 - 删除 `crates/nsc-desktop/tests/transform_dialog.rs`(只测 gpui 端 helper)
-- 保留 `crates/gpui-prototype/` 作为 gpui playground
+- 保留 `crates/gpui-prototype/` 作为 gpui playground(后续已移除,不再随仓库分发)
 
 Phase 8(已完成):Tauri 打包
 - `@tauri-apps/cli@1.6.3`(Tauri 1.x 末版)硬编码对 cargo 传 `--features custom-protocol`,但 tauri 1.8.3 已移除该 feature。在 `src-tauri/Cargo.toml` 加空 stub feature 让 cargo 接受 flag
@@ -324,11 +372,10 @@ Phase 9(已完成):经典 Tauri 布局重排
 - `tauri dev` / `tauri build` 一律 `pnpm tauri <cmd>` 从仓库根发起
 - Cargo workspace `members` 加 `src-tauri`,`crates/nsc-desktop/` 删除
 
-Phase 10(已完成):Tauri 1.x IPC 入参 camelCase 约定
-- Tauri 1.x `#[tauri::command]` 宏给所有入参和 DTO 字段自动加 `#[serde(rename_all = "camelCase")]`,前端必须用 camelCase key 调用
-- `src/ipc/commands.ts` 已修复 5 处:`listChaptersMeta`(`novelId`)、`addChapter`(`payload.novelId`)、`upsertModel`/`testModel`(`baseUrl`/`apiKey`/`maxTokens`)、`enqueueTransform`(`chapterIds`/`promptId`/`modelConfigId`/`ctxPrev*`/`ctxNext*`)
-- 同步更新 `src/__tests__/{novelDetail,models,transforms}.spec.ts` 的 `invoke` 断言(原断言用 snake_case 跑通是因为 mock 没真打 Tauri,所以掩盖了这个 bug)
-- 响应类型(Novel / Chapter / Prompt / ModelConfig / JobInfo / QueueSnapshot 等)Rust 不做 rename,**保持 snake_case** 以匹配 nsc-core DB 模型字段
+Phase 10(已完成):Tauri IPC 入参 camelCase 约定
+- Tauri `#[tauri::command]` 自动给入参加 `#[serde(rename_all = "camelCase")]`,前端必须用 camelCase key 调用
+- `src/ipc/commands.ts` 顶部注释记录了当前规则:**外层 invoke 参数** camelCase(`dataAssetId` / `chapterIds` / `promptId` / `modelConfigId` / `ctxPrev*` / `ctxNext*` / `baseUrl` / `apiKey` / `maxTokens` 等),**内层 DTO** snake_case(`base_url` / `api_key` / `max_tokens` / ... — 后端显式 `#[serde(rename_all = "snake_case")]`),**响应类型** 保持 snake_case 以匹配 nsc-core 模型字段
+- 单字字段(`id` / `title` / `name`)不受 camelCase 影响
 
 Phase 11(已完成):Transform 结果查看页
 - `src/views/Transform.vue` + 4 个子组件:`TransformChapterNav`(章节翻页 + 上下文标题)、`TransformVersionTabs`(同章多次转换 tab)、`TransformCompareView`(左右栏对照 + 同步滚动)、`TransformResultFooter`(tokens / status / error / 重新转换)
@@ -343,10 +390,12 @@ Phase 11(已完成):Transform 结果查看页
 - 新增 13 个测试(commands 3 + transformView 10):`src/__tests__/commands.spec.ts` 覆盖 3 个新 IPC 的 camelCase 入参;`src/__tests__/transformView.spec.ts` 覆盖并发加载 / 翻页缓存 / 越界 / tab 选中 / 跨小说 / 失败原子清空等
 - e2e 占位:`tests-e2e/transform.spec.ts` 用 `test.skip` 显式标记,说明需 fake LLM endpoint + 真实 Tauri runtime 才能跑,当前 `playwright.config.ts` 起的 Vite dev server 既不能注入 LLM mock 也不能触发 Tauri IPC
 
+> **Phase 12+ 演进(2026-07-22 之后)**:Phase 1-11 的设计在后续被替换为 upload → parse → data_asset → transformation_novel 的四段式数据流。当前代码模型见上文「数据模型」章节:不再有 `novels` / `transformations` 表;`uploads` 持久化原文 + sha256,`data_assets` 表示一次解析结果(可锁定 / 重解析),`transformation_novels` 是独立转换目标(可对同一份 data_asset 起多本)。前端视图也对应替换:`/uploads`(Library uploads tab) → `/library/upload/:id` → `/library/upload/:id/parse` → `/library/data/:dataAssetId` → `/library/transform/:chapterId`。本节以下「使用流程」已按当前数据流重写。
+
 ### 已知 API 风险
 
-- Tauri 1.x 与 specta 1.0.5 / specta-typescript 0.0.7 的 feature 组合已锁定。手写 IPC bindings(参见 `src/ipc/`),不在 build.rs 反射生成。gpui-prototype 是独立 crate,与产品代码无依赖关系。
-- **IPC 入参 camelCase,响应保持 snake_case**:Rust 端任何 `snake_case` 的命令参数或 `#[derive(Deserialize)]` DTO 字段,JS 端必须以 camelCase key 传入(`novel_id` → `novelId`、`base_url` → `baseUrl` 等)。单字字段(`id`、`title`、`name`)不受影响。响应类型**不**走 serde rename,继续 snake_case 以匹配 nsc-core 模型。新增 / 修改 IPC 时:在 `src/ipc/commands.ts` 写 inline 翻译、在 `src/__tests__/` 加断言、最好跑一次 `pnpm tauri dev` 实测一次 — 纯 vitest mock 抓不到这个差异。
+- **Tauri 2**:依赖 `tauri = "2"` + `@tauri-apps/api@^2` + `@tauri-apps/cli@^2`。IPC bindings **手写**(`src/ipc/commands.ts` + `src/ipc/types.ts`),不再用 specta / specta-typescript 反射生成;`src-tauri/capabilities/` 与 `src-tauri/gen/` 由 Tauri CLI 自动维护,不要手动改。
+- **IPC 入参 camelCase,响应保持 snake_case**:Tauri `#[tauri::command]` 自动给入参加 `#[serde(rename_all = "camelCase")]`,前端必须用 camelCase key 传入(`data_asset_id` → `dataAssetId`、`chapter_id` → `chapterId`、`ctx_prev_original` → `ctxPrevOriginal` 等)。单字字段(`id` / `title` / `name`)不受影响。**内层 DTO**(`ModelConfigInput` / `EnqueuePayload` 等)后端显式 `#[serde(rename_all = "snake_case")]`,前端必须按 snake_case 原样发(`base_url` / `api_key` / `max_tokens` / ...),不要 inline 改名。响应类型**不**走 serde rename,继续 snake_case 以匹配 nsc-core 模型。新增 / 修改 IPC 时:在 `src/ipc/commands.ts` 写 inline 翻译、在 `src/__tests__/` 加断言、最好跑一次 `pnpm tauri dev` 实测一次 — 纯 vitest mock 抓不到这个差异。
 
 ### 测试
 
@@ -374,9 +423,9 @@ cargo test -p nsc-core --test ai_openai
 | `queue_provider` | wiremock → 验证 worker 命中 `model_config.base_url` + 401 → Failed |
 | `queue_notifier` | enqueue / run_job 结束后调用注册的 notifier 闭包 |
 
-前端测试在 `web/src/__tests__/`,用 vitest + `vi.mock('@tauri-apps/api/tauri')` 隔离 IPC。
+前端测试在 `src/__tests__/`,用 vitest + `vi.mock('@tauri-apps/api/core')` 隔离 IPC(Tauri 2 的 invoke 入口从 `tauri` 改 `core`)。
 ```bash
-cd web && npx vitest run
+pnpm test       # 或 npx vitest run
 ```
 
 ### 冒烟测试(GUI 不阻塞)
@@ -411,64 +460,59 @@ pwsh scripts/smoke.ps1
 
 填完点 [💾 保存] → [🔌 测试连接] 确认能 ping 通。
 
-### 2. 导入小说
+### 2. 上传原文
 
-切到 `📚 小说库` 页 → 「📥 导入 .txt」：
+切到 `📂 文件上传` 页(Library uploads tab)→「📥 上传 .txt」：
 
-- 选 `.txt` 文件
-- 应用读取全文，`DefaultSplitter` 自动切分章节
-- 跳到 NovelDetail 页，可看到分章结果
+- 选 `.txt` 文件(自动计算 sha256;同 sha256 不重复入库)
+- 应用读全文存档到 `uploads.original_text`,跳到 `/library/upload/:uploadId` 页
 
-### 3. 文本清洗（可选）
+### 3. 文本清洗(可选,Upload 页操作)
 
-切到 `🧹 文本清洗` 页（也可在 Library 上传后自动跳转）：
-
-- 左栏原文，右栏清洗后；勾选规则后点 [▶ 清洗] 看效果
+- 左栏原文,右栏清洗后;勾选规则后点 [▶ 清洗] 看效果
 - 规则只改"行尾无标点的硬折行接上 + 不可见字节归一",**不擅自动缩进或换行**
 - 不勾任何规则点 [下一步 →] 等同跳过,直接进章节解析
 
 详见 [§ 清洗规则](#附录清洗规则)。
 
-### 4. 调整章节（可选）
+### 4. 解析章节(parse wizard)
 
-在 NovelDetail 页：
+点 [下一步 →] 或「解析章节」按钮:
 
-- 编辑标题 / 作者 → [💾 保存元数据]
-- 重排：每行 [↑] [↓] 按钮
-- 合并相邻：[合并→] 把下一章内容追加到本章并删除下一章
-- 删除：[🗑] 单章；或多选后 [🗑 删除选中]
-- 重命名：[✎] 在行内编辑
+- 用 `DefaultSplitter` 自动切分章节(中英文标题正则 + 空行兜底)
+- 章节可重命名 / 合并相邻 / 调整顺序 / 删除
+- 点 [💾 保存为数据资产] 提交 → 生成 `data_assets` 行(默认 unlocked,可后续重解析)
 
-### 5. 自定义 Prompt（可选）
+### 5. 自定义 Prompt(可选)
 
-切到 `📝 Prompt` 页：
+切到 `🔑 模型` 页旁的 Prompt 管理(`models` 是配置,Prompt 编辑在对应弹窗 / 代码路径中):
 
-- 复制内置：点内置行的 [复制内置] → 改名 → 编辑 template → [💾 保存]
-- 全新建：列表底部 [➕ 新建]
-- 预览：右侧编辑器 → 选章节 → [🔍 预览渲染] 看实时渲染结果
+- 复制内置:点内置行的 [复制内置] → 改名 → 编辑 template → [💾 保存]
+- 全新建:列表底部 [➕ 新建]
+- 预览:右侧编辑器 → 选章节 → [🔍 预览渲染] 看实时渲染结果
 
 模板变量见上节。
 
 ### 6. 触发转换
 
-回到 NovelDetail 页 → 勾选要转换的章节（多选 checkbox）→ 底部 [⚙ 批量转换]：
+DataAsset 页 → 顶部 [⚙ 新建转换小说] → 给转换小说起名 → 章节表勾选目标章节 → [⚙ 批量转换]:
 
-- 选 Prompt（kind 与转换模式一致：compress / style）
+- 选 Prompt(kind 与转换模式一致:compress / style)
 - 选 Model
-- 设三个上下文数（前文原文 / 前文已转换 / 后文）
+- 设三个上下文数(前文原文 / 前文已转换 / 后文)
 - [提交]
 
-每个章节插入一条 `transformations(pending)`，立即 `JobQueue.enqueue(JobSpec)`。
+每个章节插入一条 `transformation_chapters(pending)`,立即 `JobQueue.enqueue(JobSpec)`。
 
 ### 7. 查看转换结果
 
-Library → 数据资产 → 打开任意已锁定 data_asset → 章节行点 `[▶ 转换结果]`：
+DataAsset 页 → 选某个 transformation_novel → 章节行点 `[▶ 转换结果]`(跳转 `/library/transform/:chapterId`):
 
-- 顶部 ◀ ▶ 翻该 data_asset 的所有章节
-- 版本 tab:同一章节的多次转换结果(跨 transformation_novel,按 id desc)
-- 主区:左右栏对照(原文 / 选中 transformation 的 `result_content`)
+- 顶部 ◀ ▶ 翻该 transformation_novel 的所有章节
+- 版本 tab:同一章节的多次转换结果(同一 transformation_novel 下,按 id desc)
+- 主区:左右栏对照(原文 / 选中 transformation_chapter 的 `result_content`)
 - 同步滚动:左右栏 scroll 互锁 50ms 防回环
-- 失败 tab 选中:右栏 alert 显示 `transformation.error`
+- 失败 tab 选中:右栏 alert 显示 `transformation_chapter.error`
 - 底部:tokens in/out + status + 重新转换(弹 TransformDialog 选 tn + prompt + model + ctx)
 
 ---
@@ -478,8 +522,8 @@ Library → 数据资产 → 打开任意已锁定 data_asset → 章节行点 `
 - **平台**：仅 Windows 10+ / 11
 - **存储**：单 SQLite 文件，本机位置 `%APPDATA%/novel-style-converter/data.db`
 - **API key**：明文存数据库（用户机器本地，无服务器）
-- **并发**：全局一个 worker pool，大小可配置（默认 3，上限 4）。`ModelConfig.concurrency` 字段保留但当前未使用——为后续 per-config 限流扩展留口，避免用户对该字段产生行为预期
-- **级联删除**：SQLite 外键启用（`PRAGMA foreign_keys = ON`），删 novel 级联 chapter + transformation
+- **并发**：全局一个 worker pool，大小可配置（默认 2，`src-tauri/src/lib.rs`；上限 4）。`ModelConfig.concurrency` 字段保留但当前未使用——为后续 per-config 限流扩展留口，避免用户对该字段产生行为预期
+- **级联删除**：SQLite 外键启用（`PRAGMA foreign_keys = ON`），删 upload 级联 data_asset / chapters / transformation_novels / transformation_chapters
 - **响应延迟**：UI 不被 IO/网络阻塞（DB 与 HTTP 都跑在 tokio runtime）
 
 ---
@@ -499,10 +543,7 @@ Library → 数据资产 → 打开任意已锁定 data_asset → 章节行点 `
 
 ## 设计文档
 
-- 原始设计 spec：`docs/superpowers/specs/2026-07-16-novel-style-converter-design.md`
-- 原始实施 plan：`docs/superpowers/plans/2026-07-16-novel-style-converter.md`
-- gpui-component 迁移 Stage 0 设计：`docs/superpowers/specs/2026-07-17-gpui-component-migration-stage0.md`
-- gpui-component 迁移 Stage 0 实施 plan：`docs/superpowers/plans/2026-07-17-gpui-component-stage0.md`
+历史设计 spec 与实施 plan 未随仓库保留(早期版本相关)。本仓库的当前架构以本文档「数据模型」与「架构关键点」为准;新增功能前可参考本文档「Vue 3 + Tauri 迁移」章节下的 Phase 1-11 历史叙事。
 
 ---
 
