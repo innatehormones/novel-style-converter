@@ -28,11 +28,15 @@ pub struct TransformOutcome {
     pub tokens_out: i32,
 }
 
+/// 把 prompt + 上下文渲染成 chat 请求并发给 `AiProvider` 的抽象。
+/// `JobQueue` 通过 `Box<dyn Transformer>` 持有实例,所以 `Transformer` 要求 `Send + Sync`。
 #[async_trait]
 pub trait Transformer: Send + Sync {
     async fn transform(&self, req: TransformRequest) -> Result<TransformOutcome>;
 }
 
+/// `Transformer` 的默认实现:渲染 prompt → 调 `AiProvider::chat` → 透传结果。
+/// **owns** `Box<dyn AiProvider>`(不借用),这样能装进 `Box<dyn Transformer>`。
 pub struct DefaultTransformer { pub ai: Box<dyn AiProvider> }
 
 #[async_trait]

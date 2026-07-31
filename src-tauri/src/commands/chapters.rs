@@ -56,6 +56,10 @@ pub struct ChapterInput {
 
 /// 章节解析页 splitter 入口:对 upload.original_text 做 splitter,
 /// 返回原始原文坐标系(byte_start/byte_end 对 raw_text 直接切片用)。
+/// parse.vue 主入口:对 `upload.original_text` 跑 `DefaultSplitter`,
+/// 应用用户在 UI 上加的 markers(强制作为新章节起点)与 suppressed
+/// (跳过自动识别到的章节起点)。返回 byte 坐标下的 `ChapterSegment` 列表,
+/// 直接用于提交 commit_data_asset。
 #[tauri::command]
 pub fn list_chapter_segments(
     db: State<'_, Arc<Mutex<Db>>>,
@@ -131,6 +135,9 @@ pub fn get_chapter_contents(
 
 /// 章节解析页重入用:从 DB 读已提交章节,带 byte 范围。
 /// byte_start == NULL 的行(老数据)会被忽略。
+/// parse.vue 重入入口:从 `chapters` 表读已提交章节段(带 byte 范围)。
+/// `byte_start/byte_end` 为 NULL 的老数据行被过滤 —— 那些行失去原始坐标系,
+/// 前端 store 检测到后会回退 splitter 重新定位。
 #[tauri::command]
 pub fn list_committed_segments(
     db: State<'_, Arc<Mutex<Db>>>,
@@ -185,6 +192,10 @@ pub fn get_chapter(
 /// 章节解析页提交入口:对 upload.original_text 按 byte_start/byte_end 切片,
 /// 落库到 data_asset(chapters.data_asset_id 坐标系)。
 /// 锁死判定:data_asset.locked_at 非 NULL → 拒绝(对应 data_asset 已锁,不可重解析)。
+/// parse.vue 重解析入口:用前端传来的 `segments` 全量替换 `chapters` 表
+/// 该 `data_asset_id` 下的旧行(**不是**追加)。`data_asset.locked_at` 非 NULL
+/// 时拒绝(locked 表示已有 transformation_novel 在用此 data_asset)。
+/// 返回新写入行数。
 #[tauri::command]
 pub fn parse_chapters(
     db: State<'_, Arc<Mutex<Db>>>,

@@ -7,6 +7,12 @@
 //   必须按 snake_case 原样发,前端 wrapper 不要做任何 inline 改名。
 // 字段变更必须同步修改后端 DTO + 本文件 + commands.ts 中对应 wrapper。
 
+/**
+ * 后端 `model_configs` 行的前端镜像。
+ * - `api_key` 明文存 SQLite,前端拿到也要原样回传(不要脱敏 —— 提交时仍需要真实值)
+ * - `concurrency` 当前未使用,保留给后续 per-model 限流;前端不要读它做行为判断
+ * - 字段全部 snake_case 来自后端 serde(后端**不**做 rename)
+ */
 export interface ModelConfig {
   id: number;
   name: string;
@@ -18,6 +24,10 @@ export interface ModelConfig {
   concurrency: number;
 }
 
+/**
+ * `upsert_model` / `test_model` 入参:`id === 0` 表示新建,否则按 id 更新。
+ * 这是后端 snake_case DTO(内层字段原样发,不要 inline 改名)。
+ */
 export type ModelConfigInput = Omit<ModelConfig, 'id'> & { id: number };
 
 /// State 1: 原始上传文件元数据。不含章节结构(章节在 data_assets)。
@@ -84,6 +94,10 @@ export interface ChapterMeta {
   word_count: number;
 }
 
+/**
+ * `get_chapter_contents` 返回:章节正文预览(预览页用)。内容是后端从
+ * `uploads.original_text` 按 byte range 切片后,剥首行标题再 trim。
+ */
 export interface ChapterContentRow {
   idx: number;
   title: string;
@@ -101,12 +115,21 @@ export interface Chapter {
   word_count: number;
 }
 
+/**
+ * `commit_data_asset` / `parse_chapters` 入参的章节元素:
+ * 仅标题 + byte 范围。后端按 byte range 切片原文计算 `word_count` / `idx`。
+ */
 export type ChapterInput = {
   title: string;
   byte_start: number;
   byte_end: number;
 };
 
+/**
+ * `list_transformation_novels` 返回:转换小说元数据。
+ * `chapters_count` 是该 `data_asset_id` 下所有 chapters 的总数,
+ * 不代表这本 tn 实际有多少 transformation_chapter 行。
+ */
 export interface TransformationNovelSummary {
   id: number;
   data_asset_id: number;
@@ -115,9 +138,21 @@ export interface TransformationNovelSummary {
   chapters_count: number;
 }
 
+/** 转换模式:`compress` = 内容压缩,`style` = 文风转换。prompt.kind 必须与此对齐。 */
 export type TransformMode = 'compress' | 'style';
+
+/**
+ * `transformation_chapters.status` 状态机:
+ * `pending` → `running` → (`done` | `failed` | `cancelled`)
+ * 失败不自动重试 — 用户手动调 `enqueue_transformation_chapters` 重排队。
+ */
 export type TransformStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
+/**
+ * `list_transformation_chapters` / `list_transformation_chapters_for_chapter` 返回:
+ * 一次转换任务的完整状态。`chapter_idx` / `chapter_title` 是 join `chapters` 表拼上的,
+ * 方便 Transform 页直接展示,无需二次请求。
+ */
 export interface TransformationChapterRow {
   id: number;
   transformation_novel_id: number;
@@ -136,6 +171,14 @@ export interface TransformationChapterRow {
   completed_at: string | null;
 }
 
+/**
+ * `enqueue_transformation_chapters` 入参。三个上下文数:
+ * - `ctx_prev_original` —— 模板 `{{prev_original}}` 占位的前文原文章数
+ * - `ctx_prev_transformed` —— 模板 `{{prev_transformed}}` 占位的前文已转换章数
+ * (画风参考,不污染原文上下文;若前面没有已转换结果则渲染为 `(暂无已转换参考)`)
+ * - `ctx_next_original` —— 模板 `{{next_original}}` 占位的后文原文章数
+ * 后端按 (chapter_id, prompt_id, model_config_id) 同时匹配才视为画风参考。
+ */
 export type EnqueuePayload = {
   transformation_novel_id: number;
   chapter_ids: number[];
@@ -146,10 +189,17 @@ export type EnqueuePayload = {
   ctx_next_original: number;
 };
 
+/**
+ * `enqueue_all_chapters` 入参:对 `transformation_novel` 下全部 chapter 入队
+ * (后端从 `chapters` 表按 `data_asset_id` 拉全量 chapter_id)。
+ */
 export type EnqueueAllPayload = Omit<EnqueuePayload, 'chapter_ids'>;
 
+/** `JobQueue` 内部的 job 状态(与 `TransformStatus` 同字面量,但语义层面有别:
+ * `TransformStatus` 是 DB 行的持久状态;`JobStatus` 是 worker pool 的内存快照) */
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
+/** 单个 job 的实时快照。锁争用时该 job 可能不出现在 snapshot 中。 */
 export interface JobInfo {
   transformation_id: number;
   chapter_title: string;
@@ -160,6 +210,8 @@ export interface JobInfo {
   tokens_out: number | null;
 }
 
+/** `JobQueue.snapshot()` 一次拉回的全量队列快照,按状态分四组。
+ *  锁争用时返回空(字段都为空数组),前端 1s 轮询可不处理。 */
 export interface QueueSnapshot {
   pending: JobInfo[];
   running: JobInfo[];

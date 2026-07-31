@@ -59,6 +59,10 @@ pub fn get_data_asset_content(
 
 /// 把 parse.vue 的章节切片结果落库到新 data_asset。
 /// 同 upload 已有 data_asset 时拒绝(走"删除已有再重新解析"路径)。
+/// parse.vue 提交入口:为 `upload_id` 创建一个 `data_assets` 行,并把 `chapters`
+/// 全部按 byte range 切片入 `chapters` 表。同 upload **已有 data_asset 则拒绝**
+/// (unique 约束 + 这里独立校验);要走"重解析"必须先调 `delete_data_asset`。
+/// 返回新 `data_asset.id`。
 #[tauri::command]
 pub fn commit_data_asset(
     db: State<'_, Arc<Mutex<Db>>>,
@@ -152,6 +156,9 @@ pub fn list_data_assets(
 }
 
 /// 旧路由重定向用:upload_id → 对应 data_asset_id(若有)。
+/// 路由重定向 helper:`upload_id` → 对应 `data_asset.id`(若有)。前端 router
+/// beforeEach 用来把旧的 `/library/:uploadId/...` 路径和新 `/library/data/:id`
+/// 路径串起来。返回 `Ok(None)` 表示该 upload 还没解析过。
 #[tauri::command]
 pub fn find_data_asset_by_upload(
     db: State<'_, Arc<Mutex<Db>>>,
@@ -166,6 +173,10 @@ pub fn find_data_asset_by_upload(
 /// 删除 data_asset。locked 时拒绝(已有 transformation_novel 关联);
 /// unlocked 时通过 FK CASCADE 自动清掉 chapters / transformation_novels /
 /// transformation_chapters(见 migration 0005/0006 + 0002)。
+/// 删 data_asset。**locked 时拒绝**(已有 transformation_novel 关联,直接删
+/// 会让 JobQueue 的 chapter 切片坐标失效)。unlocked 时通过 FK CASCADE 自动清掉
+/// chapters / transformation_novels / transformation_chapters
+/// (见 migration 0005 / 0006 + 0002 的外键约束)。
 #[tauri::command]
 pub fn delete_data_asset(
     db: State<'_, Arc<Mutex<Db>>>,

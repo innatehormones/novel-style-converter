@@ -10,10 +10,19 @@ use super::repo::{
     TransformationNovelRepo, UploadRepo,
 };
 
+/// SQLite 连接包装。`open` / `open_in_memory` 都会按 `migrations/` 顺序跑未应用的 schema 版本。
+///
+/// **`Db` 是 `Send` 但不是 `Sync`**(`rusqlite::Connection` 内部 `RefCell`)。
+/// 调用方不能把 `Arc<Db>` 移入 `tokio::spawn` future、`spawn_blocking` closure,
+/// 也不能把它装进 `Box<dyn Transformer>` 等 trait object 通过共享引用跨线程持有。
+/// 跨线程 / 跨 future 共享 DB 的标准做法:**按路径重开** ——
+/// 捕获 `db_path: PathBuf`,在 worker 内部调 `Db::open(&path)` 拿 owned `Db`,
+/// 操作完即 drop。
 #[derive(Debug)]
 pub struct Db { conn: Connection }
 
 impl Db {
+    /// 打开或创建 SQLite 文件,跑未应用的 migrations。父目录需自行 `create_dir_all`。
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open_with_flags(
             path,
@@ -24,6 +33,7 @@ impl Db {
         Ok(Self { conn })
     }
 
+    /// 内存 SQLite,主要给单测用。仍会跑 migrations。
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.pragma_update(None, "foreign_keys", "ON")?;

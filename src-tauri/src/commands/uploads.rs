@@ -71,6 +71,9 @@ pub fn list_uploads(db: State<'_, Arc<Mutex<Db>>>) -> Result<Vec<UploadSummary>,
     Ok(ups.iter().map(to_summary).collect())
 }
 
+/// 上传一个 `.txt`。流程:编码检测 → sha256 → 同 sha256 已存在则直接返回旧行(去重);
+/// 不存在则写 `%APPDATA%/novel-style-converter/uploads/{sha}.txt` 并落库。
+/// 不影响已有 data_asset;后续走 parse 页。
 #[tauri::command]
 pub fn upload_file(
     db: State<'_, Arc<Mutex<Db>>>,
@@ -117,6 +120,8 @@ pub fn upload_file(
     Ok(to_summary(&u))
 }
 
+/// 删 upload 行 + 物理文件。若 upload 对应的 data_asset 已锁定(`locked_at` 非 NULL)
+/// 则拒绝 —— 已锁定的 data_asset 通常有 transformation_novel 在跑,不能误删原文。
 #[tauri::command]
 pub fn delete_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String> {
     let db = db.lock().map_err(|e| e.to_string())?;
@@ -140,6 +145,9 @@ pub fn get_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<UploadSummar
     Ok(to_summary(&u))
 }
 
+/// 返回 upload 原文,优先用 `uploads.original_text`(DB 字段),老数据为空时
+/// 兜底从 `uploads.file_path` 读物理文件并重新解码。结果以 `tauri::ipc::Response`
+/// 直接给前端走文本流(避免 JSON 转义大文本)。
 #[tauri::command]
 pub fn get_upload_text(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<Response, String> {
     let text = {

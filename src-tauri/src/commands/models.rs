@@ -52,6 +52,9 @@ impl ModelConfigDto {
     }
 }
 
+/// 新建或更新 `ModelConfig`。`payload.id == 0` 走 insert(返回新 id);
+/// 否则走 update(返回传入的 id)。`ModelConfigDto` 是手写 snake_case DTO
+/// (后端 `#[serde(rename_all = "snake_case")]`),前端调用时内层字段保持 snake_case。
 #[tauri::command]
 pub fn upsert_model(db: State<'_, Arc<Mutex<Db>>>, payload: ModelConfigDto) -> Result<i64, String> {
     let db = db.lock().map_err(|e| e.to_string())?;
@@ -71,6 +74,9 @@ pub fn delete_model(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String
     db.model_configs().delete(id).map_err(|e| e.to_string())
 }
 
+/// 实际发起一次 `chat` 调用(payload 的模型 + 用户消息 "ping")验证连通性。
+/// 不入库;返回响应 content 字符串。失败原因(非 2xx / 空 choices / JSON 解析)
+/// 走 `Error::Ai` 转为前端可见的 error 字符串。
 #[tauri::command]
 pub async fn test_model(payload: ModelConfigDto) -> Result<String, String> {
     let provider = OpenAiProvider::new(payload.base_url, payload.api_key)

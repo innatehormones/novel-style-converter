@@ -61,6 +61,9 @@ pub fn list_transformation_novels(
     Ok(all.iter().map(|n| to_summary(&db, n)).collect())
 }
 
+/// 新建 transformation_novel。先校验 `data_asset_id` 存在 + title 非空;
+/// 同 data_asset 允许多本 transformation_novel(每本独立 prompt / model / 上下文)。
+/// 返回新 `transformation_novel.id`。
 #[tauri::command]
 pub fn create_transformation_novel(
     db: State<'_, Arc<Mutex<Db>>>,

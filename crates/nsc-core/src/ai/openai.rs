@@ -41,6 +41,9 @@ pub struct OpenAiProvider {
 }
 
 impl OpenAiProvider {
+    /// 构造一个 OpenAI 兼容 provider。`base_url` 是根地址,不带路径
+    /// (内部会自动拼 `/chat/completions`)。`api_key` 透传到 `Authorization: Bearer ...`。
+    /// 失败时(当前主要是 `reqwest::Client` 构造失败)返回 `Error::Http`。
     pub fn new(base_url: String, api_key: String) -> Result<Self> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(120))

@@ -121,6 +121,12 @@ pub fn list_transformation_chapters_for_chapter(
     Ok(join_chapter_info(&db, ch.data_asset_id, rows))
 }
 
+/// 对 `chapter_ids` 逐章插入 `transformation_chapters(pending)` 并立即
+/// `JobQueue.enqueue(JobSpec)`。每个 chapter 校验:
+/// 1. `chapter.data_asset_id == transformation_novel.data_asset_id`(共享坐标系)
+/// 2. `chapter.id` 存在
+/// `chapter_ids` 为空时直接 `Ok(vec![])` 跳过。
+/// 返回所有新 `transformation_chapter.id` 的顺序列表。
 #[tauri::command]
 pub fn enqueue_transformation_chapters(
     db: State<'_, Arc<Mutex<Db>>>,
@@ -202,6 +208,9 @@ pub fn enqueue_transformation_chapters(
     Ok(ids)
 }
 
+/// `transformation_novel` 下所有章节入队(从 `chapters` 表拉该 `data_asset_id`
+/// 的全量 chapter_id,然后走 `enqueue_transformation_chapters` 的相同校验 +
+/// 落库 + 入队流程)。返回新 `transformation_chapter.id` 列表(按 idx 顺序)。
 #[tauri::command]
 pub fn enqueue_all_chapters(
     db: State<'_, Arc<Mutex<Db>>>,
@@ -239,6 +248,8 @@ pub fn enqueue_all_chapters(
     )
 }
 
+/// 拉当前 `JobQueue` 快照(pending / running / done / failed 四组)。
+/// 内部锁争用时返回空 snapshot,不阻塞 caller —— 前端 UI 1s 轮询用。
 #[tauri::command]
 pub fn get_queue_snapshot(queue: State<'_, Arc<JobQueue>>) -> Result<QueueSnapshot, String> {
     Ok(queue.snapshot())

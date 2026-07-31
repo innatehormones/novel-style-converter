@@ -27,6 +27,18 @@ pub struct JobQueue {
 }
 
 impl JobQueue {
+    /// 启动 `workers` 个 tokio current-thread worker,共享一个 mpsc 队列。
+    ///
+    /// **工厂闭包是 JobQueue 能跨线程工作的核心**(因为 `Db` 不是 `Sync`,
+    /// `AiProvider` 不是 `Send` 共享的)。
+    /// - `db_factory`:每个 worker 启动时调一次,拿到**独立 owned** `Db`。
+    ///   典型实现:`move || Ok(Db::open(&db_path))`。
+    /// - `provider_factory`:每个 job 调一次,基于 `ModelConfig` 生成 owned
+    ///   `Box<dyn AiProvider>`。**必须返回 owned**(不能返回 `&'a dyn AiProvider`),
+    ///   否则 `Box<dyn Transformer>` 装不下。
+    ///
+    /// 两个工厂都要求 `Send + Sync + 'static`(被 `Arc<dyn Fn ...>` 包了一层)。
+    /// `workers < 1` 会 panic。
     pub fn new<F, P>(workers: usize, db_factory: F, provider_factory: P) -> Self
     where
         F: Fn() -> Result<Db> + Send + Sync + 'static,
@@ -74,6 +86,8 @@ impl JobQueue {
         Self { tx, shared, notify }
     }
 
+    /// 注册队列变更回调。每次 `enqueue` / job 状态转换(Running / Done / Failed)末尾触发。
+    /// 闭包在 worker 线程上执行 —— 不要在闭包里做重活或再次阻塞。
     pub fn set_notifier(&self, notifier: Notifier) {
         *self.notify.lock().expect("notify lock") = Some(notifier);
     }
@@ -84,6 +98,9 @@ impl JobQueue {
         }
     }
 
+    /// 入队一个 transform job。返回传入的 `JobSpec.transformation_id`(方便 caller 记录)。
+    /// 内部通过 unbounded mpsc 派发给 worker;调用方需保证 `JobSpec` 字段齐全
+    /// (job 字段由 `transformation_chapters` 行反查得到,通常在 command 层组装)。
     pub fn enqueue(&self, job: JobSpec) -> i64 {
         let id = job.transformation_id;
         self.tx.send(job).expect("queue alive");
@@ -91,6 +108,8 @@ impl JobQueue {
         id
     }
 
+    /// 拉当前队列快照(pending / running / done / failed 四组)。
+    /// 内部锁争用时返回空 snapshot,不阻塞 caller —— 用于前端 UI 1s 轮询。
     pub fn snapshot(&self) -> QueueSnapshot {
         self.shared.inner.try_lock().map(|m| m.clone()).unwrap_or_default()
     }

@@ -7,6 +7,8 @@ pub struct CleaningPreview {
     pub chars_delta: i64,
 }
 
+/// 纯函数预览:**不改 DB**,只对传入文本按 `rule_ids` 顺序应用清洗规则,
+/// 返回清洗后文本 + 行数 delta + 字符 delta。`rule_ids` 为空或含未知 id 报错。
 #[tauri::command]
 pub fn preview_cleaning(text: String, rule_ids: Vec<String>) -> Result<CleaningPreview, String> {
     if rule_ids.is_empty() {
