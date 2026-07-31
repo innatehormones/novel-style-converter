@@ -3,7 +3,7 @@
 //! The Tauri command is a thin adapter; this module owns the business logic
 //! so it can be unit-tested without a Tauri runtime.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
