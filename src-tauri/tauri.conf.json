@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.lh.nsc",
   "build": {
-    "beforeDevCommand": "pnpm --dir D:/NewCode/novel-style-converter dev",
-    "beforeBuildCommand": "pnpm --dir D:/NewCode/novel-style-converter build",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
     "devUrl": "http://localhost:43801",
     "frontendDist": "../dist"
   },
