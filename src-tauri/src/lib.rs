@@ -40,6 +40,7 @@ pub fn run() {
     queue.set_notifier(notify);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(db)
         .manage(queue)
         .setup(|_app| Ok(()))
