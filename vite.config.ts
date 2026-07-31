@@ -1,0 +1,34 @@
+/// <reference types="vitest" />
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+
+export default defineConfig({
+  plugins: [vue()],
+  clearScreen: false,
+  server: {
+    host: 'localhost',
+    port: 43801,
+    strictPort: true,
+    watch: {
+      // Vite 默认递归扫描整个项目根,而 cargo build 产物在 target/doc/ 里
+      // 会生成几千个 rustdoc HTML,导致依赖扫描炸掉。明确排除。
+      ignored: ['**/target/**', '**/crates/**', '**/src-tauri/**', '**/migrations/**', '**/dist/**'],
+    },
+    fs: {
+      // 限制 Vite 文件系统访问只到 src/ 与 index.html,防止它误扫 target/。
+      allow: ['.'],
+    },
+  },
+  build: {
+    target: 'esnext',
+    outDir: 'dist',
+  },
+  optimizeDeps: {
+    entries: ['index.html'],
+    include: ['vue', 'vue-router', 'pinia', '@tauri-apps/api'],
+  },
+  test: {
+    include: ['src/**/*.{test,spec}.ts'],
+    exclude: ['node_modules', 'dist', 'tests-e2e/**'],
+  },
+});

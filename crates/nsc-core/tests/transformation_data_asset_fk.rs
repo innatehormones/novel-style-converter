@@ -1,0 +1,35 @@
+use nsc_core::db::Db;
+use nsc_core::models::{NewDataAsset, NewTransformationNovel, NewUpload};
+
+#[test]
+fn tn_references_data_asset_id() {
+    let db = Db::open_in_memory().unwrap();
+    let uid = db.uploads().insert(&NewUpload {
+        sha256: "h".into(), filename: "n.txt".into(),
+        byte_size: 10, file_path: "/p".into(),
+        original_text: String::new(),
+    }).unwrap();
+    let da_id = db.data_assets().insert(&NewDataAsset { upload_id: uid, title: "n".into() }).unwrap();
+    let tn_id = db.transformation_novels().insert(&NewTransformationNovel {
+        data_asset_id: da_id, title: "compact".into(),
+    }).unwrap();
+    let got = db.transformation_novels().get(tn_id).unwrap().unwrap();
+    assert_eq!(got.data_asset_id, da_id);
+    // 创建时锁定 data_asset
+    assert!(db.data_assets().is_locked(da_id).unwrap());
+}
+
+#[test]
+fn list_by_data_asset() {
+    let db = Db::open_in_memory().unwrap();
+    let uid = db.uploads().insert(&NewUpload {
+        sha256: "a".into(), filename: "n.txt".into(),
+        byte_size: 1, file_path: "/p".into(),
+        original_text: String::new(),
+    }).unwrap();
+    let da_id = db.data_assets().insert(&NewDataAsset { upload_id: uid, title: "n".into() }).unwrap();
+    db.transformation_novels().insert(&NewTransformationNovel { data_asset_id: da_id, title: "a".into() }).unwrap();
+    db.transformation_novels().insert(&NewTransformationNovel { data_asset_id: da_id, title: "b".into() }).unwrap();
+    let list = db.transformation_novels().list_by_data_asset(da_id).unwrap();
+    assert_eq!(list.len(), 2);
+}

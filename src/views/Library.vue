@@ -1,0 +1,304 @@
+<template>
+  <section>
+    <header class="header">
+      <h2>{{ pageTitle }}</h2>
+      <div v-if="page === 'uploads'" class="actions">
+        <Button kind="primary" :loading="store.uploading" @click="uploadDialogOpen = true">上传 .txt</Button>
+      </div>
+    </header>
+
+    <div v-if="store.error" class="alert">{{ store.error }}</div>
+
+    <template v-if="page === 'uploads'">
+      <div v-if="!store.loading && store.uploads.length === 0" class="empty">
+        还没有文件,点击右上"上传 .txt"添加一个。
+      </div>
+      <Table
+        v-else
+        :columns="uploadColumns"
+        :data="store.uploads"
+        :row-key="(row) => row.id"
+      >
+        <template #cell-id="{ row }">{{ row.id }}</template>
+        <template #cell-filename="{ row }">{{ row.filename }}</template>
+        <template #cell-size="{ row }">{{ formatSize(row.byte_size) }}</template>
+        <template #cell-uploaded="{ row }">{{ formatTime(row.uploaded_at) }}</template>
+        <template #cell-actions="{ row }">
+          <Button size="small" @click="goUpload(row.id)">查看</Button>
+          <Button size="small" :disabled="hasDataAsset(row.id)" @click="goParse(row.id)">
+            {{ hasDataAsset(row.id) ? '解析已存在' : '解析章节' }}
+          </Button>
+          <Button size="small" kind="danger" @click="onDeleteUpload(row.id, row.filename)">删除</Button>
+        </template>
+      </Table>
+    </template>
+
+    <template v-else-if="page === 'data-assets'">
+      <div v-if="!store.loading && store.dataAssets.length === 0" class="empty">
+        还没有数据资产。请到“上传”页面选择文件并解析章节。
+      </div>
+      <Table
+        v-else
+        :columns="daColumns"
+        :data="store.dataAssets"
+        :row-key="(row) => row.id"
+      >
+        <template #cell-id="{ row }">{{ row.id }}</template>
+        <template #cell-title="{ row }">{{ row.title }}</template>
+        <template #cell-source="{ row }">
+          <span class="muted">{{ row.filename }} · upload #{{ row.upload_id }}</span>
+        </template>
+        <template #cell-status="{ row }">
+          <Tag v-if="row.locked_at" kind="warn">已锁定</Tag>
+          <Tag v-else kind="success">可重解析</Tag>
+        </template>
+        <template #cell-parsed="{ row }">{{ formatTime(row.parsed_at) }}</template>
+        <template #cell-actions="{ row }">
+          <Button size="small" @click="goDataAsset(row.id)">打开</Button>
+          <Button size="small" :disabled="!!row.locked_at" @click="openCreateTn(row.id)">新建转换</Button>
+          <Button size="small" kind="danger" :disabled="!!row.locked_at" :title="row.locked_at ? 'data_asset 已锁定,无法删除' : ''" @click="onDeleteDa(row.id, row.title)">删除</Button>
+        </template>
+      </Table>
+    </template>
+
+    <template v-else>
+      <div v-if="!store.loading && store.transformationNovels.length === 0" class="empty">
+        还没有转换小说。请到“数据资产”页面选择资产并新建转换。
+      </div>
+      <Table
+        v-else
+        :columns="tnColumns"
+        :data="store.transformationNovels"
+        :row-key="(row) => row.id"
+      >
+        <template #cell-id="{ row }">{{ row.id }}</template>
+        <template #cell-title="{ row }">
+          <Input v-if="renamingId === row.id" v-model="renameDraft" />
+          <template v-else>{{ row.title }}</template>
+        </template>
+        <template #cell-source="{ row }">
+          <span class="muted">data_asset #{{ row.data_asset_id }} · {{ row.chapters_count }} 章</span>
+        </template>
+        <template #cell-created="{ row }">{{ formatTime(row.created_at) }}</template>
+        <template #cell-actions="{ row }">
+          <template v-if="renamingId === row.id">
+            <Button size="small" kind="primary" @click="onSaveRename(row.id)">保存</Button>
+            <Button size="small" @click="cancelRename">取消</Button>
+          </template>
+          <template v-else>
+            <Button size="small" @click="onTransform(row.id)" disabled title="Phase 3 上线">
+              ▶ 转换
+            </Button>
+            <Button size="small" @click="startRename(row.id, row.title)">重命名</Button>
+            <Button size="small" kind="danger" @click="onDeleteTn(row.id, row.title)">删除</Button>
+          </template>
+        </template>
+      </Table>
+    </template>
+
+    <UploadDialog v-model:open="uploadDialogOpen" @submit="onUpload" />
+
+    <TransformationNovelDialog
+      v-model:open="tnDialogOpen"
+      :data-asset-id="tnDialogDataAssetId"
+      @submit="onCreateTn"
+    />
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import Button from '../components/ui/Button.vue';
+import Input from '../components/ui/Input.vue';
+import Table from '../components/ui/Table.vue';
+import Tag from '../components/ui/Tag.vue';
+import UploadDialog from '../components/UploadDialog.vue';
+import TransformationNovelDialog from '../components/TransformationNovelDialog.vue';
+import { useLibraryStore } from '../stores/library';
+
+const route = useRoute();
+const router = useRouter();
+const store = useLibraryStore();
+type Page = 'uploads' | 'data-assets' | 'transformations';
+const page = computed<Page>(() => (route.meta.libraryPage as Page | undefined) ?? 'uploads');
+const pageTitle = computed(() => ({
+  uploads: '上传',
+  'data-assets': '数据资产',
+  transformations: '转换',
+})[page.value]);
+
+const uploadDialogOpen = ref(false);
+const tnDialogOpen = ref(false);
+const tnDialogDataAssetId = ref(0);
+const renamingId = ref<number | null>(null);
+const renameDraft = ref('');
+
+const uploadColumns = [
+  { key: 'id', title: 'id', width: '60px' },
+  { key: 'filename', title: '文件名', width: '260px' },
+  { key: 'size', title: '大小', width: '100px' },
+  { key: 'uploaded', title: '上传时间', width: '180px' },
+  { key: 'actions', title: '操作', width: '260px' },
+];
+
+const daColumns = [
+  { key: 'id', title: 'id', width: '60px' },
+  { key: 'title', title: '标题', width: '220px' },
+  { key: 'source', title: '来源', width: '280px' },
+  { key: 'status', title: '状态', width: '120px' },
+  { key: 'parsed', title: '解析时间', width: '180px' },
+  { key: 'actions', title: '操作', width: '200px' },
+];
+
+const tnColumns = [
+  { key: 'id', title: 'id', width: '60px' },
+  { key: 'title', title: '标题', width: '220px' },
+  { key: 'source', title: '源', width: '240px' },
+  { key: 'created', title: '创建时间', width: '180px' },
+  { key: 'actions', title: '操作', width: '280px' },
+];
+
+onMounted(() => store.load());
+/// Library 同一组件实例服务 3 个 tab(uploads / data-assets / transformations),
+/// vue-router 切换 path 不重新 mount,onMounted 只跑一次。
+/// 用户在 DataAsset.vue 删除后再切到 /data-assets,得 reload 才能拿到新数据。
+watch(() => route.path, () => store.load());
+
+function hasDataAsset(uploadId: number): boolean {
+  return store.dataAssets.some((d) => d.upload_id === uploadId);
+}
+
+function openCreateTn(dataAssetId: number) {
+  tnDialogDataAssetId.value = dataAssetId;
+  tnDialogOpen.value = true;
+}
+
+async function onUpload(input: { filename: string; bytes: number[] }) {
+  try {
+    await store.upload(input);
+  } catch (e: unknown) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function onDeleteUpload(id: number, filename: string) {
+  if (!confirm(`确认删除文件 "${filename}"?`)) return;
+  try {
+    await store.removeUpload(id);
+  } catch (e: unknown) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function onCreateTn(input: { data_asset_id: number; title: string }) {
+  try {
+    await store.createTransformationNovel(input);
+  } catch (e: unknown) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+function startRename(id: number, title: string) {
+  renamingId.value = id;
+  renameDraft.value = title;
+}
+
+function cancelRename() {
+  renamingId.value = null;
+}
+
+async function onSaveRename(id: number) {
+  const t = renameDraft.value.trim();
+  if (t === '') {
+    alert('标题不能为空');
+    return;
+  }
+  try {
+    await store.renameTransformationNovel({ id, title: t });
+    renamingId.value = null;
+  } catch (e: unknown) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function onDeleteTn(id: number, title: string) {
+  if (!confirm(`确认删除转换小说 "${title}"?历史转换结果一并删除。`)) return;
+  try {
+    await store.removeTransformationNovel(id);
+  } catch (e: unknown) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+async function onDeleteDa(id: number, title: string) {
+  if (!confirm(`确认删除数据资产 "${title}"?解析出的章节将一并删除。`)) return;
+  try {
+    await store.removeDataAsset(id);
+  } catch (e: unknown) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+}
+
+function onTransform(_id: number) {
+  alert('Phase 3(Transform 页)上线');
+}
+
+function goUpload(id: number) {
+  void router.push({ name: 'upload', params: { uploadId: id } });
+}
+
+function goDataAsset(id: number) {
+  void router.push({ name: 'data-asset', params: { dataAssetId: id } });
+}
+
+function goParse(uploadId: number) {
+  void router.push({ name: 'parse-wizard', params: { uploadId } });
+}
+
+function formatSize(b: number): string {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function formatTime(iso: string): string {
+  return iso.replace('T', ' ').slice(0, 16);
+}
+</script>
+
+<style scoped>
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+.header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: var(--font-weight-medium);
+}
+.actions { display: flex; gap: 12px; align-items: center; }
+.alert {
+  padding: 12px 16px;
+  background: var(--bg-hover);
+  color: var(--color-cinnabar-deep);
+  border-radius: var(--radius-pin);
+  margin-bottom: 16px;
+}
+.empty {
+  text-align: center;
+  padding: 56px 0;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-pin);
+  background: var(--color-sheet);
+}
+.muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+</style>

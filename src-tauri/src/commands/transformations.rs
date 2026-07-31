@@ -1,0 +1,245 @@
+use std::sync::{Arc, Mutex};
+
+use serde::{Deserialize, Serialize};
+use tauri::State;
+
+use nsc_core::db::Db;
+use nsc_core::models::{NewTransformationChapter, TransformMode, TransformStatus};
+use nsc_core::transformer::{JobQueue, JobSpec, QueueSnapshot};
+
+#[derive(Debug, Serialize)]
+pub struct TransformationChapterRow {
+    pub id: i64,
+    pub transformation_novel_id: i64,
+    pub chapter_id: i64,
+    pub chapter_idx: i32,
+    pub chapter_title: String,
+    pub mode: TransformMode,
+    pub prompt_id: i64,
+    pub model_config_id: i64,
+    pub status: TransformStatus,
+    pub result_content: Option<String>,
+    pub tokens_in: Option<i32>,
+    pub tokens_out: Option<i32>,
+    pub error: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EnqueuePayload {
+    pub transformation_novel_id: i64,
+    pub chapter_ids: Vec<i64>,
+    pub prompt_id: i64,
+    pub model_config_id: i64,
+    pub ctx_prev_original: i32,
+    pub ctx_prev_transformed: i32,
+    pub ctx_next_original: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EnqueueAllPayload {
+    pub transformation_novel_id: i64,
+    pub prompt_id: i64,
+    pub model_config_id: i64,
+    pub ctx_prev_original: i32,
+    pub ctx_prev_transformed: i32,
+    pub ctx_next_original: i32,
+}
+
+/// 通过 data_asset 反查 chapters 表(Chapter 不再带 upload_id 字段)。
+fn chapter_lookup(db: &Db, data_asset_id: i64) -> std::collections::HashMap<i64, (i32, String)> {
+    db.chapters()
+        .list_by_data_asset(data_asset_id)
+        .map(|v| v.into_iter().map(|c| (c.id, (c.idx, c.title))).collect())
+        .unwrap_or_default()
+}
+
+fn join_chapter_info(
+    db: &Db,
+    data_asset_id: i64,
+    rows: Vec<nsc_core::models::TransformationChapter>,
+) -> Vec<TransformationChapterRow> {
+    let lookup = chapter_lookup(db, data_asset_id);
+    rows.into_iter()
+        .map(|r| {
+            let (idx, title) = lookup.get(&r.chapter_id).cloned().unwrap_or((0, String::new()));
+            TransformationChapterRow {
+                id: r.id,
+                transformation_novel_id: r.transformation_novel_id,
+                chapter_id: r.chapter_id,
+                chapter_idx: idx,
+                chapter_title: title,
+                mode: r.mode,
+                prompt_id: r.prompt_id,
+                model_config_id: r.model_config_id,
+                status: r.status,
+                result_content: r.result_content,
+                tokens_in: r.tokens_in,
+                tokens_out: r.tokens_out,
+                error: r.error,
+                started_at: r.started_at.map(|t| t.to_rfc3339()),
+                completed_at: r.completed_at.map(|t| t.to_rfc3339()),
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn list_transformation_chapters(
+    db: State<'_, Arc<Mutex<Db>>>,
+    transformation_novel_id: i64,
+) -> Result<Vec<TransformationChapterRow>, String> {
+    let db = db.lock().map_err(|e| e.to_string())?;
+    let tn = db
+        .transformation_novels()
+        .get(transformation_novel_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("transformation_novel {transformation_novel_id} 不存在"))?;
+    let rows = db
+        .transformation_chapters()
+        .list_by_transformation_novel(transformation_novel_id)
+        .map_err(|e| e.to_string())?;
+    Ok(join_chapter_info(&db, tn.data_asset_id, rows))
+}
+
+#[tauri::command]
+pub fn list_transformation_chapters_for_chapter(
+    db: State<'_, Arc<Mutex<Db>>>,
+    chapter_id: i64,
+) -> Result<Vec<TransformationChapterRow>, String> {
+    let db = db.lock().map_err(|e| e.to_string())?;
+    let ch = db
+        .chapters()
+        .get(chapter_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("chapter {chapter_id} 不存在"))?;
+    let rows = db
+        .transformation_chapters()
+        .list_by_chapter(chapter_id)
+        .map_err(|e| e.to_string())?;
+    Ok(join_chapter_info(&db, ch.data_asset_id, rows))
+}
+
+#[tauri::command]
+pub fn enqueue_transformation_chapters(
+    db: State<'_, Arc<Mutex<Db>>>,
+    queue: State<'_, Arc<JobQueue>>,
+    payload: EnqueuePayload,
+) -> Result<Vec<i64>, String> {
+    if payload.chapter_ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let (tn, prompt, model_cfg) = {
+        let db = db.lock().map_err(|e| e.to_string())?;
+        let tn = db
+            .transformation_novels()
+            .get(payload.transformation_novel_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| {
+                format!("transformation_novel {} 不存在", payload.transformation_novel_id)
+            })?;
+        let prompt = db
+            .prompts()
+            .get(payload.prompt_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("prompt {} 不存在", payload.prompt_id))?;
+        let cfg = db
+            .model_configs()
+            .get(payload.model_config_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("model_config {} 不存在", payload.model_config_id))?;
+        (tn, prompt, cfg)
+    };
+
+    let mut ids = Vec::with_capacity(payload.chapter_ids.len());
+    let mut jobs: Vec<JobSpec> = Vec::with_capacity(payload.chapter_ids.len());
+    {
+        let db = db.lock().map_err(|e| e.to_string())?;
+        for chapter_id in &payload.chapter_ids {
+            let chapter = db
+                .chapters()
+                .get(*chapter_id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("chapter {chapter_id} 不存在"))?;
+            // 校验:同一 transformation_novel 共享同一 data_asset。
+            if chapter.data_asset_id != tn.data_asset_id {
+                return Err(format!(
+                    "chapter {chapter_id} 不属于 transformation_novel 的 data_asset {}",
+                    tn.data_asset_id
+                ));
+            }
+            let mode = TransformMode::from(prompt.kind);
+            let id = db
+                .transformation_chapters()
+                .insert(&NewTransformationChapter {
+                    transformation_novel_id: tn.id,
+                    chapter_id: chapter.id,
+                    mode,
+                    prompt_id: prompt.id,
+                    model_config_id: model_cfg.id,
+                    ctx_prev_original: payload.ctx_prev_original,
+                    ctx_prev_transformed: payload.ctx_prev_transformed,
+                    ctx_next_original: payload.ctx_next_original,
+                })
+                .map_err(|e| e.to_string())?;
+            ids.push(id);
+            jobs.push(JobSpec {
+                transformation_id: id,
+                mode,
+                chapter,
+                prompt: prompt.clone(),
+                model_config: model_cfg.clone(),
+                ctx_prev_original: payload.ctx_prev_original,
+                ctx_prev_transformed: payload.ctx_prev_transformed,
+                ctx_next_original: payload.ctx_next_original,
+            });
+        }
+    }
+    for job in jobs {
+        queue.enqueue(job);
+    }
+    Ok(ids)
+}
+
+#[tauri::command]
+pub fn enqueue_all_chapters(
+    db: State<'_, Arc<Mutex<Db>>>,
+    queue: State<'_, Arc<JobQueue>>,
+    payload: EnqueueAllPayload,
+) -> Result<Vec<i64>, String> {
+    let chapter_ids: Vec<i64> = {
+        let db = db.lock().map_err(|e| e.to_string())?;
+        let tn = db
+            .transformation_novels()
+            .get(payload.transformation_novel_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| {
+                format!("transformation_novel {} 不存在", payload.transformation_novel_id)
+            })?;
+        db.chapters()
+            .list_by_data_asset(tn.data_asset_id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|c| c.id)
+            .collect()
+    };
+    enqueue_transformation_chapters(
+        db,
+        queue,
+        EnqueuePayload {
+            transformation_novel_id: payload.transformation_novel_id,
+            chapter_ids,
+            prompt_id: payload.prompt_id,
+            model_config_id: payload.model_config_id,
+            ctx_prev_original: payload.ctx_prev_original,
+            ctx_prev_transformed: payload.ctx_prev_transformed,
+            ctx_next_original: payload.ctx_next_original,
+        },
+    )
+}
+
+#[tauri::command]
+pub fn get_queue_snapshot(queue: State<'_, Arc<JobQueue>>) -> Result<QueueSnapshot, String> {
+    Ok(queue.snapshot())
+}
