@@ -2,16 +2,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tauri::ipc::Response;
 use tauri::State;
 
 use nsc_core::db::Db;
-use nsc_core::encoding::{decode_to_utf8, read_text_file};
-use nsc_core::models::{NewUpload, Upload};
+use nsc_core::encoding::read_text_file;
+use nsc_core::models::Upload;
+use nsc_core::upload;
 
-/// Upload listing IPC DTO。只承载 upload 自身字段;data_asset 相关信息
-/// 属于后续 Task 7 的 DataAssetSummary,本任务不混合到上传响应里。
+/// Upload listing IPC DTO. Only carries upload self-fields; data_asset
+/// related info belongs to DataAssetSummary (Task 7).
 #[derive(Debug, Serialize)]
 pub struct UploadSummary {
     pub id: i64,
@@ -24,24 +24,13 @@ pub struct UploadSummary {
 
 #[derive(Debug, Deserialize)]
 pub struct UploadFilePayload {
+    pub file_path: String,
     pub filename: String,
-    pub bytes: Vec<u8>,
 }
 
 fn uploads_dir() -> PathBuf {
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
     PathBuf::from(base).join("novel-style-converter").join("uploads")
-}
-
-fn ensure_dir(p: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(p)
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut h = Sha256::new();
-    h.update(bytes);
-    let out = h.finalize();
-    out.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 fn to_summary(u: &Upload) -> UploadSummary {
@@ -55,8 +44,8 @@ fn to_summary(u: &Upload) -> UploadSummary {
     }
 }
 
-/// 读 upload.original_text;DB 字段为空时(老版本上传的)兜底从 file_path 读 raw 文件再 decode。
-/// 老 DB 行可能没 original_text,但 raw 文件在 disk 上还在;统一走这里防止 read 路径拿到 ""。
+/// Read `upload.original_text`; DB field empty (legacy uploads) falls
+/// back to reading the raw file from `file_path` and re-decoding.
 pub fn read_upload_original_text(u: &Upload) -> Result<String, String> {
     if !u.original_text.is_empty() {
         return Ok(u.original_text.clone());
@@ -71,63 +60,27 @@ pub fn list_uploads(db: State<'_, Arc<Mutex<Db>>>) -> Result<Vec<UploadSummary>,
     Ok(ups.iter().map(to_summary).collect())
 }
 
-/// 上传一个 `.txt`。流程:编码检测 → sha256 → 同 sha256 已存在则直接返回旧行(去重);
-/// 不存在则写 `%APPDATA%/novel-style-converter/uploads/{sha}.txt` 并落库。
-/// 不影响已有 data_asset;后续走 parse 页。
+/// Register a new upload from a user-chosen file path. Delegates to
+/// `nsc_core::upload::upload_file` for all business logic (decode, hash,
+/// dedup, atomic write, DB insert with rollback).
 #[tauri::command]
 pub fn upload_file(
     db: State<'_, Arc<Mutex<Db>>>,
     payload: UploadFilePayload,
 ) -> Result<UploadSummary, String> {
-    if payload.filename.trim().is_empty() {
-        return Err("文件名不能为空".into());
-    }
-    if payload.bytes.is_empty() {
-        return Err("文件为空".into());
-    }
-    // 早失败:编码解析失败 = 上传失败,不入库。
-    let decoded = decode_to_utf8(&payload.bytes)?;
-    let text = decoded.text;
-
-    let sha = sha256_hex(&payload.bytes);
-
-    let db = db.lock().map_err(|e| e.to_string())?;
-    let existing = db
-        .uploads()
-        .find_by_sha256(&sha)
-        .map_err(|e| e.to_string())?;
-    if let Some(id) = existing {
-        let u = db.uploads().get(id).map_err(|e| e.to_string())?
-            .ok_or_else(|| "upload row missing".to_string())?;
-        return Ok(to_summary(&u));
-    }
-
     let dir = uploads_dir();
-    ensure_dir(&dir).map_err(|e| format!("创建目录失败: {e}"))?;
-    let file_path = dir.join(format!("{sha}.txt"));
-    std::fs::write(&file_path, &payload.bytes).map_err(|e| format!("写文件失败: {e}"))?;
-
-    let id = db.uploads().insert(&NewUpload {
-        sha256: sha,
-        filename: payload.filename.trim().to_string(),
-        byte_size: payload.bytes.len() as i64,
-        file_path: file_path.to_string_lossy().to_string(),
-        original_text: text,
-    }).map_err(|e| e.to_string())?;
-
-    let u = db.uploads().get(id).map_err(|e| e.to_string())?
-        .ok_or_else(|| "upload row missing".to_string())?;
+    let source = PathBuf::from(&payload.file_path);
+    let db_guard = db.lock().map_err(|e| e.to_string())?;
+    let u = upload::upload_file(&db_guard, &source, &payload.filename, &dir)
+        .map_err(|e| e.to_string())?;
     Ok(to_summary(&u))
 }
 
-/// 删 upload 行 + 物理文件。若 upload 对应的 data_asset 已锁定(`locked_at` 非 NULL)
-/// 则拒绝 —— 已锁定的 data_asset 通常有 transformation_novel 在跑,不能误删原文。
 #[tauri::command]
 pub fn delete_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String> {
     let db = db.lock().map_err(|e| e.to_string())?;
     let u = db.uploads().get(id).map_err(|e| e.to_string())?
         .ok_or_else(|| format!("upload {id} 不存在"))?;
-    // data_asset 锁死 → 不允许删 upload(锁死语义由 Task 4 完整给出,这里已对齐)。
     if let Some(da) = db.data_assets().find_by_upload(id).map_err(|e| e.to_string())? {
         if db.data_assets().is_locked(da.id).map_err(|e| e.to_string())? {
             return Err("upload 对应的 data_asset 已锁定,无法删除".into());
@@ -145,9 +98,6 @@ pub fn get_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<UploadSummar
     Ok(to_summary(&u))
 }
 
-/// 返回 upload 原文,优先用 `uploads.original_text`(DB 字段),老数据为空时
-/// 兜底从 `uploads.file_path` 读物理文件并重新解码。结果以 `tauri::ipc::Response`
-/// 直接给前端走文本流(避免 JSON 转义大文本)。
 #[tauri::command]
 pub fn get_upload_text(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<Response, String> {
     let text = {
@@ -157,17 +107,12 @@ pub fn get_upload_text(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<Respons
         if !u.original_text.is_empty() {
             u.original_text.clone()
         } else {
-            // 兜底:旧库没 original_text,从 file_path 读。
             read_text_file(Path::new(&u.file_path))?.text
         }
     };
     Ok(Response::new(text.into_bytes()))
 }
 
-/// State 1 编辑入口:把 textarea 里的全文写回 uploads.original_text。
-/// 已有 data_asset 关联时拒绝(unlocked 也拒)——raw_text 改了 chapters.byte_range
-/// 就指向无效偏移,前端没法自动重切,必须先 delete_data_asset 再重解析。
-/// 这是真相源头,前端 hasDataAsset disable 只是 UX,后端必须独立校验防绕过。
 #[tauri::command]
 pub fn update_upload_text(
     db: State<'_, Arc<Mutex<Db>>>,
