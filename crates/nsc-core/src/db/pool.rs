@@ -72,6 +72,14 @@ impl Db {
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    /// Test/admin helper: execute a raw SQL batch. Production code paths
+    /// must use the typed repos. Marked `#[doc(hidden)]` to keep it out
+    /// of rendered docs but allow internal test access.
+    #[doc(hidden)]
+    pub fn execute_batch(&self, sql: &str) -> rusqlite::Result<()> {
+        self.conn.execute_batch(sql)
+    }
 }
 
 fn run_schemas(conn: &Connection) -> Result<()> {
