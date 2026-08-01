@@ -9,7 +9,7 @@
 $ErrorActionPreference = "Continue"
 $ScriptRoot = $PSScriptRoot
 $RepoRoot = Split-Path -Parent $ScriptRoot
-$ExePath = Join-Path $RepoRoot "target\release\novel-style-converter.exe"
+$ExePath = Join-Path $RepoRoot "target\release\nsc-desktop.exe"
 
 if (-not (Test-Path $ExePath)) {
     Write-Error "release build missing at $ExePath — run pnpm tauri build --bundles msi first"
