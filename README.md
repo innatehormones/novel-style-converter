@@ -9,6 +9,7 @@
 ## 功能概览
 
 - **小说导入**：从 `.txt` 文件导入，自动按章节标题正则切分（支持「第一章」「第 N 回」「Chapter N」「卷 N」等中英文标题，也能按空行兜底分隔）
+- **上传链路**：前端通过 `tauri-plugin-dialog` 选择文件路径，后端 `nsc_core::upload` 自行读取、解码（UTF-8/GBK）、SHA-256 去重并写入 `%APPDATA%/novel-style-converter/uploads/<sha>.txt`；DB 插入失败时回滚删除物理文件，避免孤儿文件。单文件上限 256 MiB（`MAX_UPLOAD_BYTES`）
 - **手动调整章节**：章节表支持新增、删除、合并相邻、上下移动、重命名
 - **Prompt 模板管理**：内置 `compress_default`、`style_default` 两条模板，支持复制内置、新建自定义、模板预览（调用 `prompts::render` 实时看渲染结果）
 - **模型配置管理**：支持任意 OpenAI 兼容 base_url + api_key + model，可一键测试连接（实际发起一次 `chat` 调用）
@@ -464,7 +465,10 @@ pwsh scripts/smoke.ps1
 
 切到 `📂 文件上传` 页(Library uploads tab)→「📥 上传 .txt」：
 
-- 选 `.txt` 文件(自动计算 sha256;同 sha256 不重复入库)
+- 通过 `tauri-plugin-dialog` 选 `.txt` 路径（前端不发字节,后端自读）
+- 自动算 sha256 去重；同 sha256 不会重复入库,直接复用已有 upload 行
+- 写入 `%APPDATA%/novel-style-converter/uploads/<sha>.txt`；DB 插入失败时自动回滚删除物理文件
+- 单文件硬上限 256 MiB（`MAX_UPLOAD_BYTES`）
 - 应用读全文存档到 `uploads.original_text`,跳到 `/library/upload/:uploadId` 页
 
 ### 3. 文本清洗(可选,Upload 页操作)
