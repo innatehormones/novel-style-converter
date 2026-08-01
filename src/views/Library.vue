@@ -174,9 +174,12 @@ function openCreateTn(dataAssetId: number) {
   tnDialogOpen.value = true;
 }
 
-async function onUpload(input: { filename: string; bytes: number[] }) {
+// onUpload is the translation layer between Vue-camelCase dialog emit
+// and snake-case IPC DTO. Dialog emits { filePath, filename }; we re-pack
+// to { file_path, filename } before handing to the store / IPC.
+async function onUpload(input: { filePath: string; filename: string }) {
   try {
-    await store.upload(input);
+    await store.upload({ file_path: input.filePath, filename: input.filename });
   } catch (e: unknown) {
     alert(e instanceof Error ? e.message : String(e));
   }

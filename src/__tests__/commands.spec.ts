@@ -83,14 +83,14 @@ describe('Upload IPC wrappers', () => {
     expect(invoke).toHaveBeenCalledWith('list_uploads');
   });
 
-  it('uploadFile sends snake_case payload', async () => {
+  it('uploadFile sends snake_case payload with file_path', async () => {
     const sample: UploadSummary = {
       id: 1, sha256: 'x', filename: 'A.txt', byte_size: 3, uploaded_at: '2026-07-26T00:00:00Z', file_path: '/x',
     };
     vi.mocked(invoke).mockResolvedValueOnce(sample);
-    const r = await uploadFile({ filename: 'A.txt', bytes: [1, 2, 3] });
+    const r = await uploadFile({ file_path: 'C:/tmp/A.txt', filename: 'A.txt' });
     expect(r).toEqual(sample);
-    expect(invoke).toHaveBeenCalledWith('upload_file', { payload: { filename: 'A.txt', bytes: [1, 2, 3] } });
+    expect(invoke).toHaveBeenCalledWith('upload_file', { payload: { file_path: 'C:/tmp/A.txt', filename: 'A.txt' } });
   });
 
   it('deleteUpload sends id', async () => {

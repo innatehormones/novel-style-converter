@@ -66,8 +66,8 @@ describe('library store', () => {
       return Promise.reject(new Error(`unexpected cmd: ${cmd}`));
     });
     const store = useLibraryStore();
-    const result = await store.upload({ filename: 'x.txt', bytes: [1, 2, 3] });
-    expect(invoke).toHaveBeenCalledWith('upload_file', { payload: { filename: 'x.txt', bytes: [1, 2, 3] } });
+    const result = await store.upload({ file_path: '/tmp/A.txt', filename: 'A.txt' });
+    expect(invoke).toHaveBeenCalledWith('upload_file', { payload: { file_path: '/tmp/A.txt', filename: 'A.txt' } });
     expect(result.id).toBe(7);
     expect(store.uploads[0].id).toBe(7);
     expect(store.uploading).toBe(false);
@@ -83,7 +83,7 @@ describe('library store', () => {
       return Promise.reject(new Error(`unexpected cmd: ${cmd}`));
     });
     const store = useLibraryStore();
-    const pending = store.upload({ filename: 'big.txt', bytes: [9] });
+    const pending = store.upload({ file_path: '/tmp/big.txt', filename: 'big.txt' });
     expect(store.uploading).toBe(true);
     resolveUpload({ ...sampleUpload, id: 8 });
     await pending;
@@ -94,7 +94,7 @@ describe('library store', () => {
       return Promise.resolve([]);
     });
     await expect(
-      store.upload({ filename: 'broken.txt', bytes: [] }),
+      store.upload({ file_path: '/tmp/broken.txt', filename: 'broken.txt' }),
     ).rejects.toThrow('boom');
     expect(store.uploading).toBe(false);
   });

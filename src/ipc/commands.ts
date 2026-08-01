@@ -38,7 +38,7 @@ export function listUploads(): Promise<UploadSummary[]> {
   return invoke<UploadSummary[]>('list_uploads');
 }
 
-export function uploadFile(payload: { filename: string; bytes: number[] }): Promise<UploadSummary> {
+export function uploadFile(payload: { file_path: string; filename: string }): Promise<UploadSummary> {
   return invoke<UploadSummary>('upload_file', { payload });
 }
 

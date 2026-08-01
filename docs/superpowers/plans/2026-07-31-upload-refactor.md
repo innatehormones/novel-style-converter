@@ -892,9 +892,12 @@ In `src/stores/library.ts`, replace the `upload` function inside `defineStore('l
 In `src/views/Library.vue`, the `onUpload` function is the consumer passed to `@submit`. Find it and replace:
 
 ```ts
-async function onUpload(input: { file_path: string; filename: string }) {
+// onUpload is the translation layer between Vue-camelCase dialog emit
+// and snake-case IPC DTO. Dialog emits { filePath, filename }; we re-pack
+// to { file_path, filename } before handing to the store / IPC.
+async function onUpload(input: { filePath: string; filename: string }) {
   try {
-    await store.upload(input);
+    await store.upload({ file_path: input.filePath, filename: input.filename });
   } catch (e: unknown) {
     alert(e instanceof Error ? e.message : String(e));
   }
