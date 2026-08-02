@@ -20,7 +20,9 @@
     >
       <template #cell-name="{ row }">{{ row.name }}</template>
       <template #cell-kind="{ row }">
-        {{ row.kind === 'compress' ? '压缩' : '文风' }}
+        <span class="kind-tag" :class="`kind-${row.kind}`">
+          {{ row.kind === 'compress' ? '压缩' : '文风' }}
+        </span>
       </template>
       <template #cell-builtin="{ row }">
         <Tag v-if="row.is_builtin" kind="info">内置</Tag>
@@ -173,6 +175,20 @@ async function confirmDelete() {
   border: 1px dashed var(--border-color);
   border-radius: var(--radius-pin);
   background: var(--color-sheet);
+}
+.kind-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--radius-pin);
+  font-size: 12px;
+}
+.kind-compress {
+  background: var(--color-paper-mist);
+  color: var(--text-primary);
+}
+.kind-style {
+  background: var(--color-cinnabar-light);
+  color: var(--color-cinnabar-deep);
 }
 .muted {
   color: var(--text-secondary);
