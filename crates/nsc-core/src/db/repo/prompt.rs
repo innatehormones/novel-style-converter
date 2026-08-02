@@ -54,6 +54,17 @@ impl<'a> PromptRepo<'a> {
         Ok(())
     }
 
+    /// 统计 `transformation_chapters` 表里 prompt_id 等于参数的行数。
+    /// 删除 prompt 前给用户展示"被 N 个转换结果引用"用。
+    pub fn count_by_prompt(&self, prompt_id: i64) -> Result<i64> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM transformation_chapters WHERE prompt_id = ?1",
+            params![prompt_id],
+            |r| r.get(0),
+        )?;
+        Ok(n)
+    }
+
     pub fn seed_builtin_if_empty(&self) -> Result<()> {
         let count: i64 = self.conn
             .query_row("SELECT COUNT(*) FROM prompts WHERE is_builtin = 1", [], |r| r.get(0))?;
