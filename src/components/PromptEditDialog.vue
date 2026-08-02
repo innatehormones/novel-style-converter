@@ -21,7 +21,7 @@
       />
     </div>
     <div v-if="missingChapterContent" class="warn">
-      该 prompt 未引用 <code>{{ '{{chapter_content}}' }}</code>,LLM 将无法看到章节正文
+      该 prompt 未引用 <code>{{ `{{chapter_content}}` }}</code>,LLM 将无法看到章节正文
     </div>
     <div v-if="error" class="error">{{ error }}</div>
     <template #footer>
