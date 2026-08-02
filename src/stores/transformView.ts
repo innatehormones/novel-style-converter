@@ -88,10 +88,17 @@ export const useTransformViewStore = defineStore('transformView', () => {
     transformations.value.find((t) => t.id === selectedTransformationId.value) ?? null,
   );
 
+  /// byte_start/byte_end 是 UTF-8 字节偏移,不能直接 `String.prototype.slice`
+  /// (那是 UTF-16 code unit 索引,中文 UTF-8 是 3 byte/char)。把原文 UTF-8 编码
+  /// 后再 subarray 切片、decode 回字符串。等价于后端 Rust 的 `text[s..e]`。
+  const originalTextBytes = computed(() => new TextEncoder().encode(originalText.value));
   const originalContent = computed(() => {
     const ch = chapter.value;
     if (!ch) return '';
-    return originalText.value.slice(ch.byte_start, ch.byte_end);
+    const bytes = originalTextBytes.value;
+    const start = Math.max(0, Math.min(ch.byte_start, bytes.length));
+    const end = Math.max(start, Math.min(ch.byte_end, bytes.length));
+    return new TextDecoder().decode(bytes.subarray(start, end));
   });
 
   const canGoPrev = computed(() => currentIndex.value > 0);
