@@ -116,6 +116,7 @@ import Tag from '../components/ui/Tag.vue';
 import UploadDialog from '../components/UploadDialog.vue';
 import TransformationNovelDialog from '../components/TransformationNovelDialog.vue';
 import { useLibraryStore } from '../stores/library';
+import { formatSize, formatTime, formatWordCount } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
@@ -165,8 +166,13 @@ onMounted(() => store.load());
 /// 用户在 DataAsset.vue 删除后再切到 /data-assets,得 reload 才能拿到新数据。
 watch(() => route.path, () => store.load());
 
+/// 上传列表每行都要查"是否已有 data_asset",data_assets 数量是 O(N),
+/// 若每次都 .some() 则渲染总复杂度 O(M*N)。用 Set 一次性算好,O(1) 查。
+const uploadIdsWithDataAsset = computed(
+  () => new Set(store.dataAssets.map((d) => d.upload_id)),
+);
 function hasDataAsset(uploadId: number): boolean {
-  return store.dataAssets.some((d) => d.upload_id === uploadId);
+  return uploadIdsWithDataAsset.value.has(uploadId);
 }
 
 function openCreateTn(dataAssetId: number) {
@@ -257,21 +263,6 @@ function goDataAsset(id: number) {
 
 function goParse(uploadId: number) {
   void router.push({ name: 'parse-wizard', params: { uploadId } });
-}
-
-function formatSize(b: number): string {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / 1024 / 1024).toFixed(2)} MB`;
-}
-
-function formatWordCount(n: number): string {
-  if (n >= 10000) return `${(n / 10000).toFixed(1)} 万字`;
-  return `${n} 字`;
-}
-
-function formatTime(iso: string): string {
-  return iso.replace('T', ' ').slice(0, 16);
 }
 </script>
 

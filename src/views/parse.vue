@@ -139,6 +139,7 @@ import Dialog from '../components/ui/Dialog.vue';
 import MarkerButton from '../components/MarkerButton.vue';
 import { useChaptersStore } from '../stores/chapters';
 import { useChapterSearch } from '../composables/useChapterSearch';
+import { formatWordCount } from '../utils/format';
 import type { ChapterSegment } from '../ipc/types';
 
 const route = useRoute();
@@ -223,11 +224,6 @@ function confirmMerge() {
 function displayTitle(t: unknown): string {
   if (typeof t !== 'string' || t.length === 0) return '(无标题)';
   return t;
-}
-
-function formatWordCount(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return '?';
-  return `${n.toLocaleString('zh-Hans-CN')} 字`;
 }
 
 function segIdx(item: ChapterSegment | null | undefined): number {
