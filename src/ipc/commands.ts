@@ -14,6 +14,7 @@ import type {
   ChapterSegment, ChapterMeta, ChapterContentRow, Chapter, ChapterInput,
   TransformationNovelSummary, TransformationChapterRow,
   EnqueuePayload, EnqueueAllPayload, QueueSnapshot,
+  Prompt, PromptInput,
 } from './types';
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -169,4 +170,25 @@ export function enqueueAllChapters(payload: EnqueueAllPayload): Promise<number[]
 // ─── Queue ─────────────────────────────────────────────────────────────────
 export function getQueueSnapshot(): Promise<QueueSnapshot> {
   return invoke<QueueSnapshot>('get_queue_snapshot');
+}
+
+// ─── Prompts ───────────────────────────────────────────────────────────────
+export function listPrompts(): Promise<Prompt[]> {
+  return invoke<Prompt[]>('list_prompts');
+}
+
+export function getPrompt(id: number): Promise<Prompt> {
+  return invoke<Prompt>('get_prompt', { id });
+}
+
+export function upsertPrompt(payload: PromptInput): Promise<number> {
+  return invoke<number>('upsert_prompt', { payload });
+}
+
+export function deletePrompt(id: number): Promise<void> {
+  return invoke<void>('delete_prompt', { id });
+}
+
+export function countPromptUsage(promptId: number): Promise<number> {
+  return invoke<number>('count_transformation_chapters_by_prompt', { promptId });
 }
