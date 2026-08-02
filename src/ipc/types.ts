@@ -231,3 +231,24 @@ export interface CleaningPreview {
   lines_delta: number;
   chars_delta: number;
 }
+
+/**
+ * 后端 `prompts` 表行的前端镜像(取自 `nsc_core::models::Prompt`)。
+ * `kind` 来自后端 `PromptKind` 枚举(`#[serde(rename_all = "snake_case")]`)
+ * —— 前端拿到 / 发回 `"compress"` / `"style"`。
+ * `is_builtin` 为 true 的行在 UI 上不可编辑、不可删除,可"复制"成用户版。
+ */
+export interface Prompt {
+  id: number;
+  name: string;
+  kind: 'compress' | 'style';
+  template: string;
+  is_builtin: boolean;
+}
+
+/**
+ * `upsert_prompt` 入参。`id === 0` 表示新建(走 insert);>0 表示更新(走 update)。
+ * 字段保持 snake_case-by-default —— `kind` / `name` / `template` 都是单词,
+ * 没有 `#[serde(rename_all)]` 在这层 DTO 上,所以前端按字段名原样发。
+ */
+export type PromptInput = Omit<Prompt, 'id' | 'is_builtin'> & { id: number };
