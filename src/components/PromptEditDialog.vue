@@ -108,7 +108,7 @@ async function onSubmit() {
   error.value = null;
   try {
     const payload: PromptInput = {
-      id: props.mode === 'create' ? 0 : (props.initial?.id ?? 0),
+      id: props.mode === 'edit' ? (props.initial?.id ?? 0) : 0,
       name: nameRef.value.trim(),
       kind: kindRef.value,
       template: templateRef.value,
