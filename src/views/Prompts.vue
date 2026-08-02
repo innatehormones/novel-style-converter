@@ -122,13 +122,17 @@ function openCopy(row: Prompt) {
 function onSaved() {
 }
 
+let deleteRequestId = 0;
+
 async function requestDelete(row: Prompt) {
+  const requestId = ++deleteRequestId;
   let usage = 0;
   try {
     usage = await store.countUsage(row.id);
   } catch {
     usage = 0;
   }
+  if (requestId !== deleteRequestId) return;
   pendingDelete.value = { id: row.id, name: row.name, usage };
   confirmOpen.value = true;
 }
