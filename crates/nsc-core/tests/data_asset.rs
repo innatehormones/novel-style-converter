@@ -6,6 +6,7 @@ fn seed_upload(db: &Db) -> i64 {
         sha256: "abc".into(), filename: "x.txt".into(),
         byte_size: 100, file_path: "/tmp/x.txt".into(),
         original_text: "x".into(),
+        word_count: 0,
     }).unwrap()
 }
 

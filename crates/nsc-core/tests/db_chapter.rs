@@ -9,6 +9,7 @@ fn make_upload(db: &Db, name: &str) -> i64 {
             byte_size: 0,
             file_path: format!("/tmp/{name}.txt"),
             original_text: format!("{name}-text"),
+            word_count: 0,
         })
         .unwrap()
 }

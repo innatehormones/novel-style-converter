@@ -38,6 +38,8 @@ export interface UploadSummary {
   byte_size: number;
   uploaded_at: string;
   file_path: string;
+  /// zh-aware 字数(汉字 + 字母 + 数字),upload_file 时后端一次算好。
+  word_count: number;
 }
 
 /// State 2: 一次解析结果 = 一份 data_asset + 一组分章节切片。
@@ -49,7 +51,7 @@ export interface DataAssetSummary {
   locked_at: string | null;
 }
 
-/// Library.vue "数据资产" tab 行:data_asset 元数据 + 来源 upload 文件名。
+/// Library.vue "数据资产" tab 行:data_asset 元数据 + 来源 upload 文件名 + 章节总字数。
 export interface DataAssetRow {
   id: number;
   upload_id: number;
@@ -58,6 +60,8 @@ export interface DataAssetRow {
   locked_at: string | null;
   filename: string;
   byte_size: number;
+  /// SUM(chapters.word_count) WHERE data_asset_id = da.id。
+  word_count: number;
 }
 
 /// State 2 章节元数据(从 list_data_asset_chapters 返回)。正文由前端按 byte 切片 original_text。

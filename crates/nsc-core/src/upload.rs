@@ -11,6 +11,7 @@ use crate::db::Db;
 use crate::encoding::{decode_to_utf8, DecodedText};
 use crate::error::{Error, Result};
 use crate::models::{NewUpload, Upload};
+use crate::text;
 
 /// Hard cap on a single uploaded file's size (bytes).
 /// 256 MiB is generous for a novel txt while still bounding memory + IO.
@@ -71,12 +72,14 @@ pub fn upload_file(
 
     std::fs::write(&dest, &bytes)?;
 
+    let word_count = text::word_count(&text) as i64;
     let insert = db.uploads().insert(&NewUpload {
         sha256: sha,
         filename: filename.to_string(),
         byte_size: size as i64,
         file_path: dest.to_string_lossy().to_string(),
         original_text: text,
+        word_count,
     });
 
     let id = match insert {

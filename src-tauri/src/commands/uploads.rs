@@ -20,6 +20,9 @@ pub struct UploadSummary {
     pub byte_size: i64,
     pub uploaded_at: String,
     pub file_path: String,
+    /// 字数(zh-aware,汉字 + 字母 + 数字)。upload_file() 时由 nsc_core::text::word_count 一次算好,
+    /// list 列表无需重扫原文。
+    pub word_count: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,6 +44,7 @@ fn to_summary(u: &Upload) -> UploadSummary {
         byte_size: u.byte_size,
         uploaded_at: u.uploaded_at.to_rfc3339(),
         file_path: u.file_path.clone(),
+        word_count: u.word_count,
     }
 }
 

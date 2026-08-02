@@ -13,6 +13,9 @@ pub struct Upload {
     pub file_path: String,
     /// 原文整篇。data_assets 的章节切片通过 byte_start/byte_end 在此坐标系定位。
     pub original_text: String,
+    /// 字数(zh-aware:汉字 + 字母 + 数字)。upload_file() 时一次性算好。
+    /// UI 列表展示用,避免每次 list 都对原文做字符扫描。
+    pub word_count: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +25,7 @@ pub struct NewUpload {
     pub byte_size: i64,
     pub file_path: String,
     pub original_text: String,
+    pub word_count: i64,
 }
 
 /// 转换小说工作台条目:引用某个 data_asset(已锁定的 State 2 行)。

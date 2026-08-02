@@ -16,6 +16,7 @@ const sampleUpload: UploadSummary = {
   byte_size: 100,
   uploaded_at: '2026-07-26T00:00:00Z',
   file_path: '/x',
+  word_count: 0,
 };
 
 const sampleTn: TransformationNovelSummary = {
@@ -34,6 +35,7 @@ const sampleDa: DataAssetRow = {
   locked_at: null,
   filename: 'A.txt',
   byte_size: 100,
+  word_count: 0,
 };
 
 describe('library store', () => {

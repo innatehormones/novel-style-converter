@@ -10,9 +10,9 @@ impl<'a> UploadRepo<'a> {
     pub fn insert(&self, u: &NewUpload) -> Result<i64> {
         let now = Utc::now();
         self.conn.execute(
-            "INSERT INTO uploads (sha256, filename, byte_size, uploaded_at, file_path, original_text) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![u.sha256, u.filename, u.byte_size, now.to_rfc3339(), u.file_path, u.original_text],
+            "INSERT INTO uploads (sha256, filename, byte_size, uploaded_at, file_path, original_text, word_count) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![u.sha256, u.filename, u.byte_size, now.to_rfc3339(), u.file_path, u.original_text, u.word_count],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -28,7 +28,7 @@ impl<'a> UploadRepo<'a> {
 
     pub fn get(&self, id: i64) -> Result<Option<Upload>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, sha256, filename, byte_size, uploaded_at, file_path, original_text \
+            "SELECT id, sha256, filename, byte_size, uploaded_at, file_path, original_text, word_count \
              FROM uploads WHERE id = ?1"
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -39,7 +39,7 @@ impl<'a> UploadRepo<'a> {
 
     pub fn list(&self) -> Result<Vec<Upload>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, sha256, filename, byte_size, uploaded_at, file_path, original_text \
+            "SELECT id, sha256, filename, byte_size, uploaded_at, file_path, original_text, word_count \
              FROM uploads ORDER BY id DESC"
         )?;
         let rows = stmt.query_map([], |row| from_row(row))?;
@@ -47,10 +47,12 @@ impl<'a> UploadRepo<'a> {
     }
 
     /// 把原文整篇写回 uploads.original_text(用于清洗/重解析等需要重写原文的路径)。
+    /// 同步刷新 word_count:原文变了,字数跟着变,避免 list 显示旧值。
     pub fn set_original_text(&self, id: i64, text: &str) -> Result<()> {
+        let wc = crate::text::word_count(text) as i64;
         self.conn.execute(
-            "UPDATE uploads SET original_text = ?2 WHERE id = ?1",
-            params![id, text],
+            "UPDATE uploads SET original_text = ?2, word_count = ?3 WHERE id = ?1",
+            params![id, text, wc],
         )?;
         Ok(())
     }
@@ -75,6 +77,7 @@ fn from_row(row: &Row) -> rusqlite::Result<Upload> {
         uploaded_at,
         file_path: row.get(5)?,
         original_text: row.get(6)?,
+        word_count: row.get(7)?,
     })
 }
 

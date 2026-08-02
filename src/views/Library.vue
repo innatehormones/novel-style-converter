@@ -19,9 +19,9 @@
         :data="store.uploads"
         :row-key="(row) => row.id"
       >
-        <template #cell-id="{ row }">{{ row.id }}</template>
         <template #cell-filename="{ row }">{{ row.filename }}</template>
         <template #cell-size="{ row }">{{ formatSize(row.byte_size) }}</template>
+        <template #cell-words="{ row }">{{ formatWordCount(row.word_count) }}</template>
         <template #cell-uploaded="{ row }">{{ formatTime(row.uploaded_at) }}</template>
         <template #cell-actions="{ row }">
           <Button size="small" @click="goUpload(row.id)">查看</Button>
@@ -43,11 +43,11 @@
         :data="store.dataAssets"
         :row-key="(row) => row.id"
       >
-        <template #cell-id="{ row }">{{ row.id }}</template>
         <template #cell-title="{ row }">{{ row.title }}</template>
         <template #cell-source="{ row }">
-          <span class="muted">{{ row.filename }} · upload #{{ row.upload_id }}</span>
+          <span class="muted">{{ row.filename }}</span>
         </template>
+        <template #cell-words="{ row }">{{ formatWordCount(row.word_count) }}</template>
         <template #cell-status="{ row }">
           <Tag v-if="row.locked_at" kind="warn">已锁定</Tag>
           <Tag v-else kind="success">可重解析</Tag>
@@ -135,17 +135,17 @@ const renamingId = ref<number | null>(null);
 const renameDraft = ref('');
 
 const uploadColumns = [
-  { key: 'id', title: 'id', width: '60px' },
   { key: 'filename', title: '文件名', width: '260px' },
   { key: 'size', title: '大小', width: '100px' },
+  { key: 'words', title: '字数', width: '100px' },
   { key: 'uploaded', title: '上传时间', width: '180px' },
   { key: 'actions', title: '操作', width: '260px' },
 ];
 
 const daColumns = [
-  { key: 'id', title: 'id', width: '60px' },
   { key: 'title', title: '标题', width: '220px' },
-  { key: 'source', title: '来源', width: '280px' },
+  { key: 'source', title: '来源', width: '260px' },
+  { key: 'words', title: '字数', width: '100px' },
   { key: 'status', title: '状态', width: '120px' },
   { key: 'parsed', title: '解析时间', width: '180px' },
   { key: 'actions', title: '操作', width: '200px' },
@@ -263,6 +263,11 @@ function formatSize(b: number): string {
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
   return `${(b / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function formatWordCount(n: number): string {
+  if (n >= 10000) return `${(n / 10000).toFixed(1)} 万字`;
+  return `${n} 字`;
 }
 
 function formatTime(iso: string): string {

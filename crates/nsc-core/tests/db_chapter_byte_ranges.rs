@@ -9,6 +9,7 @@ fn make_upload(db: &Db) -> i64 {
             byte_size: 0,
             file_path: "/tmp/x.txt".into(),
             original_text: "hello".into(),
+            word_count: 0,
         })
         .unwrap()
 }

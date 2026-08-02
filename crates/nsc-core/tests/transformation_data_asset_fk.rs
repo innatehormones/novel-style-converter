@@ -8,6 +8,7 @@ fn tn_references_data_asset_id() {
         sha256: "h".into(), filename: "n.txt".into(),
         byte_size: 10, file_path: "/p".into(),
         original_text: String::new(),
+        word_count: 0,
     }).unwrap();
     let da_id = db.data_assets().insert(&NewDataAsset { upload_id: uid, title: "n".into() }).unwrap();
     let tn_id = db.transformation_novels().insert(&NewTransformationNovel {
@@ -26,6 +27,7 @@ fn list_by_data_asset() {
         sha256: "a".into(), filename: "n.txt".into(),
         byte_size: 1, file_path: "/p".into(),
         original_text: String::new(),
+        word_count: 0,
     }).unwrap();
     let da_id = db.data_assets().insert(&NewDataAsset { upload_id: uid, title: "n".into() }).unwrap();
     db.transformation_novels().insert(&NewTransformationNovel { data_asset_id: da_id, title: "a".into() }).unwrap();

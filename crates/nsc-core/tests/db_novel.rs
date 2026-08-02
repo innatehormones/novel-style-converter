@@ -10,6 +10,7 @@ fn create_list_delete_upload() {
         byte_size: 1024,
         file_path: "/tmp/a.txt".into(),
         original_text: "原文内容".into(),
+        word_count: 0,
     }).unwrap();
     assert!(id > 0);
 

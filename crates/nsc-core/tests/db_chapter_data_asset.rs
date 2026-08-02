@@ -8,6 +8,7 @@ fn chapter_belongs_to_data_asset_not_upload() {
         sha256: "h".into(), filename: "n.txt".into(),
         byte_size: 10, file_path: "/p".into(),
         original_text: "第一章 起\n一段文字\n第二章 出\n二段内容".into(),
+        word_count: 0,
     }).unwrap();
     let da_id = db.data_assets().insert(&NewDataAsset { upload_id: uid, title: "n".into() }).unwrap();
     db.chapters().insert_batch(&[

@@ -57,6 +57,7 @@ fn seed_db(path: &std::path::Path) -> (Chapter, nsc_core::models::Prompt, i64, i
             byte_size: 0,
             file_path: "/tmp/x.txt".into(),
             original_text: "Hello world".into(),
+            word_count: 0,
         })
         .expect("insert upload");
 

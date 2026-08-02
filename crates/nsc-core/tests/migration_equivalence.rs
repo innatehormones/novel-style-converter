@@ -1,6 +1,6 @@
-//! 验证迁移 0004-0006 的等价性:
+//! 验证迁移 0004-0007 的等价性:
 //! - byte_start/byte_end 在迁移前后指向同一段 UTF-8 字节切片
-//! - v3 老库通过 `Db::open` 自动升到 v6 且不报错
+//! - v3 老库通过 `Db::open` 自动升到 v7 且不报错
 //!
 //! 测试文件位于 `crates/nsc-core/tests/`,migrations/ 在仓库根目录,
 //! 所以 `../../../migrations/` 才是仓库根。
@@ -15,6 +15,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("v4", include_str!("../../../migrations/0004_data_assets.sql")),
     ("v5", include_str!("../../../migrations/0005_chapters_data_asset_fk.sql")),
     ("v6", include_str!("../../../migrations/0006_transformation_novels_data_asset_fk.sql")),
+    ("v7", include_str!("../../../migrations/0007_uploads_word_count.sql")),
 ];
 
 /// 把版本号解析成数字,跳过 v 前缀。
@@ -164,9 +165,9 @@ fn open_old_db_runs_all_migrations() {
     }
 
     let db = Db::open(&tmp).unwrap();
-    // 检查 schema_versions 表是否登记了 v1..v6
+    // 检查 schema_versions 表是否登记了 v1..v7
     let versions = db.applied_schema_versions().unwrap();
-    assert_eq!(versions, vec!["v1", "v2", "v3", "v4", "v5", "v6"]);
+    assert_eq!(versions, vec!["v1", "v2", "v3", "v4", "v5", "v6", "v7"]);
 
     let _ = std::fs::remove_file(&tmp);
 }

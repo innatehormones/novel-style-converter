@@ -46,6 +46,7 @@ fn setup() -> (TempDir, PathBuf, i64) {
         byte_size: 0,
         file_path: "/tmp/x.txt".into(),
         original_text: "abc".into(),
+        word_count: 0,
     }).unwrap();
     let da_id = db.data_assets().insert(&nsc_core::models::NewDataAsset {
         upload_id, title: "DA".into(),

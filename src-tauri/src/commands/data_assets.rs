@@ -117,7 +117,7 @@ pub fn commit_data_asset(
     Ok(da_id)
 }
 
-/// Library.vue "数据资产" tab:列所有 data_asset + 来源 upload 文件名。
+/// Library.vue "数据资产" tab:列所有 data_asset + 来源 upload 文件名 + 章节总字数。
 #[derive(Debug, Serialize)]
 pub struct DataAssetRow {
     pub id: i64,
@@ -127,6 +127,8 @@ pub struct DataAssetRow {
     pub locked_at: Option<String>,
     pub filename: String,
     pub byte_size: i64,
+    /// SUM(chapters.word_count) WHERE data_asset_id = da.id。
+    pub word_count: i64,
 }
 
 impl From<DataAssetWithUpload> for DataAssetRow {
@@ -139,6 +141,7 @@ impl From<DataAssetWithUpload> for DataAssetRow {
             locked_at: d.locked_at.map(|t| t.to_rfc3339()),
             filename: d.filename,
             byte_size: d.byte_size,
+            word_count: d.word_count,
         }
     }
 }

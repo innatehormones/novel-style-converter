@@ -12,6 +12,7 @@ fn setup() -> (Db, i64, i64) {
         byte_size: 0,
         file_path: "/tmp/x.txt".into(),
         original_text: "正文".into(),
+        word_count: 0,
     }).unwrap();
     let da_id = db.data_assets().insert(&NewDataAsset {
         upload_id, title: "DA".into(),
