@@ -21,7 +21,7 @@
       />
     </div>
     <div v-if="missingChapterContent" class="warn">
-      该 prompt 未引用 <code>{{ `{{chapter_content}}` }}</code>,LLM 将无法看到章节正文
+      该 prompt 未引用 <code>{{ chapterContentPlaceholder }}</code>,LLM 将无法看到章节正文
     </div>
     <div v-if="error" class="error">{{ error }}</div>
     <template #footer>
@@ -75,8 +75,9 @@ const canSubmit = computed(
 );
 
 const missingChapterContent = computed(
-  () => !templateRef.value.includes('{{chapter_content}}'),
+  () => !templateRef.value.includes(chapterContentPlaceholder),
 );
+const chapterContentPlaceholder = '{{chapter_content}}';
 
 function blank() {
   nameRef.value = '';
