@@ -77,6 +77,11 @@ pub fn run() {
             commands::transformations::enqueue_transformation_chapters,
             commands::transformations::enqueue_all_chapters,
             commands::transformations::get_queue_snapshot,
+            commands::prompts::list_prompts,
+            commands::prompts::get_prompt,
+            commands::prompts::upsert_prompt,
+            commands::prompts::delete_prompt,
+            commands::prompts::count_transformation_chapters_by_prompt,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
