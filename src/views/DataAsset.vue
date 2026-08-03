@@ -2,7 +2,9 @@
   <section class="data-asset">
     <PageHeader :title="store.title || '加载中...'" subtitle="浏览已解析章节,可发起删除">
       <template #back>
-        <Button @click="onBack">← 返回</Button>
+        <Button aria-label="返回" @click="onBack">
+          <IconArrowLeft :size="16" :stroke-width="1.5" />
+        </Button>
       </template>
       <template #meta>
         <span class="badge" :class="{ locked: !!store.lockedAt }">
@@ -77,6 +79,7 @@ import Button from '../components/ui/Button.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
+import IconArrowLeft from '~icons/lucide/arrow-left';
 import { useDataAssetStore } from '../stores/dataAsset';
 import { useLibraryStore } from '../stores/library';
 import { formatTime } from '../utils/format';

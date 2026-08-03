@@ -2,7 +2,9 @@
   <section class="upload">
     <PageHeader :title="filename || '加载中...'" subtitle="查看原文与字节元信息,清洗后转为数据资产">
       <template #back>
-        <Button @click="onBack">← 返回</Button>
+        <Button aria-label="返回" @click="onBack">
+          <IconArrowLeft :size="16" :stroke-width="1.5" />
+        </Button>
       </template>
       <template #actions>
         <Button :loading="saving" :disabled="!dirty || hasDataAsset" :title="hasDataAsset ? '原文已有关联数据资产,无法修改。请先在数据资产页删除。' : ''" @click="save">保存</Button>
@@ -61,6 +63,7 @@ import Tag from '../components/ui/Tag.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
+import IconArrowLeft from '~icons/lucide/arrow-left';
 import { getUpload, getUploadText, updateUploadText, findDataAssetByUpload } from '../ipc/commands';
 import CleaningDialog from '../components/CleaningDialog.vue';
 
