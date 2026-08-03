@@ -1,6 +1,6 @@
 <template>
   <section class="data-asset">
-    <PageHeader :title="store.title || '加载中...'" subtitle="浏览已解析章节,可发起删除">
+    <PageHeader :title="store.title || '加载中...'" size="small">
       <template #back>
         <Button aria-label="返回" @click="onBack">
           <IconArrowLeft :size="16" :stroke-width="1.5" />

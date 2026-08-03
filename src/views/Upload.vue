@@ -1,6 +1,6 @@
 <template>
   <section class="upload">
-    <PageHeader :title="filename || '加载中...'" subtitle="查看原文与字节元信息,清洗后转为数据资产">
+    <PageHeader :title="filename || '加载中...'" size="small">
       <template #back>
         <Button aria-label="返回" @click="onBack">
           <IconArrowLeft :size="16" :stroke-width="1.5" />

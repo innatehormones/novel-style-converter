@@ -5,7 +5,7 @@
     </div>
     <div class="title-block">
       <div class="title-row">
-        <h2 class="title">{{ title }}</h2>
+        <h2 class="title" :class="size">{{ title }}</h2>
         <slot name="meta" />
       </div>
       <p v-if="subtitle" class="subtitle">{{ subtitle }}</p>
@@ -21,18 +21,15 @@ withDefaults(
   defineProps<{
     title: string;
     subtitle?: string;
+    /// default: 22px(列表页标题)。small: 18px(详情页 / 长文件名场景,
+    /// 字号小一点能让单行多装十几个字、减少 ellipsis 截断)。
+    size?: 'default' | 'small';
   }>(),
-  { subtitle: '' },
+  { subtitle: '', size: 'default' },
 );
 </script>
 
 <style scoped>
-/*
-  三栏布局:back / title-block / actions。
-  - align-items: center 让 34px 默认按钮与 ~29px 标题行(22px × 1.3)垂直居中,
-    行高稳定为 max(34, 29),不再被按钮撑开。
-  - title-block 是 grid 自身两行(title-row / subtitle),与外层三栏对齐方式独立。
-*/
 .page-header {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -65,6 +62,9 @@ withDefaults(
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.title.small {
+  font-size: 18px;
 }
 .subtitle {
   margin: 4px 0 0;
