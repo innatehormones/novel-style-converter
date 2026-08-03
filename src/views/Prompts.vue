@@ -70,6 +70,12 @@
         <Button kind="danger" @click="confirmDelete">确认删除</Button>
       </template>
     </Dialog>
+
+    <AlertDialog
+      v-model:open="alertOpen"
+      title="提示"
+      :message="alertMessage"
+    />
   </section>
 </template>
 
@@ -79,6 +85,7 @@ import Button from '../components/ui/Button.vue';
 import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
 import Dialog from '../components/ui/Dialog.vue';
+import AlertDialog from '../components/ui/AlertDialog.vue';
 import PromptEditDialog from '../components/PromptEditDialog.vue';
 import PromptViewDialog from '../components/PromptViewDialog.vue';
 import { usePromptsStore } from '../stores/prompts';
@@ -109,6 +116,8 @@ interface PendingDelete {
 }
 const confirmOpen = ref(false);
 const pendingDelete = ref<PendingDelete | null>(null);
+const alertOpen = ref(false);
+const alertMessage = ref('');
 
 onMounted(() => void store.load());
 
@@ -161,7 +170,8 @@ async function confirmDelete() {
   try {
     await store.remove(pending.id);
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    alertMessage.value = e instanceof Error ? e.message : String(e);
+    alertOpen.value = true;
   }
 }
 </script>
