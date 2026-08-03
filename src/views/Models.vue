@@ -37,6 +37,15 @@
       :initial="dialogInitial"
       @submit="onSubmit"
     />
+
+    <ConfirmDialog
+      v-model:open="deleteConfirmOpen"
+      title="删除模型"
+      message="确认删除这个模型?"
+      kind="danger"
+      confirm-text="删除"
+      @confirm="doDelete"
+    />
   </section>
 </template>
 
@@ -44,6 +53,7 @@
 import { onMounted, ref } from 'vue';
 import Button from '../components/ui/Button.vue';
 import Table from '../components/ui/Table.vue';
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import ModelDialog from '../components/ModelDialog.vue';
 import { useModelsStore } from '../stores/models';
 import type { ModelConfigInput } from '../ipc/types';
@@ -51,6 +61,8 @@ import type { ModelConfigInput } from '../ipc/types';
 const store = useModelsStore();
 const dialogOpen = ref(false);
 const dialogInitial = ref<ModelConfigInput | null>(null);
+const deleteConfirmOpen = ref(false);
+const deleteTargetId = ref<number | null>(null);
 
 const columns = [
   { key: 'id', title: 'id', width: '60px' },
@@ -77,7 +89,13 @@ async function onSubmit(input: ModelConfigInput) {
 }
 
 async function onDelete(id: number) {
-  if (!confirm('确认删除这个模型?')) return;
+  deleteTargetId.value = id;
+  deleteConfirmOpen.value = true;
+}
+
+async function doDelete() {
+  const id = deleteTargetId.value;
+  if (id == null) return;
   await store.remove(id);
 }
 </script>
