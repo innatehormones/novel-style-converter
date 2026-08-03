@@ -99,7 +99,7 @@ const columns = [
   { key: 'name', title: '名称', width: '240px' },
   { key: 'kind', title: '类型', width: '100px' },
   { key: 'builtin', title: '来源', width: '120px' },
-  { key: 'actions', title: '操作', width: '280px' },
+  { key: 'actions', title: '操作', width: '280px', type: 'actions' as const },
 ];
 
 const dialogOpen = ref(false);

@@ -69,7 +69,7 @@ const columns = [
   { key: 'name', title: '名称', width: '160px' },
   { key: 'model', title: '模型', width: '160px' },
   { key: 'base_url', title: 'Base URL' },
-  { key: 'actions', title: '操作', width: '180px' },
+  { key: 'actions', title: '操作', width: '180px', type: 'actions' as const },
 ];
 
 onMounted(() => store.load());

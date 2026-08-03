@@ -195,7 +195,7 @@ const uploadColumns = [
   { key: 'size', title: '大小', width: '100px' },
   { key: 'words', title: '字数', width: '100px' },
   { key: 'uploaded', title: '上传时间', width: '180px' },
-  { key: 'actions', title: '操作', width: '260px' },
+  { key: 'actions', title: '操作', width: '260px', type: 'actions' as const },
 ];
 
 const daColumns = [
@@ -204,7 +204,7 @@ const daColumns = [
   { key: 'words', title: '字数', width: '100px' },
   { key: 'status', title: '状态', width: '120px' },
   { key: 'parsed', title: '解析时间', width: '180px' },
-  { key: 'actions', title: '操作', width: '200px' },
+  { key: 'actions', title: '操作', width: '200px', type: 'actions' as const },
 ];
 
 const tnColumns = [
@@ -212,7 +212,7 @@ const tnColumns = [
   { key: 'title', title: '标题', width: '220px' },
   { key: 'source', title: '源', width: '240px' },
   { key: 'created', title: '创建时间', width: '180px' },
-  { key: 'actions', title: '操作', width: '280px' },
+  { key: 'actions', title: '操作', width: '280px', type: 'actions' as const },
 ];
 
 onMounted(() => store.load());
