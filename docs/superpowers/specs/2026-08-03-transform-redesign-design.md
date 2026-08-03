@@ -258,21 +258,32 @@ pub enum ResumeAction {
                         ▼
              ┌──────────────────────┐
              │       Running        │ ◀────────────────┐
-             └─┬────────┬────────┬──┘                  │
-               │        │        │                    │ resume(Retry|Skip)
-   ch='failed' │        │        │ ch='failed' &     │
-   & skip_failed│       │        │ pause_and_review   │
-               ▼        ▼        ▼                    │
-   ┌────────────────┐ ┌─────────┐ ┌──────────┐       │
-   │ ch:Skipped     │ │Completed│ │ Paused   │───────┘
-   │ (留 Running)   │ │(末章完) │ └────┬─────┘
-   └────────────────┘ └─────────┘      │
-                                        │ resume(Terminate)
-                                        ▼
-                                ┌──────────────┐
-                                │ Terminated   │
-                                └──────────────┘
+             └──┬────┬────┬────┬────┘                  │
+                │    │    │    │                       │ resume(Retry|Skip)
+       skip_failed │    │   │ pause_and_review          │
+                  │    │    │   │                       │
+                  │    │   │    ▼                       │
+                  │   末章  │ ┌──────────┐              │
+                  │   done  │ │ Paused   │─────────────┘
+                  │    │    │ └────┬─────┘
+                  │    ▼    │      │ resume(Terminate)
+                  │ ┌─────┐ │      ▼
+                  │ │Compl.│ │ ┌──────────────┐
+                  │ │ eted │ │ │ Terminated   │
+                  │ └─────┘ │ └──────────────┘
+                  ▼ (ch=failed & skip_failed)
+            ┌────────────────┐
+            │ ch:Skipped     │
+            │ (留 Running)   │
+            └────────────────┘
+                       ▲
+                       │
+                  on_failure_policy=skip_failed:
+                  ch 标 skipped, 继续 dispatch; batch 留 Running
+                  （见 §5.6）
 ```
+
+**补充**：`ch='failed' & terminate` 触发时 batch 直接到 `Terminated`（同 batch 后续章节 cancelled）；路径图省略以保持可读性，语义见 §5.6。
 
 ### 5.4 chapter 状态机（变更）
 
@@ -292,8 +303,8 @@ Backend:
   2. scheduler.create_batch():
        对每个 chapter_ids[i]:
          INSERT tc row (新 batch 内) 已完成
-         计算 frontier_for(chapter_id_i)   // 见 §5.7
-         计算 style_ref_for(chapter_id_i)  // 见 §5.8
+         计算 frontier_for(chapter_id_i)   // 见 §5.8
+         计算 style_ref_for(chapter_id_i)  // 见 §5.9
          UPDATE batches SET started_at=NOW WHERE id=batch_id  // 首章 dispatch 时
          UPDATE batches SET status='running' WHERE id=batch_id
          JobQueue.enqueue(NewTransformationChapter { ... 已有 9 列, batch_id, style_ref_chapter_id })
@@ -557,7 +568,7 @@ export const useBatchesStore = defineStore('batches', () => {
 | 3. **chapter batch_id 接入** | migration 增 2 列 + `NewTransformationChapter` 增字段 + 现有 enqueue stamp batch_id | cargo test transformer |
 | 4. **BatchScheduler 核心** | `batch_scheduler.rs` 模块 + lib.rs 接线 + frontier SQL + style_ref SQL + JobQueue on-finish 回调接通 | cargo test scheduler + transformer |
 | 5. **on_failure_policy + resume** | chapter Skipped 状态 + paused 路径 + `resume_batch` IPC + UI 工作流 panel 的 retry/skip/terminate 按钮 | cargo test scheduler + vitest batches |
-| 6. **TN 详情页骨架** | 路由 + `TransformationNovelDetail.vue` 两 tab + Library "详情" 入口 + 5s 轮询 + paused 顶部红条 | vitest 组件 |
+| 6. **TN 详情页骨架** | 路由 + `TransformationNovelDetail.vue` 两 tab + Library "详情" 入口 + 5s 轮询 + paused 顶部红条 | vitest 组件快照（项目首批 vue-test 模式，DI library 不在此引入） |
 
 ---
 
