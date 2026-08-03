@@ -24,7 +24,7 @@
   "app": {
     "windows": [
       {
-        "title": "novel-style-converter",
+        "title": "小说风格转换器",
         "width": 1024,
         "height": 720,
         "resizable": true,
