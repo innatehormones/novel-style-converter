@@ -29,7 +29,8 @@
         <span v-else class="muted">用户</span>
       </template>
       <template #cell-actions="{ row }">
-        <Button size="small" :disabled="row.is_builtin" @click="openEdit(row)">编辑</Button>
+        <Button v-if="row.is_builtin" size="small" @click="openView(row)">查看</Button>
+        <Button v-else size="small" @click="openEdit(row)">编辑</Button>
         <Button size="small" @click="openCopy(row)">复制</Button>
         <Button
           size="small"
@@ -45,6 +46,12 @@
       :mode="dialogMode"
       :initial="dialogInitial"
       @saved="onSaved"
+    />
+
+    <PromptViewDialog
+      v-if="viewTarget"
+      v-model:open="viewOpen"
+      :initial="viewTarget"
     />
 
     <Dialog
@@ -73,6 +80,7 @@ import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
 import Dialog from '../components/ui/Dialog.vue';
 import PromptEditDialog from '../components/PromptEditDialog.vue';
+import PromptViewDialog from '../components/PromptViewDialog.vue';
 import { usePromptsStore } from '../stores/prompts';
 import type { Prompt } from '../ipc/types';
 
@@ -90,6 +98,9 @@ const columns = [
 const dialogOpen = ref(false);
 const dialogMode = ref<DialogMode>('create');
 const dialogInitial = ref<Prompt | undefined>(undefined);
+
+const viewOpen = ref(false);
+const viewTarget = ref<Prompt | null>(null);
 
 interface PendingDelete {
   id: number;
@@ -111,6 +122,11 @@ function openEdit(row: Prompt) {
   dialogMode.value = 'edit';
   dialogInitial.value = row;
   dialogOpen.value = true;
+}
+
+function openView(row: Prompt) {
+  viewTarget.value = row;
+  viewOpen.value = true;
 }
 
 function openCopy(row: Prompt) {
