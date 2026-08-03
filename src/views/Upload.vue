@@ -3,10 +3,6 @@
     <header class="header">
       <Button @click="onBack">← 返回</Button>
       <h2>{{ filename || '加载中...' }}</h2>
-      <div class="tags">
-        <Tag>实体文件</Tag>
-        <Tag v-if="hasDataAsset" kind="success">已解析</Tag>
-      </div>
       <Button :loading="saving" :disabled="!dirty || hasDataAsset" :title="hasDataAsset ? '原文已有关联数据资产,无法修改。请先在数据资产页删除。' : ''" @click="save">保存</Button>
       <Button
         :disabled="uploadId == null || dirty || hasDataAsset"
@@ -16,8 +12,14 @@
       <Button kind="primary" :disabled="uploadId == null || dirty" @click="goParse">转为数据资产</Button>
     </header>
     <div v-if="error" class="alert">{{ error }}</div>
-    <div v-if="uploadId != null" class="meta-strip" :title="metaTooltip">
-      {{ mbSize }} MB · {{ lineCount }} 行 · {{ charCount }} 字
+    <div v-if="uploadId != null" class="meta-strip">
+      <div class="tags">
+        <Tag>实体文件</Tag>
+        <Tag v-if="hasDataAsset" kind="success">已解析</Tag>
+      </div>
+      <span class="meta-text" :title="metaTooltip">
+        {{ mbSize }} MB · {{ lineCount }} 行 · {{ charCount }} 字
+      </span>
     </div>
     <div class="body">
       <textarea
@@ -182,19 +184,22 @@ function onCleaningConfirm(cleanedText: string) {
   font-size: 16px;
   font-weight: var(--font-weight-medium);
 }
+.meta-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+}
 .tags {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.meta-strip {
+.meta-text {
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
   cursor: default;
-  padding: 6px 0;
-  display: flex;
-  justify-content: flex-end;
 }
 .body {
   display: flex;
