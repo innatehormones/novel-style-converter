@@ -1,9 +1,17 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import Icons from 'unplugin-icons/vite';
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    Icons({
+      compiler: 'vue3',
+      // 只打包 lucide,其它图标集不引进来。
+      collections: ['lucide'],
+    }),
+  ],
   clearScreen: false,
   server: {
     host: 'localhost',

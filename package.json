@@ -21,12 +21,14 @@
     "vue-virtual-scroller": "2.0.0-beta.8"
   },
   "devDependencies": {
+    "@iconify-json/lucide": "^1.2.121",
     "@playwright/test": "^1.50.0",
     "@tauri-apps/cli": "^2.0.0",
     "@vitejs/plugin-vue": "^5.2.0",
     "@vue/test-utils": "^2.4.0",
     "happy-dom": "^15.0.0",
     "typescript": "^5.6.0",
+    "unplugin-icons": "^23.0.1",
     "vite": "^6.0.0",
     "vitest": "^2.1.0",
     "vue-tsc": "^2.2.0"
