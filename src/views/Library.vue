@@ -53,7 +53,7 @@
         <template #cell-parsed="{ row }">{{ formatTime(row.parsed_at) }}</template>
         <template #cell-actions="{ row }">
           <Button size="small" @click="goDataAsset(row.id)">打开</Button>
-          <Button size="small" :disabled="!!row.locked_at" @click="openCreateTn(row.id)">新建转换</Button>
+          <Button size="small" @click="openCreateTn(row.id)">新建转换</Button>
           <Button size="small" kind="danger" :disabled="!!row.locked_at" :title="row.locked_at ? 'data_asset 已锁定,无法删除' : ''" @click="onDeleteDa(row.id, row.title)">删除</Button>
         </template>
       </Table>
