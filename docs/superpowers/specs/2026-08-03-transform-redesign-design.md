@@ -327,6 +327,19 @@ on_chapter_failed(batch, ch, err):
       取 batch 中下一个 chapter → dispatch 同 on_chapter_done 流程（仍 Running）
 ```
 
+**§5.6.1 Completed 判据（在 on_chapter_done / on_chapter_failed 末尾检查）**
+
+```
+batch → completed 当且仅当:
+  - 批次内不存在 status ∈ {pending, running, failed} 的 chapter 行
+  - 且至少一行 status = 'done'
+batch → terminated 当且仅当:
+  - 批次内不存在 status ∈ {pending, running, failed} 的 chapter 行
+  - 且全无 status = 'done'（整批全部 cancelled / skipped）
+```
+
+即："完成" = 至少 1 章真转换成功；"终止（按 §5.6 Terminate 路径）"已显式设定。其他边界（skip_failed 最后 1 章失败 → 0 done）由 §5.6.1 落到 Terminated；UI 上会有警示"批号未真发生转换"。
+
 ### 5.7 数据流 · Resume
 
 ```
