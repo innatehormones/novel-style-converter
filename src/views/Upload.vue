@@ -1,8 +1,12 @@
 <template>
   <section class="upload">
     <header class="header">
+      <Button @click="onBack">← 返回</Button>
       <h2>{{ filename || '加载中...' }}</h2>
       <span class="badge">实体文件</span>
+      <span v-if="uploadId != null" class="meta-inline" :title="metaTooltip">
+        {{ byteSize }} 字节 · {{ lineCount }} 行 · {{ charCount }} 字
+      </span>
       <Button :loading="saving" :disabled="!dirty || hasDataAsset" :title="hasDataAsset ? '原文已有关联数据资产,无法修改。请先在数据资产页删除。' : ''" @click="save">保存</Button>
       <Button
         :disabled="uploadId == null || dirty || hasDataAsset"
@@ -19,12 +23,6 @@
         spellcheck="false"
         :readonly="hasDataAsset"
       />
-      <aside class="meta">
-        <div>SHA256: <code>{{ sha256 || '—' }}</code></div>
-        <div>字节数: {{ byteSize }}</div>
-        <div>行数: {{ lineCount }}</div>
-        <div>字符数: {{ charCount }}</div>
-      </aside>
     </div>
     <CleaningDialog
       v-model:open="cleaningOpen"
@@ -100,6 +98,11 @@ onMounted(async () => {
 const dirty = computed(() => rawText.value !== savedText.value);
 const lineCount = computed(() => rawText.value.split(/\r\n|\n|\r/).length);
 const charCount = computed(() => [...rawText.value].length);
+const metaTooltip = computed(() => (sha256.value ? `SHA256: ${sha256.value}` : ''));
+
+function onBack() {
+  void router.push('/uploads');
+}
 
 async function save() {
   if (uploadId.value == null || !dirty.value) return;
@@ -167,6 +170,10 @@ function onCleaningConfirm(cleanedText: string) {
 .header h2 {
   margin: 0;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 16px;
   font-weight: var(--font-weight-medium);
 }
@@ -176,6 +183,12 @@ function onCleaningConfirm(cleanedText: string) {
   border-radius: 4px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+.meta-inline {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: default;
 }
 .body {
   display: flex;
@@ -198,23 +211,6 @@ function onCleaningConfirm(cleanedText: string) {
 }
 .raw:focus {
   border-color: var(--border-strong);
-}
-.meta {
-  width: 220px;
-  padding: 12px;
-  background: var(--color-sheet);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-pin);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.meta code {
-  font-size: 11px;
-  word-break: break-all;
-  color: var(--text-primary);
 }
 .alert {
   margin-top: 12px;
