@@ -3,7 +3,10 @@
     <header class="header">
       <Button @click="onBack">← 返回</Button>
       <h2>{{ filename || '加载中...' }}</h2>
-      <span class="badge">实体文件</span>
+      <div class="tags">
+        <Tag>实体文件</Tag>
+        <Tag v-if="hasDataAsset" kind="success">已解析</Tag>
+      </div>
       <Button :loading="saving" :disabled="!dirty || hasDataAsset" :title="hasDataAsset ? '原文已有关联数据资产,无法修改。请先在数据资产页删除。' : ''" @click="save">保存</Button>
       <Button
         :disabled="uploadId == null || dirty || hasDataAsset"
@@ -49,6 +52,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Button from '../components/ui/Button.vue';
+import Tag from '../components/ui/Tag.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import { getUpload, getUploadText, updateUploadText, findDataAssetByUpload } from '../ipc/commands';
@@ -178,12 +182,10 @@ function onCleaningConfirm(cleanedText: string) {
   font-size: 16px;
   font-weight: var(--font-weight-medium);
 }
-.badge {
-  padding: 2px 8px;
-  background: var(--bg-hover);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--text-secondary);
+.tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .meta-strip {
   font-size: 12px;
