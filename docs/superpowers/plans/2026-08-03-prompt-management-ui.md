@@ -1350,3 +1350,29 @@ Expected: Vite 启动无错(在浏览器打开 http://localhost:43801 看 `/prom
   - `upsert_prompt` 分支条件 `payload.id == 0` (Task 2) 与 store `upsert` 调用 (Task 6) 与 dialog `id = mode === 'create' ? 0 : initial.id` (Task 7) 一致
 
 - [x] **依赖顺序:** T1(repo) → T2(commands.rs) → T3(注册) → T4(types) → T5(wrapper 测试 + impl) → T6(store 测试 + impl) → T7(dialog) → T8(view) → T9(router) → T10(sidebar) → T11(verify)
+
+---
+
+## 实现背离(post-plan commits)
+
+本计划执行完后,后续 UI 一致性重构覆盖了 Task 7 (Prompts.vue 顶部 header) 与 Task 10 (Sidebar.vue icon 渲染) 的实现细节。计划文件保留作为历史记录,实际代码以现 commit 为准。
+
+### 1. Task 10 — Sidebar 图标从 inline SVG 切换为 lucide
+
+- **计划写法**(1223-1277 行):Sidebar 用 `template v-else-if="item.icon === 'prompt'"` 写 inline SVG 分支,`Item.icon` 是字符串联合 `'upload' | 'data' | 'convert' | 'prompt' | 'model'`
+- **实际写法**(commit `1a8df40`):改用 `unplugin-icons` + `@iconify-json/lucide`,`Item.icon` 变成 `Component` 类型,模板统一 `<component :is="item.icon" :size="16" :stroke-width="1.5" />`,`markRaw()` 防止组件被包成 reactive proxy
+- **配套改动**:`vite.config.ts` 加 `Icons({ compiler: 'vue3', collections: ['lucide'] })`,新增 `src/types/icons.d.ts` 给 `~icons/*` shim
+- **影响范围**:Sidebar 7 个图标 (upload / database / repeat / file-text / box / sun / moon),Upload / DataAsset 的返回按钮 `← 返回` 文字版换成 `<IconArrowLeft>` 图标版 (commit `f4342e7`)
+- **意图**:vite 编译期按需生成图标组件 + tree-shake,避免手写 SVG 同步成本
+
+### 2. Task 7 — Prompts.vue 顶部 header 收敛到 PageHeader 组件
+
+- **计划写法**(957-962、1103-1111 行):`<header class="header"><h2>提示词</h2><div class="actions"><Button kind="primary">新建 prompt</Button></div></header>` + 视图内 scoped `.header` / `.header h2` / `.actions` CSS
+- **实际写法**(commit `de79c58`):迁到 `<PageHeader title="提示词" subtitle="...">` 通用组件
+- **PageHeader 组件**:三栏 grid (`auto 1fr auto`),槽位 `#back` / `#meta` / `#actions`,prop `title` / `subtitle` / `size`(default 22px / small 18px)。同次 commit 还覆盖了 Library / Upload / DataAsset / Models / parse 五个视图的 header,统一标题字号 / 字重 / 边框 / 对齐
+- **后续微调**(commit `2d71b6a`):详情页(Upload / DataAsset)加 `size="small"`(18px,长文件名单行多装十几个字),并去掉冗余副标题;列表页(Library / Models / Prompts / parse)保持 default 22px + 副标题
+- **意图**:6 个视图的 header 各写一套样式导致字号 22/24/28px 不一致、Models 误用 `--border-rouge` 分隔线、大按钮把行高撑开。统一后 CSS 总量 -1 KB
+
+### 计划里其他仍准确的部分
+
+- Task 1-9 的后端命令、IPC wrapper、store、router、dialog、view 实现与最终代码一致,只有 UI 渲染层 (Task 7 / Task 10) 被上述重构覆盖

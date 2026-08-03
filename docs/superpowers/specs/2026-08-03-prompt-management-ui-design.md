@@ -297,3 +297,19 @@ Props:
 4. 手工跑:`pnpm tauri dev`,访问 `/prompts`,能看到 2 个 builtin + 可新建 / 编辑 / 删除 / 复制
 5. 删除一个有 history 引用计数的 prompt,confirm 弹"被 N 个转换结果引用",确认后删成功,刷新列表不再显示
 6. 未引用 `{{chapter_content}}` 的 prompt,dialog 底部显示黄字警告
+
+---
+
+## 实现背离(spec / plan 写成后被替换的部分)
+
+Spec 在 2026-08-03 写时,Sidebar 图标与 Prompts 顶部 header 的写法如下:
+
+- **41 行**:`src/components/Sidebar.vue` 加一项 `prompts: { label: '提示词', icon: <PromptIcon> }`
+- **194 行**:顶 `<header>`:`<h2>提示词</h2>` + `<Button kind="primary">新建 prompt</Button>`
+
+后续 UI 一致性重构把这两处都替换掉了,实际代码与 spec 描述不再一致:
+
+- Sidebar 不再有手写 `<PromptIcon>` 组件 — 改用 `unplugin-icons` + `~icons/lucide/file-text`,Sidebar 7 个图标统一换成 lucide(commit `1a8df40`)
+- Prompts 顶部 header 收敛到通用 `<PageHeader>` 组件,与 Library / Upload / DataAsset / Models / parse 五个视图一起对齐(commit `de79c58`)。PageHeader 加了 `size="small"` 给详情页用(commit `2d71b6a`)
+
+详见 `docs/superpowers/plans/2026-08-03-prompt-management-ui.md` 的 "实现背离" 一节。
