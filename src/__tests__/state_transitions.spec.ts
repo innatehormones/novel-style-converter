@@ -43,6 +43,10 @@ describe('State 1 → 2 transition via parse.vue → DataAsset.vue', () => {
           ];
         case 'get_data_asset_content':
           return fullText;
+        case 'list_data_assets':
+          return [
+            { id: 42, upload_id: 7, title: '第一卷', parsed_at: '2026-07-29T00:00:00Z', locked_at: null, filename: 'novel.txt', byte_size: fullBytes, word_count: 8 },
+          ];
         default:
           throw new Error(`unexpected cmd: ${cmd}`);
       }
@@ -111,6 +115,9 @@ describe('State 1 → 2 transition via parse.vue → DataAsset.vue', () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === 'list_data_asset_chapters') return chList;
       if (cmd === 'get_data_asset_content') return text;
+      if (cmd === 'list_data_assets') {
+        return [{ id: 1, upload_id: 0, title: 'multi', parsed_at: '2026-07-29T00:00:00Z', locked_at: null, filename: 'multi.txt', byte_size: text.length, word_count: 0 }];
+      }
       throw new Error(`unexpected cmd: ${cmd}`);
     });
 
