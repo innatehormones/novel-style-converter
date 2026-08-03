@@ -6,14 +6,14 @@
       <span class="badge" :class="{ locked: !!store.lockedAt }">
         {{ store.lockedAt ? '已锁定' : '已解析' }}
       </span>
-      <span v-if="store.parsedAt" class="src">{{ store.parsedAt }}</span>
+      <span v-if="store.parsedAt" class="src">{{ formatTime(store.parsedAt) }}</span>
       <Button
         class="del-btn"
         kind="danger"
         :disabled="!!store.lockedAt"
-        :title="store.lockedAt ? 'data_asset 已锁定,无法删除' : ''"
+        :title="store.lockedAt ? '数据资产已锁定,无法删除' : ''"
         @click="onDelete"
-      >删除 data_asset</Button>
+      >删除资产</Button>
     </header>
 
     <div v-if="store.error" class="alert">{{ store.error }}</div>
@@ -57,6 +57,7 @@ import { RecycleScroller } from 'vue-virtual-scroller';
 import Button from '../components/ui/Button.vue';
 import { useDataAssetStore } from '../stores/dataAsset';
 import { useLibraryStore } from '../stores/library';
+import { formatTime } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
@@ -104,12 +105,17 @@ function onBack() {
   gap: 12px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-color);
+  min-width: 0;
 }
 .header h2 {
   margin: 0;
   flex: 1;
   font-size: 16px;
   font-weight: var(--font-weight-medium);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .badge {
   padding: 2px 8px;
