@@ -126,6 +126,21 @@
         <Button kind="primary" :disabled="!pendingTitle.trim()" @click="confirmCommit">确认</Button>
       </template>
     </Dialog>
+
+    <ConfirmDialog
+      v-model:open="resplitConfirmOpen"
+      title="重新解析"
+      message="丢弃已保存的章节,重新走 splitter?"
+      kind="danger"
+      confirm-text="重新切分"
+      @confirm="doResplit"
+    />
+
+    <AlertDialog
+      v-model:open="alertOpen"
+      title="提示"
+      :message="alertMessage"
+    />
   </section>
 </template>
 
@@ -136,6 +151,8 @@ import { DynamicScroller, DynamicScrollerItem, RecycleScroller } from 'vue-virtu
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
 import Button from '../components/ui/Button.vue';
 import Dialog from '../components/ui/Dialog.vue';
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
+import AlertDialog from '../components/ui/AlertDialog.vue';
 import MarkerButton from '../components/MarkerButton.vue';
 import { useChaptersStore } from '../stores/chapters';
 import { useChapterSearch } from '../composables/useChapterSearch';
@@ -158,6 +175,10 @@ const mergeDialogOpen = computed({
 
 const commitDialogOpen = ref(false);
 const pendingTitle = ref('');
+
+const resplitConfirmOpen = ref(false);
+const alertOpen = ref(false);
+const alertMessage = ref('');
 
 const lines = computed(() => store.rawLines);
 const markerSet = computed(() => new Set(store.markers));
@@ -251,7 +272,10 @@ function onReset() {
 }
 
 async function onResplit() {
-  if (!window.confirm('丢弃已保存的章节,重新走 splitter?')) return;
+  resplitConfirmOpen.value = true;
+}
+
+async function doResplit() {
   await store.reSplit();
 }
 
@@ -273,7 +297,8 @@ async function confirmCommit() {
     const newDataAssetId = await store.commit(title);
     void router.push(`/library/data/${newDataAssetId}`);
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    alertMessage.value = e instanceof Error ? e.message : String(e);
+    alertOpen.value = true;
   } finally {
     committing.value = false;
   }
