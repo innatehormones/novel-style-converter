@@ -1,11 +1,10 @@
 <template>
   <section>
-    <header class="header">
-      <h2>模型</h2>
-      <div class="actions">
+    <PageHeader title="模型" subtitle="OpenAI 兼容 API 配置,可在此新增 / 编辑">
+      <template #actions>
         <Button kind="primary" @click="openCreate">新增模型</Button>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <div v-if="store.error" class="alert">{{ store.error }}</div>
 
@@ -52,6 +51,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import Button from '../components/ui/Button.vue';
+import PageHeader from '../components/ui/PageHeader.vue';
 import Table from '../components/ui/Table.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import ModelDialog from '../components/ModelDialog.vue';
@@ -101,21 +101,6 @@ async function doDelete() {
 </script>
 
 <style scoped>
-.header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border-rouge);
-}
-.header h2 {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: 28px;
-  letter-spacing: -0.01em;
-}
-.actions { display: flex; gap: 12px; align-items: center; }
 .alert {
   padding: 12px 16px;
   background: var(--danger-bg);

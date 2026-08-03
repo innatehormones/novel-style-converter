@@ -1,8 +1,7 @@
 <template>
   <section class="chapters">
-    <header class="header">
-      <h2>章节解析</h2>
-      <div class="actions">
+    <PageHeader title="章节解析" subtitle="调整章节 marker,提交为数据资产">
+      <template #actions>
         <Button @click="onReset" :disabled="!store.dirty">重置 marker</Button>
         <Button
           v-if="store.committed && !store.dirty"
@@ -10,8 +9,8 @@
           @click="onResplit"
         >重新切分</Button>
         <Button kind="primary" :loading="committing" :disabled="committing || store.workingChapters.length === 0" @click="onCommit">保存为数据资产</Button>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <div v-if="store.error" class="alert">{{ store.error }}</div>
     <div v-else-if="store.committed && !store.dirty" class="info">
@@ -151,6 +150,7 @@ import { DynamicScroller, DynamicScrollerItem, RecycleScroller } from 'vue-virtu
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
 import Button from '../components/ui/Button.vue';
 import Dialog from '../components/ui/Dialog.vue';
+import PageHeader from '../components/ui/PageHeader.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import MarkerButton from '../components/MarkerButton.vue';
@@ -311,16 +311,6 @@ async function confirmCommit() {
   flex-direction: column;
   height: 100%;
 }
-.header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border-color);
-}
-.header h2 { margin: 0; }
-.actions { display: flex; gap: 12px; align-items: center; }
 .alert {
   padding: 12px 16px;
   background: var(--bg-hover);

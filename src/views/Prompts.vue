@@ -1,11 +1,10 @@
 <template>
   <section>
-    <header class="header">
-      <h2>提示词</h2>
-      <div class="actions">
+    <PageHeader title="提示词" subtitle="压缩与文风转换的 prompt 模板,内置 / 自定义均可">
+      <template #actions>
         <Button kind="primary" @click="openCreate">新建 prompt</Button>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <div v-if="store.error" class="alert">{{ store.error }}</div>
 
@@ -86,6 +85,7 @@ import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
 import Dialog from '../components/ui/Dialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
+import PageHeader from '../components/ui/PageHeader.vue';
 import PromptEditDialog from '../components/PromptEditDialog.vue';
 import PromptViewDialog from '../components/PromptViewDialog.vue';
 import { usePromptsStore } from '../stores/prompts';
@@ -177,20 +177,6 @@ async function confirmDelete() {
 </script>
 
 <style scoped>
-.header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-color);
-}
-.header h2 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: var(--font-weight-medium);
-}
-.actions { display: flex; gap: 12px; align-items: center; }
 .alert {
   padding: 12px 16px;
   background: var(--bg-hover);

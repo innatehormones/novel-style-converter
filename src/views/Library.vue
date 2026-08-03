@@ -1,11 +1,10 @@
 <template>
   <section>
-    <header class="header">
-      <h2>{{ pageTitle }}</h2>
-      <div v-if="page === 'uploads'" class="actions">
-        <Button kind="primary" :loading="store.uploading" @click="uploadDialogOpen = true">上传 .txt</Button>
-      </div>
-    </header>
+    <PageHeader :title="pageTitle" subtitle="在这里管理上传文件、解析后的数据资产与转换小说">
+      <template #actions>
+        <Button v-if="page === 'uploads'" kind="primary" :loading="store.uploading" @click="uploadDialogOpen = true">上传 .txt</Button>
+      </template>
+    </PageHeader>
 
     <div v-if="store.error" class="alert">{{ store.error }}</div>
 
@@ -142,6 +141,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Button from '../components/ui/Button.vue';
 import Input from '../components/ui/Input.vue';
+import PageHeader from '../components/ui/PageHeader.vue';
 import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
 import UploadDialog from '../components/UploadDialog.vue';
@@ -343,20 +343,6 @@ function goParse(uploadId: number) {
 </script>
 
 <style scoped>
-.header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-color);
-}
-.header h2 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: var(--font-weight-medium);
-}
-.actions { display: flex; gap: 12px; align-items: center; }
 .alert {
   padding: 12px 16px;
   background: var(--bg-hover);

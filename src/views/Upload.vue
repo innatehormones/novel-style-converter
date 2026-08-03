@@ -1,16 +1,19 @@
 <template>
   <section class="upload">
-    <header class="header">
-      <Button @click="onBack">← 返回</Button>
-      <h2>{{ filename || '加载中...' }}</h2>
-      <Button :loading="saving" :disabled="!dirty || hasDataAsset" :title="hasDataAsset ? '原文已有关联数据资产,无法修改。请先在数据资产页删除。' : ''" @click="save">保存</Button>
-      <Button
-        :disabled="uploadId == null || dirty || hasDataAsset"
-        :title="hasDataAsset ? '数据资产已存在,请先在数据资产页删除再清洗(清洗会改变原文字节数,但 chapters.byte_range 不会自动重算)' : ''"
-        @click="openCleaning"
-      >清洗</Button>
-      <Button kind="primary" :disabled="uploadId == null || dirty" @click="goParse">转为数据资产</Button>
-    </header>
+    <PageHeader :title="filename || '加载中...'" subtitle="查看原文与字节元信息,清洗后转为数据资产">
+      <template #back>
+        <Button @click="onBack">← 返回</Button>
+      </template>
+      <template #actions>
+        <Button :loading="saving" :disabled="!dirty || hasDataAsset" :title="hasDataAsset ? '原文已有关联数据资产,无法修改。请先在数据资产页删除。' : ''" @click="save">保存</Button>
+        <Button
+          :disabled="uploadId == null || dirty || hasDataAsset"
+          :title="hasDataAsset ? '数据资产已存在,请先在数据资产页删除再清洗(清洗会改变原文字节数,但 chapters.byte_range 不会自动重算)' : ''"
+          @click="openCleaning"
+        >清洗</Button>
+        <Button kind="primary" :disabled="uploadId == null || dirty" @click="goParse">转为数据资产</Button>
+      </template>
+    </PageHeader>
     <div v-if="error" class="alert">{{ error }}</div>
     <div v-if="uploadId != null" class="meta-strip">
       <div class="tags">
@@ -55,6 +58,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Button from '../components/ui/Button.vue';
 import Tag from '../components/ui/Tag.vue';
+import PageHeader from '../components/ui/PageHeader.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import { getUpload, getUploadText, updateUploadText, findDataAssetByUpload } from '../ipc/commands';
@@ -166,23 +170,6 @@ function onCleaningConfirm(cleanedText: string) {
   display: flex;
   flex-direction: column;
   height: 100%;
-}
-.header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-color);
-}
-.header h2 {
-  margin: 0;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 16px;
-  font-weight: var(--font-weight-medium);
 }
 .meta-strip {
   display: flex;
