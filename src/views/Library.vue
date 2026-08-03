@@ -25,9 +25,7 @@
         <template #cell-uploaded="{ row }">{{ formatTime(row.uploaded_at) }}</template>
         <template #cell-actions="{ row }">
           <Button size="small" @click="goUpload(row.id)">查看</Button>
-          <Button size="small" :disabled="hasDataAsset(row.id)" @click="goParse(row.id)">
-            {{ hasDataAsset(row.id) ? '解析已存在' : '解析章节' }}
-          </Button>
+          <Button v-if="!hasDataAsset(row.id)" size="small" @click="goParse(row.id)">解析章节</Button>
           <Button size="small" kind="danger" @click="onDeleteUpload(row.id, row.filename)">删除</Button>
         </template>
       </Table>
