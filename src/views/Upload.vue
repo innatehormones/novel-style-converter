@@ -31,6 +31,19 @@
       :source-text="rawText"
       @confirm="onCleaningConfirm"
     />
+
+    <ConfirmDialog
+      v-model:open="resplitConfirmOpen"
+      title="重新解析"
+      message="清洗会破坏现有章节范围,需要重新解析。是否继续?"
+      @confirm="doOpenCleaning"
+    />
+
+    <AlertDialog
+      v-model:open="alertOpen"
+      :title="alertTitle"
+      :message="alertMessage"
+    />
   </section>
 </template>
 
@@ -38,6 +51,8 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Button from '../components/ui/Button.vue';
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
+import AlertDialog from '../components/ui/AlertDialog.vue';
 import { getUpload, getUploadText, updateUploadText, findDataAssetByUpload } from '../ipc/commands';
 import CleaningDialog from '../components/CleaningDialog.vue';
 
@@ -53,6 +68,10 @@ const saving = ref(false);
 const error = ref<string | null>(null);
 const cleaningOpen = ref(false);
 const hasDataAsset = ref(false);
+const resplitConfirmOpen = ref(false);
+const alertOpen = ref(false);
+const alertTitle = ref('提示');
+const alertMessage = ref('');
 
 onMounted(async () => {
   const id = Number(route.params.uploadId);
@@ -104,18 +123,25 @@ function goParse() {
 async function openCleaning() {
   if (uploadId.value == null) return;
   if (rawText.value.length > 10 * 1024 * 1024) {
-    alert('文本过大,请先手动精简');
+    alertMessage.value = '文本过大,请先手动精简';
+    alertOpen.value = true;
     return;
   }
   try {
     const existing = await findDataAssetByUpload(uploadId.value);
     if (existing != null) {
-      if (!confirm('清洗会破坏现有章节范围,需要重新解析。是否继续?')) return;
+      resplitConfirmOpen.value = true;
+      return;
     }
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    alertMessage.value = e instanceof Error ? e.message : String(e);
+    alertOpen.value = true;
     return;
   }
+  cleaningOpen.value = true;
+}
+
+function doOpenCleaning() {
   cleaningOpen.value = true;
 }
 
