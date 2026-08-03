@@ -4,9 +4,6 @@
       <Button @click="onBack">← 返回</Button>
       <h2>{{ filename || '加载中...' }}</h2>
       <span class="badge">实体文件</span>
-      <span v-if="uploadId != null" class="meta-inline" :title="metaTooltip">
-        {{ byteSize }} 字节 · {{ lineCount }} 行 · {{ charCount }} 字
-      </span>
       <Button :loading="saving" :disabled="!dirty || hasDataAsset" :title="hasDataAsset ? '原文已有关联数据资产,无法修改。请先在数据资产页删除。' : ''" @click="save">保存</Button>
       <Button
         :disabled="uploadId == null || dirty || hasDataAsset"
@@ -16,6 +13,9 @@
       <Button kind="primary" :disabled="uploadId == null || dirty" @click="goParse">转为数据资产</Button>
     </header>
     <div v-if="error" class="alert">{{ error }}</div>
+    <div v-if="uploadId != null" class="meta-strip" :title="metaTooltip">
+      {{ byteSize }} 字节 · {{ lineCount }} 行 · {{ charCount }} 字
+    </div>
     <div class="body">
       <textarea
         v-model="rawText"
@@ -184,18 +184,19 @@ function onCleaningConfirm(cleanedText: string) {
   font-size: 12px;
   color: var(--text-secondary);
 }
-.meta-inline {
+.meta-strip {
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
   cursor: default;
+  padding: 6px 0;
 }
 .body {
   display: flex;
   gap: 16px;
   flex: 1;
   min-height: 0;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 .raw {
   flex: 1;
