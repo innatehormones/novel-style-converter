@@ -1,6 +1,7 @@
 <template>
   <section class="data-asset">
     <header class="header">
+      <Button @click="onBack">← 返回</Button>
       <h2>{{ store.title || '加载中...' }}</h2>
       <span class="badge" :class="{ locked: !!store.lockedAt }">
         {{ store.lockedAt ? '已锁定' : '已解析' }}
@@ -36,7 +37,6 @@
               <span class="idx">{{ index + 1 }}</span>
               <span class="title">{{ item.title }}</span>
               <span class="size">{{ item.word_count }} 字</span>
-              <Button size="small" class="open-tn" @click.stop="openTransform(item.id)">▶ 转换结果</Button>
             </div>
           </template>
         </RecycleScroller>
@@ -87,8 +87,8 @@ async function onDelete() {
   }
 }
 
-function openTransform(chapterId: number) {
-  void router.push(`/library/transform/${chapterId}`);
+function onBack() {
+  void router.push('/data-assets');
 }
 </script>
 
@@ -143,6 +143,9 @@ function openTransform(chapterId: number) {
   flex: 1;
   min-height: 0;
   margin-top: 12px;
+}
+.pane:first-child {
+  flex: 0 0 280px;
 }
 .pane {
   flex: 1;
@@ -218,5 +221,4 @@ function openTransform(chapterId: number) {
   color: var(--text-secondary);
   font-size: 13px;
 }
-.open-tn { margin-left: auto; }
 </style>
