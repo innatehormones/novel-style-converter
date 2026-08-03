@@ -18,6 +18,21 @@
 
     <div v-if="store.error" class="alert">{{ store.error }}</div>
 
+    <ConfirmDialog
+      v-model:open="confirmOpen"
+      title="删除数据资产"
+      :message="confirmMessage"
+      kind="danger"
+      confirm-text="删除"
+      @confirm="doDelete"
+    />
+
+    <AlertDialog
+      v-model:open="alertOpen"
+      title="提示"
+      :message="alertMessage"
+    />
+
     <div class="panes">
       <div class="pane">
         <div class="pane-title">章节 ({{ store.chapters.length }})</div>
@@ -51,10 +66,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { RecycleScroller } from 'vue-virtual-scroller';
 import Button from '../components/ui/Button.vue';
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
+import AlertDialog from '../components/ui/AlertDialog.vue';
 import { useDataAssetStore } from '../stores/dataAsset';
 import { useLibraryStore } from '../stores/library';
 import { formatTime } from '../utils/format';
@@ -63,6 +80,11 @@ const route = useRoute();
 const router = useRouter();
 const store = useDataAssetStore();
 const library = useLibraryStore();
+
+const confirmOpen = ref(false);
+const confirmMessage = computed(() => `确认删除数据资产 "${store.title}"?解析出的章节将一并删除,删除后可重新解析。`);
+const alertOpen = ref(false);
+const alertMessage = ref('');
 
 onMounted(async () => {
   const raw = route.params.dataAssetId;
@@ -77,14 +99,18 @@ onMounted(async () => {
 
 async function onDelete() {
   if (store.lockedAt) return;
-  if (!confirm(`确认删除数据资产 "${store.title}"?解析出的章节将一并删除,删除后可重新解析。`)) return;
+  confirmOpen.value = true;
+}
+
+async function doDelete() {
   const id = store.dataAssetId;
   if (id == null) return;
   try {
     await library.removeDataAsset(id);
     void router.push('/data-assets');
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    alertMessage.value = e instanceof Error ? e.message : String(e);
+    alertOpen.value = true;
   }
 }
 
