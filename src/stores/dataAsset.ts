@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { listDataAssetChapters, getDataAssetContent } from '../ipc/commands';
+import { listDataAssetChapters, getDataAssetContent, listDataAssets as ipcListDataAssets } from '../ipc/commands';
 import type { DataAssetChapter } from '../ipc/types';
 import type { ChapterSegment } from '../ipc/types';
+import type { DataAssetRow } from '../ipc/types';
 
 /// State 2 读专用 store:从 data_asset 读章节列表 + 原文,纯展示,不允许编辑。
 /// selectedContent 按 UTF-8 字节切片 originalText,避免拉取每章正文。
@@ -26,12 +27,17 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
     error.value = null;
     chapters.value = [];
     originalText.value = '';
+    title.value = '';
+    filename.value = '';
+    parsedAt.value = null;
+    lockedAt.value = null;
     ++requestToken;
     const token = requestToken;
     try {
-      const [chs, content] = await Promise.all([
+      const [chs, content, assets] = await Promise.all([
         listDataAssetChapters(id),
         getDataAssetContent(id),
+        ipcListDataAssets(),
       ]);
       if (token !== requestToken) return;
       chapters.value = chs.map((c: DataAssetChapter) => ({
@@ -42,6 +48,13 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
         idx: c.idx,
       }));
       originalText.value = content;
+      const row: DataAssetRow | undefined = assets.find((a: DataAssetRow) => a.id === id);
+      if (row) {
+        title.value = row.title;
+        filename.value = row.filename;
+        parsedAt.value = row.parsed_at;
+        lockedAt.value = row.locked_at;
+      }
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
