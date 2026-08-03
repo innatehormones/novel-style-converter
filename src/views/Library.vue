@@ -103,6 +103,39 @@
       :data-asset-id="tnDialogDataAssetId"
       @submit="onCreateTn"
     />
+
+    <ConfirmDialog
+      v-model:open="deleteUploadConfirmOpen"
+      title="删除上传"
+      :message="deleteUploadMessage"
+      kind="danger"
+      confirm-text="删除"
+      @confirm="doDeleteUpload"
+    />
+
+    <ConfirmDialog
+      v-model:open="deleteTnConfirmOpen"
+      title="删除转换小说"
+      :message="deleteTnMessage"
+      kind="danger"
+      confirm-text="删除"
+      @confirm="doDeleteTn"
+    />
+
+    <ConfirmDialog
+      v-model:open="deleteDaConfirmOpen"
+      title="删除数据资产"
+      :message="deleteDaMessage"
+      kind="danger"
+      confirm-text="删除"
+      @confirm="doDeleteDa"
+    />
+
+    <AlertDialog
+      v-model:open="alertOpen"
+      :title="alertTitle"
+      :message="alertMessage"
+    />
   </section>
 </template>
 
@@ -115,6 +148,8 @@ import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
 import UploadDialog from '../components/UploadDialog.vue';
 import TransformationNovelDialog from '../components/TransformationNovelDialog.vue';
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
+import AlertDialog from '../components/ui/AlertDialog.vue';
 import { useLibraryStore } from '../stores/library';
 import { formatSize, formatTime, formatWordCount } from '../utils/format';
 
@@ -134,6 +169,28 @@ const tnDialogOpen = ref(false);
 const tnDialogDataAssetId = ref(0);
 const renamingId = ref<number | null>(null);
 const renameDraft = ref('');
+
+const deleteUploadConfirmOpen = ref(false);
+const deleteUploadMessage = ref('');
+const deleteUploadId = ref<number | null>(null);
+
+const deleteTnConfirmOpen = ref(false);
+const deleteTnMessage = ref('');
+const deleteTnId = ref<number | null>(null);
+
+const deleteDaConfirmOpen = ref(false);
+const deleteDaMessage = ref('');
+const deleteDaId = ref<number | null>(null);
+
+const alertOpen = ref(false);
+const alertTitle = ref('提示');
+const alertMessage = ref('');
+
+function showAlert(title: string, message: string) {
+  alertTitle.value = title;
+  alertMessage.value = message;
+  alertOpen.value = true;
+}
 
 const uploadColumns = [
   { key: 'filename', title: '文件名', width: '260px' },
@@ -187,16 +244,23 @@ async function onUpload(input: { filePath: string; filename: string }) {
   try {
     await store.upload({ file_path: input.filePath, filename: input.filename });
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    showAlert('提示', e instanceof Error ? e.message : String(e));
   }
 }
 
 async function onDeleteUpload(id: number, filename: string) {
-  if (!confirm(`确认删除文件 "${filename}"?`)) return;
+  deleteUploadId.value = id;
+  deleteUploadMessage.value = `确认删除文件 "${filename}"?`;
+  deleteUploadConfirmOpen.value = true;
+}
+
+async function doDeleteUpload() {
+  const id = deleteUploadId.value;
+  if (id == null) return;
   try {
     await store.removeUpload(id);
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    showAlert('提示', e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -204,7 +268,7 @@ async function onCreateTn(input: { data_asset_id: number; title: string }) {
   try {
     await store.createTransformationNovel(input);
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    showAlert('提示', e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -220,37 +284,51 @@ function cancelRename() {
 async function onSaveRename(id: number) {
   const t = renameDraft.value.trim();
   if (t === '') {
-    alert('标题不能为空');
+    showAlert('标题不能为空', '请输入转换小说标题。');
     return;
   }
   try {
     await store.renameTransformationNovel({ id, title: t });
     renamingId.value = null;
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    showAlert('提示', e instanceof Error ? e.message : String(e));
   }
 }
 
 async function onDeleteTn(id: number, title: string) {
-  if (!confirm(`确认删除转换小说 "${title}"?历史转换结果一并删除。`)) return;
+  deleteTnId.value = id;
+  deleteTnMessage.value = `确认删除转换小说 "${title}"?历史转换结果一并删除。`;
+  deleteTnConfirmOpen.value = true;
+}
+
+async function doDeleteTn() {
+  const id = deleteTnId.value;
+  if (id == null) return;
   try {
     await store.removeTransformationNovel(id);
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    showAlert('提示', e instanceof Error ? e.message : String(e));
   }
 }
 
 async function onDeleteDa(id: number, title: string) {
-  if (!confirm(`确认删除数据资产 "${title}"?解析出的章节将一并删除。`)) return;
+  deleteDaId.value = id;
+  deleteDaMessage.value = `确认删除数据资产 "${title}"?解析出的章节将一并删除。`;
+  deleteDaConfirmOpen.value = true;
+}
+
+async function doDeleteDa() {
+  const id = deleteDaId.value;
+  if (id == null) return;
   try {
     await store.removeDataAsset(id);
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    showAlert('提示', e instanceof Error ? e.message : String(e));
   }
 }
 
 function onTransform(_id: number) {
-  alert('Phase 3(Transform 页)上线');
+  showAlert('提示', 'Phase 3(Transform 页)上线');
 }
 
 function goUpload(id: number) {
