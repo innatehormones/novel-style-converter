@@ -30,6 +30,7 @@ impl Db {
         )?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         run_schemas(&conn)?;
+        UploadRepo { conn: &conn }.backfill_word_count()?;
         Ok(Self { conn })
     }
 

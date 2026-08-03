@@ -57,6 +57,37 @@ impl<'a> UploadRepo<'a> {
         Ok(())
     }
 
+    /// 把 `word_count = 0` 且 `original_text` 非空的 upload 行用真实字符数回填。
+    ///
+    /// Migration 0007 加 `uploads.word_count` 时给老行填了默认值 0;此函数在
+    /// `Db::open` 末尾跑一次,把这些行的 word_count 用已存的 original_text 重算。
+    /// 幂等:重跑只触发一次 UPDATE(已经在的字数已正确)。空 original_text 的
+    /// 极老 upload 留 0(原文没存进 DB,需要重传才能填)。
+    ///
+    /// 返回回填的行数(给日志/测试用)。
+    pub fn backfill_word_count(&self) -> Result<usize> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, original_text FROM uploads \
+             WHERE word_count = 0 AND length(original_text) > 0",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut updated = 0;
+        for row in rows {
+            let (id, text) = row?;
+            let wc = crate::text::word_count(&text) as i64;
+            if wc > 0 {
+                self.conn.execute(
+                    "UPDATE uploads SET word_count = ?2 WHERE id = ?1",
+                    params![id, wc],
+                )?;
+                updated += 1;
+            }
+        }
+        Ok(updated)
+    }
+
     pub fn delete(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM uploads WHERE id = ?1", params![id])?;
         Ok(())
