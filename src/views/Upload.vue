@@ -14,7 +14,7 @@
     </header>
     <div v-if="error" class="alert">{{ error }}</div>
     <div v-if="uploadId != null" class="meta-strip" :title="metaTooltip">
-      {{ byteSize }} 字节 · {{ lineCount }} 行 · {{ charCount }} 字
+      {{ mbSize }} MB · {{ lineCount }} 行 · {{ charCount }} 字
     </div>
     <div class="body">
       <textarea
@@ -98,6 +98,7 @@ onMounted(async () => {
 const dirty = computed(() => rawText.value !== savedText.value);
 const lineCount = computed(() => rawText.value.split(/\r\n|\n|\r/).length);
 const charCount = computed(() => [...rawText.value].length);
+const mbSize = computed(() => (byteSize.value / 1024 / 1024).toFixed(2));
 const metaTooltip = computed(() => (sha256.value ? `SHA256: ${sha256.value}` : ''));
 
 function onBack() {
@@ -190,6 +191,8 @@ function onCleaningConfirm(cleanedText: string) {
   white-space: nowrap;
   cursor: default;
   padding: 6px 0;
+  display: flex;
+  justify-content: flex-end;
 }
 .body {
   display: flex;
