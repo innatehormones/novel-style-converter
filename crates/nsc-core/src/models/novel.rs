@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::models::transformation::TransformMode;
+
 /// State 1: 一次上传 = 一份原始 .txt 文件。sha256 去重。
 /// 章节结构不在此处,章节切片在 data_assets(已拆分)。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,10 +39,19 @@ pub struct TransformationNovel {
     pub data_asset_id: i64,
     pub title: String,
     pub created_at: DateTime<Utc>,
+    /// 默认模型配置 id。NULL 兼容存量旧 tn（无默认配置）。
+    pub default_model_config_id: Option<i64>,
+    /// 默认 prompt id。
+    pub default_prompt_id: Option<i64>,
+    /// 默认转换模式 ('compress' | 'style')。
+    pub default_mode: Option<TransformMode>,
 }
 
 #[derive(Debug, Clone)]
 pub struct NewTransformationNovel {
     pub data_asset_id: i64,
     pub title: String,
+    pub default_model_config_id: Option<i64>,
+    pub default_prompt_id: Option<i64>,
+    pub default_mode: Option<TransformMode>,
 }

@@ -120,10 +120,18 @@ impl<'a> TransformationNovelRepo<'a> {
     pub fn insert(&self, n: &NewTransformationNovel) -> Result<i64> {
         let tx = self.conn.unchecked_transaction()?;
         let now = Utc::now().to_rfc3339();
+        let mode_str = n.default_mode.map(|m| match m {
+            crate::models::TransformMode::Compress => "compress",
+            crate::models::TransformMode::Style => "style",
+        });
         tx.execute(
-            "INSERT INTO transformation_novels (data_asset_id, title, created_at) \
-             VALUES (?1, ?2, ?3)",
-            params![n.data_asset_id, n.title, now],
+            "INSERT INTO transformation_novels \
+             (data_asset_id, title, created_at, default_model_config_id, default_prompt_id, default_mode) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                n.data_asset_id, n.title, now,
+                n.default_model_config_id, n.default_prompt_id, mode_str,
+            ],
         )?;
         let id = tx.last_insert_rowid();
         tx.execute(
@@ -136,7 +144,7 @@ impl<'a> TransformationNovelRepo<'a> {
 
     pub fn get(&self, id: i64) -> Result<Option<TransformationNovel>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, title, created_at \
+            "SELECT id, data_asset_id, title, created_at, default_model_config_id, default_prompt_id, default_mode \
              FROM transformation_novels WHERE id = ?1"
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -147,7 +155,7 @@ impl<'a> TransformationNovelRepo<'a> {
 
     pub fn list(&self) -> Result<Vec<TransformationNovel>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, title, created_at \
+            "SELECT id, data_asset_id, title, created_at, default_model_config_id, default_prompt_id, default_mode \
              FROM transformation_novels ORDER BY id DESC"
         )?;
         let rows = stmt.query_map([], |row| novel_from_row(row))?;
@@ -155,16 +163,25 @@ impl<'a> TransformationNovelRepo<'a> {
     }
 
     pub fn update(&self, n: &TransformationNovel) -> Result<()> {
+        let mode_str = n.default_mode.map(|m| match m {
+            crate::models::TransformMode::Compress => "compress",
+            crate::models::TransformMode::Style => "style",
+        });
         self.conn.execute(
-            "UPDATE transformation_novels SET title = ?2 WHERE id = ?1",
-            params![n.id, n.title],
+            "UPDATE transformation_novels \
+             SET title = ?2, default_model_config_id = ?3, default_prompt_id = ?4, default_mode = ?5 \
+             WHERE id = ?1",
+            params![
+                n.id, n.title,
+                n.default_model_config_id, n.default_prompt_id, mode_str,
+            ],
         )?;
         Ok(())
     }
 
     pub fn list_by_data_asset(&self, data_asset_id: i64) -> Result<Vec<TransformationNovel>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, title, created_at \
+            "SELECT id, data_asset_id, title, created_at, default_model_config_id, default_prompt_id, default_mode \
              FROM transformation_novels WHERE data_asset_id = ?1 ORDER BY id DESC"
         )?;
         let rows = stmt.query_map(params![data_asset_id], |row| novel_from_row(row))?;
@@ -183,10 +200,21 @@ fn novel_from_row(row: &Row) -> rusqlite::Result<TransformationNovel> {
         .map(|d| d.with_timezone(&Utc))
         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
             3, rusqlite::types::Type::Text, Box::new(e)))?;
+    let mode_s: Option<String> = row.get(6)?;
+    let default_mode = mode_s.map(|s| match s.as_str() {
+        "compress" => Ok(crate::models::TransformMode::Compress),
+        "style" => Ok(crate::models::TransformMode::Style),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            6, rusqlite::types::Type::Text,
+            format!("unknown default_mode: {other}").into())),
+    }).transpose()?;
     Ok(TransformationNovel {
         id: row.get(0)?,
         data_asset_id: row.get(1)?,
         title: row.get(2)?,
         created_at,
+        default_model_config_id: row.get(4)?,
+        default_prompt_id: row.get(5)?,
+        default_mode,
     })
 }
