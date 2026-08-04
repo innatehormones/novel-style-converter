@@ -32,6 +32,10 @@
         <NumberInput v-model="ctxNextOriginal" :min="0" :max="20" class="ctx-next-original" />
       </div>
     </div>
+    <div class="ctx-hint">
+      给 LLM 的上下文窗口大小（章）。一般只设"前文转换" 1~3,
+      让模型参考前面已经转换好的章节学文风;原文带多了浪费 token。
+    </div>
     <div v-if="error" class="error">{{ error }}</div>
     <div v-if="!promptId" class="hint">该章节还没有历史转换,无法确定 prompt。请先在 Library 转换 tab 用「新建转换」完成首次转换。</div>
     <template #footer>
@@ -144,4 +148,5 @@ async function onSubmit() {
 .row.ctx label { width: auto; font-size: 12px; color: var(--text-muted); }
 .error { color: var(--danger); font-size: 12px; margin-top: 8px; }
 .hint { color: var(--text-muted); font-size: 12px; margin-top: 8px; }
+.ctx-hint { color: var(--text-muted); font-size: 11px; margin-top: -4px; margin-bottom: 12px; line-height: 1.5; }
 </style>
