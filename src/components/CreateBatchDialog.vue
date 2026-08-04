@@ -139,8 +139,11 @@ watch(open, async (v) => {
 
 async function onSubmit() {
   if (!canSubmit.value) return;
-  if (!props.defaultMode) {
-    error.value = '转换小说缺少默认 mode,无法确定 prompt 类型。';
+  // mode 由所选 prompt 的 kind 决定(后端 BatchOverrides 也接受 mode 字符串)。
+  const selectedPrompt = prompts.value.find((p) => p.id === promptId.value);
+  const mode = selectedPrompt?.kind;
+  if (mode !== 'compress' && mode !== 'style') {
+    error.value = '请选择一个 prompt 以确定 mode。';
     return;
   }
   submitting.value = true;
@@ -152,7 +155,7 @@ async function onSubmit() {
       overrides: {
         prompt_id: promptId.value,
         model_config_id: modelConfigId.value,
-        mode: props.defaultMode,
+        mode,
         ctx_prev_original: ctxPrevOriginal.value ?? 0,
         ctx_prev_transformed: ctxPrevTransformed.value ?? 0,
         ctx_next_original: ctxNextOriginal.value ?? 0,

@@ -60,7 +60,7 @@ describe('CreateBatchDialog', () => {
     expect(payload.label).toBeNull();
   });
 
-  it('rejects submit when defaultMode is null', async () => {
+  it('infers mode from selected prompt kind even when TN defaultMode is null', async () => {
     const wrapper = mount(CreateBatchDialog, {
       props: { tnId: 1, defaultMode: null, open: true },
       attachTo: document.body,
@@ -69,11 +69,12 @@ describe('CreateBatchDialog', () => {
     await flushPromises();
 
     const vm = wrapper.vm as any;
-    vm.promptId = 1;
+    vm.promptId = 2;  // kind='style'
     vm.modelConfigId = 1;
     await vm.onSubmit();
 
-    expect(wrapper.emitted('submit')).toBeFalsy();
-    expect(document.body.textContent ?? '').toContain('缺少默认 mode');
+    const submits = wrapper.emitted('submit');
+    expect(submits).toBeTruthy();
+    expect((submits![0] as any)[0].overrides.mode).toBe('style');
   });
 });
