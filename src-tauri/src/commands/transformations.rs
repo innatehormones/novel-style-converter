@@ -57,7 +57,7 @@ fn chapter_lookup(db: &Db, data_asset_id: i64) -> std::collections::HashMap<i64,
         .unwrap_or_default()
 }
 
-fn join_chapter_info(
+pub(crate) fn join_chapter_info(
     db: &Db,
     data_asset_id: i64,
     rows: Vec<nsc_core::models::TransformationChapter>,

@@ -102,6 +102,7 @@ pub fn run() {
             commands::batches::update_batch,
             commands::batches::list_batch_chapters,
             commands::batches::count_batches_by_status,
+            commands::batches::dispatch_batch,
             commands::batches::resume_batch,
         ])
         .run(tauri::generate_context!())

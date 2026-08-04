@@ -6,8 +6,8 @@ use tauri::State;
 use nsc_core::db::repo::BatchStatusCount;
 use nsc_core::db::Db;
 use nsc_core::error::Error;
-use nsc_core::models::{Batch, BatchStatus, NewBatch, OnFailurePolicy, ResumeAction};
-use nsc_core::transformer::BatchScheduler;
+use nsc_core::models::{Batch, BatchStatus, NewBatch, OnFailurePolicy, ResumeAction, TransformMode};
+use nsc_core::transformer::{BatchOverrides, BatchScheduler};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateBatchPayload {
@@ -133,15 +133,69 @@ pub fn update_batch(
     db.batches().update(&next).map_err(|e| e.to_string())
 }
 
-/// 暂返回空 Vec —— Slice 3 会替换为真实 `transformation_chapters.list_by_batch` 调用。
-/// 保留命令名/签名,前端可立即接入;Slice 3 落地后无前端改动。
+/// 列出 batch 内所有 tc 行 + join chapter 标题/idx。
 #[tauri::command]
 pub fn list_batch_chapters(
-    _db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Mutex<Db>>>,
     batch_id: i64,
-) -> Result<Vec<serde_json::Value>, String> {
-    let _ = batch_id;
-    Ok(vec![])
+) -> Result<Vec<super::transformations::TransformationChapterRow>, String> {
+    let db = db.lock().map_err(|e| e.to_string())?;
+    let rows = db.transformation_chapters()
+        .list_by_batch(batch_id)
+        .map_err(|e| e.to_string())?;
+    let batch = db.batches().get(batch_id).map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("batch {batch_id} 不存在"))?;
+    let tn = db.transformation_novels().get(batch.transformation_novel_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("tn {} 不存在", batch.transformation_novel_id))?;
+    Ok(super::transformations::join_chapter_info(&db, tn.data_asset_id, rows))
+}
+
+/// 派发已存在的 Pending batch：自动取 TN 全量章节,落 tc 行,派首章。
+/// 内部委派给 `BatchScheduler::dispatch_batch`。
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct DispatchOverrides {
+    #[serde(default)] pub prompt_id: Option<i64>,
+    #[serde(default)] pub model_config_id: Option<i64>,
+    #[serde(default)] pub mode: Option<String>,
+    #[serde(default)] pub ctx_prev_original: Option<i32>,
+    #[serde(default)] pub ctx_prev_transformed: Option<i32>,
+    #[serde(default)] pub ctx_next_original: Option<i32>,
+}
+
+impl DispatchOverrides {
+    fn into_core(self) -> Result<BatchOverrides, Error> {
+        let mode = match self.mode.as_deref() {
+            None => None,
+            Some("compress") => Some(TransformMode::Compress),
+            Some("style") => Some(TransformMode::Style),
+            Some(other) => return Err(Error::Validation(format!("未知 mode: {other}"))),
+        };
+        Ok(BatchOverrides {
+            prompt_id: self.prompt_id,
+            model_config_id: self.model_config_id,
+            mode,
+            ctx_prev_original: self.ctx_prev_original,
+            ctx_prev_transformed: self.ctx_prev_transformed,
+            ctx_next_original: self.ctx_next_original,
+        })
+    }
+}
+
+#[tauri::command]
+pub async fn dispatch_batch(
+    batch_id: i64,
+    overrides: DispatchOverrides,
+    scheduler: tauri::State<'_, Arc<BatchScheduler>>,
+) -> Result<BatchSummary, String> {
+    let scheduler = scheduler.inner().clone();
+    let overrides = overrides.into_core().map_err(|e| e.to_string())?;
+    let res = tokio::task::spawn_blocking(move || scheduler.dispatch_batch(batch_id, overrides))
+        .await
+        .map_err(|e| format!("dispatch_batch join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+    Ok(to_summary(&res))
 }
 
 #[tauri::command]

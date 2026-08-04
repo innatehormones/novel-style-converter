@@ -210,6 +210,21 @@ export interface CreateBatchInput {
   chapter_ids: number[];
 }
 
+/** `dispatch_batch` overrides：任一字段为 null 时后端回退到 TN 默认。 */
+export interface DispatchBatchOverrides {
+  prompt_id?: number | null;
+  model_config_id?: number | null;
+  mode?: 'compress' | 'style' | null;
+  ctx_prev_original?: number | null;
+  ctx_prev_transformed?: number | null;
+  ctx_next_original?: number | null;
+}
+
+export interface DispatchBatchInput {
+  batch_id: number;
+  overrides?: DispatchBatchOverrides;
+}
+
 /** `resume_batch` 入参：`kind` 决定动作；`chapter_id` 仅 retry/skip 时必填。 */
 export type ResumeAction =
   | { kind: 'retry'; chapter_id: number }

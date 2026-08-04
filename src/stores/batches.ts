@@ -2,11 +2,19 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import {
   countBatchesByStatus,
+  createBatch,
+  dispatchBatch,
   getBatch,
   listBatches,
   resumeBatch,
 } from '../ipc/commands';
-import type { Batch, BatchStatusCount, ResumeAction } from '../ipc/types';
+import type {
+  Batch,
+  BatchStatusCount,
+  CreateBatchInput,
+  DispatchBatchInput,
+  ResumeAction,
+} from '../ipc/types';
 
 export const useBatchesStore = defineStore('batches', () => {
   const byTn = ref<Map<number, Batch[]>>(new Map());
@@ -42,6 +50,26 @@ export const useBatchesStore = defineStore('batches', () => {
     }
   }
 
+  /// 创建 batch + 派发（落 tc + 入队）。两步合一是因为后端 `create_batch`
+  /// 不会自动派发 — 必须显式调 `dispatch_batch`。
+  async function createAndDispatch(payload: CreateBatchInput, dispatch: DispatchBatchInput['overrides']) {
+    loading.value = true;
+    error.value = null;
+    try {
+      const batchId = await createBatch(payload);
+      const batch = await dispatchBatch({ batch_id: batchId, overrides: dispatch });
+      const list = byTn.value.get(batch.tn_id) ?? [];
+      list.unshift(batch);
+      byTn.value.set(batch.tn_id, list);
+      return batch;
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e);
+      throw e;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   async function resume(batchId: number, action: ResumeAction) {
     loading.value = true;
     error.value = null;
@@ -69,5 +97,5 @@ export const useBatchesStore = defineStore('batches', () => {
     return counts.value.get(tnId);
   }
 
-  return { byTn, loading, error, loadByTn, refresh, resume, getByTn, getCounts };
+  return { byTn, loading, error, loadByTn, refresh, resume, createAndDispatch, getByTn, getCounts };
 });

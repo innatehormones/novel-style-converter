@@ -83,9 +83,7 @@
             <Button size="small" @click="cancelRename">取消</Button>
           </template>
           <template v-else>
-            <Button size="small" @click="onTransform(row.id)" disabled title="Phase 3 上线">
-              ▶ 转换
-            </Button>
+            <Button size="small" kind="primary" @click="openCreateBatch(row)">▶ 新建工作流</Button>
             <Button size="small" @click="goDetail(row.id)">详情</Button>
             <Button size="small" @click="startRename(row.id, row.title)">重命名</Button>
             <Button size="small" kind="danger" @click="onDeleteTn(row.id, row.title)">删除</Button>
@@ -100,6 +98,15 @@
       v-model:open="tnDialogOpen"
       :data-asset-id="tnDialogDataAssetId"
       @submit="onCreateTn"
+    />
+
+    <CreateBatchDialog
+      v-model:open="createBatchOpen"
+      :tn-id="createBatchTnId"
+      :default-prompt-id="createBatchDefaults.default_prompt_id"
+      :default-model-config-id="createBatchDefaults.default_model_config_id"
+      :default-mode="createBatchDefaults.default_mode"
+      @submit="onCreateBatch"
     />
 
     <ConfirmDialog
@@ -147,14 +154,17 @@ import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
 import UploadDialog from '../components/UploadDialog.vue';
 import TransformationNovelDialog from '../components/TransformationNovelDialog.vue';
+import CreateBatchDialog from '../components/CreateBatchDialog.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import { useLibraryStore } from '../stores/library';
+import { useBatchesStore } from '../stores/batches';
 import { formatSize, formatTime, formatWordCount } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
 const store = useLibraryStore();
+const batchesStore = useBatchesStore();
 type Page = 'uploads' | 'data-assets' | 'transformations';
 const page = computed<Page>(() => (route.meta.libraryPage as Page | undefined) ?? 'uploads');
 const pageTitle = computed(() => ({
@@ -168,6 +178,14 @@ const tnDialogOpen = ref(false);
 const tnDialogDataAssetId = ref(0);
 const renamingId = ref<number | null>(null);
 const renameDraft = ref('');
+
+const createBatchOpen = ref(false);
+const createBatchTnId = ref(0);
+const createBatchDefaults = ref<{
+  default_prompt_id: number | null;
+  default_model_config_id: number | null;
+  default_mode: 'compress' | 'style' | null;
+}>({ default_prompt_id: null, default_model_config_id: null, default_mode: null });
 
 const deleteUploadConfirmOpen = ref(false);
 const deleteUploadMessage = ref('');
@@ -326,8 +344,47 @@ async function doDeleteDa() {
   }
 }
 
-function onTransform(_id: number) {
-  showAlert('提示', 'Phase 3(Transform 页)上线');
+function openCreateBatch(row: {
+  id: number;
+  default_prompt_id: number | null;
+  default_model_config_id: number | null;
+  default_mode: 'compress' | 'style' | null;
+}) {
+  createBatchTnId.value = row.id;
+  createBatchDefaults.value = {
+    default_prompt_id: row.default_prompt_id,
+    default_model_config_id: row.default_model_config_id,
+    default_mode: row.default_mode,
+  };
+  createBatchOpen.value = true;
+}
+
+async function onCreateBatch(input: {
+  label: string | null;
+  on_failure_policy: 'pause_and_review' | 'terminate' | 'skip_failed';
+  overrides: {
+    prompt_id: number;
+    model_config_id: number;
+    mode: 'compress' | 'style';
+    ctx_prev_original: number;
+    ctx_prev_transformed: number;
+    ctx_next_original: number;
+  };
+}) {
+  try {
+    const batch = await batchesStore.createAndDispatch(
+      {
+        tn_id: createBatchTnId.value,
+        label: input.label,
+        on_failure_policy: input.on_failure_policy,
+        chapter_ids: [],
+      },
+      input.overrides,
+    );
+    void router.push({ name: 'transformation-detail', params: { tnId: String(batch.tn_id) } });
+  } catch (e: unknown) {
+    showAlert('创建工作流失败', e instanceof Error ? e.message : String(e));
+  }
 }
 
 function goUpload(id: number) {

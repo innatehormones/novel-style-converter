@@ -201,7 +201,7 @@ fn pause_and_review_does_not_advance() {
     let batch = scheduler.create_batch(NewBatch {
         transformation_novel_id: tn_id, label: None,
         on_failure_policy: OnFailurePolicy::PauseAndReview,
-    }, vec![cids[0], cids[1]]).unwrap();
+    }, vec![cids[0], cids[1]], nsc_core::transformer::BatchOverrides::default()).unwrap();
     assert_eq!(batch.status, BatchStatus::Running);
 
     let tids: Vec<i64> = db.conn.prepare(
@@ -236,7 +236,7 @@ fn terminate_cancels_remaining() {
     let batch = scheduler.create_batch(NewBatch {
         transformation_novel_id: tn_id, label: None,
         on_failure_policy: OnFailurePolicy::Terminate,
-    }, vec![cids[0], cids[1]]).unwrap();
+    }, vec![cids[0], cids[1]], nsc_core::transformer::BatchOverrides::default()).unwrap();
 
     let tids: Vec<i64> = db.conn.prepare(
         "SELECT id FROM transformation_chapters WHERE batch_id=?1 ORDER BY id ASC"
@@ -265,7 +265,7 @@ fn skip_failed_marks_skipped_and_keeps_running() {
     let batch = scheduler.create_batch(NewBatch {
         transformation_novel_id: tn_id, label: None,
         on_failure_policy: OnFailurePolicy::SkipFailed,
-    }, vec![cids[0], cids[1]]).unwrap();
+    }, vec![cids[0], cids[1]], nsc_core::transformer::BatchOverrides::default()).unwrap();
 
     let tids: Vec<i64> = db.conn.prepare(
         "SELECT id FROM transformation_chapters WHERE batch_id=?1 ORDER BY id ASC"
@@ -286,6 +286,44 @@ fn skip_failed_marks_skipped_and_keeps_running() {
     // 关键断言:c1 skipped,batch 不为 Paused/Terminated。
     assert!(matches!(b.status, BatchStatus::Running | BatchStatus::Completed),
             "expected Running or Completed, got {:?}", b.status);
+
+    let _ = queue;
+}
+
+#[test]
+fn dispatch_batch_fills_chapters_and_advances() {
+    // create_batch_row → dispatch_batch:走"先建空 batch,后派"的 2 步流程。
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dispatch.db");
+    let (db, tn_id, cids) = seed_batch_world(&path, OnFailurePolicy::PauseAndReview);
+    let (queue, scheduler) = build_pair(path.clone());
+
+    let batch_id = db.batches().insert(&NewBatch {
+        transformation_novel_id: tn_id,
+        label: Some("manual".into()),
+        on_failure_policy: OnFailurePolicy::PauseAndReview,
+    }).unwrap();
+
+    let b = scheduler.dispatch_batch(
+        batch_id,
+        nsc_core::transformer::BatchOverrides::default(),
+    ).unwrap();
+    assert_eq!(b.id, batch_id);
+    assert_eq!(b.status, BatchStatus::Running);
+
+    // tc 行应自动落 N 行（cids.len()）
+    let tids: Vec<i64> = db.conn.prepare(
+        "SELECT id FROM transformation_chapters WHERE batch_id=?1 ORDER BY id ASC"
+    ).unwrap().query_map(rusqlite::params![batch_id], |r| r.get(0))
+    .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+    assert_eq!(tids.len(), cids.len(), "应给每个 chapter 落一行 tc");
+
+    // 重复 dispatch → ValidationError（已不是 Pending）
+    let err = scheduler.dispatch_batch(
+        batch_id,
+        nsc_core::transformer::BatchOverrides::default(),
+    ).unwrap_err();
+    assert!(format!("{err}").contains("不是 Pending"), "got: {err}");
 
     let _ = queue;
 }

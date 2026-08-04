@@ -16,7 +16,7 @@ import type {
   CreateTransformationNovelInput, UpdateTransformationNovelInput,
   EnqueuePayload, EnqueueAllPayload, QueueSnapshot,
   Prompt, PromptInput,
-  Batch, BatchStatusCount, CreateBatchInput, OnFailurePolicy, ResumeAction,
+  Batch, BatchStatusCount, CreateBatchInput, DispatchBatchInput, OnFailurePolicy, ResumeAction,
 } from './types';
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -178,6 +178,9 @@ export const getBatch = (batchId: number): Promise<Batch> =>
 
 export const createBatch = (payload: CreateBatchInput): Promise<number> =>
   invoke<number>('create_batch', { payload });
+
+export const dispatchBatch = (input: DispatchBatchInput): Promise<Batch> =>
+  invoke<Batch>('dispatch_batch', { batchId: input.batch_id, overrides: input.overrides ?? {} });
 
 export const updateBatch = (
   batchId: number,

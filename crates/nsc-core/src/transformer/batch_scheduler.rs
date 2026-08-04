@@ -30,6 +30,18 @@ pub struct BatchScheduler {
     job_queue: Arc<JobQueue>,
 }
 
+/// Per-batch 可选覆盖：`create_batch` 时 prompt / model / mode / ctx 字段
+/// 任一填了 None 就回退到 TN 默认；都给 None 等价于"用 TN 默认"。
+#[derive(Debug, Default, Clone)]
+pub struct BatchOverrides {
+    pub prompt_id: Option<i64>,
+    pub model_config_id: Option<i64>,
+    pub mode: Option<TransformMode>,
+    pub ctx_prev_original: Option<i32>,
+    pub ctx_prev_transformed: Option<i32>,
+    pub ctx_next_original: Option<i32>,
+}
+
 impl BatchScheduler {
     pub fn new(db_path: PathBuf, job_queue: Arc<JobQueue>) -> Self {
         Self { db_path, job_queue }
@@ -37,10 +49,12 @@ impl BatchScheduler {
 
     /// 创建批号 + 立即派首章（其他章节等 JobQueue 完成回调再派）。
     /// 整批写入一个事务（batch 行 + N 个 tc 行）；dispatch 部分是 tx 外。
+    /// `overrides` 给 None 时回退到 TN 默认；都给 None 时等价于"用 TN 默认"。
     pub fn create_batch(
         &self,
         new_batch: NewBatch,
         chapter_ids: Vec<i64>,
+        overrides: BatchOverrides,
     ) -> Result<Batch> {
         let db = Db::open(&self.db_path)?;
         let tn_id = new_batch.transformation_novel_id;
@@ -48,11 +62,14 @@ impl BatchScheduler {
         // 取 TN 的默认配置（必填：spec §4.4 兼容性策略）
         let tn = db.transformation_novels().get(tn_id)?
             .ok_or_else(|| Error::NotFound(format!("tn {tn_id} 不存在")))?;
-        let prompt_id = tn.default_prompt_id
+        let prompt_id = overrides.prompt_id
+            .or(tn.default_prompt_id)
             .ok_or_else(|| Error::NotFound("default_prompt 缺失".into()))?;
-        let model_cfg_id = tn.default_model_config_id
+        let model_cfg_id = overrides.model_config_id
+            .or(tn.default_model_config_id)
             .ok_or_else(|| Error::NotFound("default_model_config 缺失".into()))?;
-        let mode = tn.default_mode
+        let mode = overrides.mode
+            .or(tn.default_mode)
             .ok_or_else(|| Error::NotFound("default_mode 缺失".into()))?;
         let prompt = db.prompts().get(prompt_id)?
             .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
@@ -87,13 +104,16 @@ impl BatchScheduler {
                      (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
                       ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
                       batch_id, style_ref_chapter_id, status) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, ?6, ?7, 'pending')",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending')",
                     rusqlite::params![
                         tn_id,
                         *cid,
                         mode_str(mode),
                         prompt_id,
                         model_cfg_id,
+                        overrides.ctx_prev_original.unwrap_or(0),
+                        overrides.ctx_prev_transformed.unwrap_or(0),
+                        overrides.ctx_next_original.unwrap_or(0),
                         batch_id,
                         frontier_cid,
                     ],
@@ -110,12 +130,106 @@ impl BatchScheduler {
         }
 
         // 派首章
-        self.dispatch(&db, &tn, &prompt, &model, tids[0])?;
+        self.dispatch(
+            &db, &tn, &prompt, &model, tids[0],
+            overrides.ctx_prev_original.unwrap_or(0),
+            overrides.ctx_prev_transformed.unwrap_or(0),
+            overrides.ctx_next_original.unwrap_or(0),
+        )?;
 
         // 读回 batch 实体
         let batch = db.batches().get(batch_id)?
             .ok_or_else(|| Error::NotFound("batch 写入后回读失败".into()))?;
         Ok(batch)
+    }
+
+    /// 派发一个已有的 Pending batch：自动取 TN 全量章节 → 落 tc 行 → 派首章。
+    /// batch 必须处于 Pending（已 dispatch 的 batch 不能再次派）。
+    /// overrides 任意字段为 None 时回退到 TN 默认。
+    pub fn dispatch_batch(
+        &self,
+        batch_id: i64,
+        overrides: BatchOverrides,
+    ) -> Result<Batch> {
+        let db = Db::open(&self.db_path)?;
+        let batch = db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
+        if !matches!(batch.status, BatchStatus::Pending) {
+            return Err(Error::Validation(format!(
+                "batch {batch_id} 不是 Pending（当前 {:?}），不能 dispatch",
+                batch.status
+            )));
+        }
+        let tn = db.transformation_novels().get(batch.transformation_novel_id)?
+            .ok_or_else(|| Error::NotFound(format!(
+                "tn {} 不存在", batch.transformation_novel_id
+            )))?;
+        let chapter_ids: Vec<i64> = db.chapters()
+            .list_by_data_asset(tn.data_asset_id)?
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+
+        let prompt_id = overrides.prompt_id
+            .or(tn.default_prompt_id)
+            .ok_or_else(|| Error::NotFound("default_prompt 缺失".into()))?;
+        let model_cfg_id = overrides.model_config_id
+            .or(tn.default_model_config_id)
+            .ok_or_else(|| Error::NotFound("default_model_config 缺失".into()))?;
+        let mode = overrides.mode
+            .or(tn.default_mode)
+            .ok_or_else(|| Error::NotFound("default_mode 缺失".into()))?;
+        let prompt = db.prompts().get(prompt_id)?
+            .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
+        let model = db.model_configs().get(model_cfg_id)?
+            .ok_or_else(|| Error::NotFound(format!("model_config {model_cfg_id} 不存在")))?;
+
+        let now = Utc::now().to_rfc3339();
+        let tids: Vec<i64>;
+        {
+            let tx = db.conn.unchecked_transaction()?;
+            let mut ids = Vec::with_capacity(chapter_ids.len());
+            for cid in &chapter_ids {
+                let frontier_cid = frontier_chapter_id(&tx, batch.transformation_novel_id, *cid)?;
+                tx.execute(
+                    "INSERT INTO transformation_chapters \
+                     (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
+                      ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
+                      batch_id, style_ref_chapter_id, status) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending')",
+                    rusqlite::params![
+                        batch.transformation_novel_id,
+                        *cid,
+                        mode_str(mode),
+                        prompt_id,
+                        model_cfg_id,
+                        overrides.ctx_prev_original.unwrap_or(0),
+                        overrides.ctx_prev_transformed.unwrap_or(0),
+                        overrides.ctx_next_original.unwrap_or(0),
+                        batch_id,
+                        frontier_cid,
+                    ],
+                )?;
+                ids.push(tx.last_insert_rowid());
+            }
+            tx.execute(
+                "UPDATE batches SET status='running', started_at=?1 WHERE id=?2",
+                rusqlite::params![now, batch_id],
+            )?;
+            tx.commit()?;
+            tids = ids;
+        }
+
+        self.dispatch(
+            &db, &tn, &prompt, &model, tids[0],
+            overrides.ctx_prev_original.unwrap_or(0),
+            overrides.ctx_prev_transformed.unwrap_or(0),
+            overrides.ctx_next_original.unwrap_or(0),
+        )?;
+
+        let updated = db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound("batch 回读失败".into()))?;
+        Ok(updated)
     }
 
     /// 派发一个具体 tc（按 tid）。从 Db 读 chapter + frontier 章节 id，
@@ -127,6 +241,9 @@ impl BatchScheduler {
         prompt: &Prompt,
         model: &ModelConfig,
         tid: i64,
+        ctx_prev_original: i32,
+        ctx_prev_transformed: i32,
+        ctx_next_original: i32,
     ) -> Result<()> {
         let tc = db.transformation_chapters().get(tid)?
             .ok_or_else(|| Error::NotFound(format!("tc {tid} 不存在")))?;
@@ -147,9 +264,9 @@ impl BatchScheduler {
             },
             prompt: prompt.clone(),
             model_config: model.clone(),
-            ctx_prev_original: 0,
-            ctx_prev_transformed: 0,
-            ctx_next_original: 0,
+            ctx_prev_original,
+            ctx_prev_transformed,
+            ctx_next_original,
         };
         self.job_queue.enqueue(spec);
         Ok(())
@@ -254,7 +371,7 @@ impl BatchScheduler {
                 .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
             let model = db.model_configs().get(model_cfg_id)?
                 .ok_or_else(|| Error::NotFound(format!("model_config {model_cfg_id} 不存在")))?;
-            return self.dispatch(db, &tn, &prompt, &model, tid);
+            return self.dispatch(db, &tn, &prompt, &model, tid, 0, 0, 0);
         }
 
         // 没 pending 了 → 完成判据
@@ -333,7 +450,7 @@ impl BatchScheduler {
                     .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
                 let model = db.model_configs().get(model_cfg_id)?
                     .ok_or_else(|| Error::NotFound(format!("model_config {model_cfg_id} 不存在")))?;
-                self.dispatch(&db, &tn, &prompt, &model, ch_id)?;
+                self.dispatch(&db, &tn, &prompt, &model, ch_id, 0, 0, 0)?;
             }
             ResumeAction::Skip(ch_id) => {
                 tx.execute(

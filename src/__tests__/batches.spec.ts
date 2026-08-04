@@ -7,6 +7,7 @@ import {
   listBatches,
   getBatch,
   createBatch,
+  dispatchBatch,
   updateBatch,
   listBatchChapters,
   countBatchesByStatus,
@@ -66,5 +67,21 @@ describe('batches IPC wrappers', () => {
     });
     await countBatchesByStatus(2);
     expect(invoke).toHaveBeenCalledWith('count_batches_by_status', { tnId: 2 });
+  });
+
+  it('dispatchBatch passes { batchId, overrides } camelCase + default {}', async () => {
+    (invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ id: 5 });
+    await dispatchBatch({ batch_id: 5 });
+    expect(invoke).toHaveBeenCalledWith('dispatch_batch', { batchId: 5, overrides: {} });
+
+    (invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ id: 6 });
+    await dispatchBatch({
+      batch_id: 6,
+      overrides: { prompt_id: 2, ctx_prev_original: 1 },
+    });
+    expect(invoke).toHaveBeenCalledWith('dispatch_batch', {
+      batchId: 6,
+      overrides: { prompt_id: 2, ctx_prev_original: 1 },
+    });
   });
 });
