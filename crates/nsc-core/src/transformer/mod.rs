@@ -1,7 +1,9 @@
+pub mod batch_scheduler;
 pub mod job;
 pub mod queue;
 pub mod transformer;
 
+pub use batch_scheduler::BatchScheduler;
 pub use job::{JobInfo, JobSpec, JobStatus, QueueSnapshot};
 pub use queue::{DbFactory, JobQueue, Notifier, ProviderFactory};
 pub use transformer::{

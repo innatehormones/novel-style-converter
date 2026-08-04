@@ -75,6 +75,8 @@ fn setup() -> (TempDir, PathBuf, i64) {
         ctx_prev_original: 0,
         ctx_prev_transformed: 0,
         ctx_next_original: 0,
+        batch_id: None,
+        style_ref_chapter_id: None,
     }).unwrap();
     drop(db);
     (dir, path, tid)

@@ -227,7 +227,7 @@ describe('Transformation novel IPC wrappers', () => {
 
   it('listTransformationNovels calls list_transformation_novels', async () => {
     const sample: TransformationNovelSummary[] = [
-      { id: 1, data_asset_id: 1, title: 'X', created_at: '2026-07-26T00:00:00Z', chapters_count: 0 },
+      { id: 1, data_asset_id: 1, title: 'X', created_at: '2026-07-26T00:00:00Z', chapters_count: 0, default_model_config_id: null, default_prompt_id: null, default_mode: null },
     ];
     vi.mocked(invoke).mockResolvedValueOnce(sample);
     expect(await listTransformationNovels()).toEqual(sample);

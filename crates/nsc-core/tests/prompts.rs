@@ -95,6 +95,8 @@ fn existing_prev_transformed_is_concatenated_in_order() {
             error: None,
             started_at: None,
             completed_at: None,
+            batch_id: None,
+            style_ref_chapter_id: None,
         },
         TransformationChapter {
             id: 22,
@@ -113,6 +115,8 @@ fn existing_prev_transformed_is_concatenated_in_order() {
             error: None,
             started_at: None,
             completed_at: None,
+            batch_id: None,
+            style_ref_chapter_id: None,
         },
     ];
     let ctx = PromptContext {

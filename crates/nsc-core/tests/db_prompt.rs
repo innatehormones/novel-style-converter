@@ -76,6 +76,8 @@ fn count_by_prompt_returns_ref_count() {
             ctx_prev_original: 0,
             ctx_prev_transformed: 0,
             ctx_next_original: 0,
+            batch_id: None,
+            style_ref_chapter_id: None,
         }).unwrap();
     }
     for _ in 0..2 {
@@ -88,6 +90,8 @@ fn count_by_prompt_returns_ref_count() {
             ctx_prev_original: 0,
             ctx_prev_transformed: 0,
             ctx_next_original: 0,
+            batch_id: None,
+            style_ref_chapter_id: None,
         }).unwrap();
     }
 

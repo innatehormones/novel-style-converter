@@ -140,17 +140,88 @@ export interface TransformationNovelSummary {
   title: string;
   created_at: string;
   chapters_count: number;
+  default_model_config_id: number | null;
+  default_prompt_id: number | null;
+  default_mode: TransformMode | null;
+}
+
+/**
+ * `create_transformation_novel` 入参:后端 snake_case DTO,
+ * 三个默认字段为可空,内层字段原样发,不要 inline 改名。
+ * 命名加 Input 后缀,与后端 `*Payload` 区分,避免跨语言同名歧义。
+ */
+export interface CreateTransformationNovelInput {
+  data_asset_id: number;
+  title: string;
+  default_model_config_id?: number | null;
+  default_prompt_id?: number | null;
+  default_mode?: TransformMode | null;
+}
+
+/**
+ * `update_transformation_novel` 入参:后端 snake_case DTO,三个默认字段可空。
+ * null 表示清空存量默认值(后端 update 行为:用 payload 覆盖 cur.default_*)。
+ */
+export interface UpdateTransformationNovelInput {
+  id: number;
+  title: string;
+  default_model_config_id?: number | null;
+  default_prompt_id?: number | null;
+  default_mode?: TransformMode | null;
 }
 
 /** 转换模式:`compress` = 内容压缩,`style` = 文风转换。prompt.kind 必须与此对齐。 */
 export type TransformMode = 'compress' | 'style';
+
+// === Batch 工作流 ===
+/** 后端 `BatchStatus` 状态机:`pending` → `running` → (`completed`|`terminated`|`cancelled`),失败时可转 `paused` 等用户决策。 */
+export type BatchStatus =
+  | 'pending' | 'running' | 'paused'
+  | 'completed' | 'terminated' | 'cancelled';
+
+/** 章节失败时的整批处置策略。 */
+export type OnFailurePolicy =
+  | 'pause_and_review' | 'terminate' | 'skip_failed';
+
+export interface Batch {
+  id: number;
+  tn_id: number;
+  label: string | null;
+  on_failure_policy: OnFailurePolicy;
+  status: BatchStatus;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface BatchStatusCount {
+  pending: number;
+  running: number;
+  paused: number;
+  completed: number;
+  terminated: number;
+  cancelled: number;
+}
+
+export interface CreateBatchInput {
+  tn_id: number;
+  label: string | null;
+  on_failure_policy: OnFailurePolicy;
+  chapter_ids: number[];
+}
+
+/** `resume_batch` 入参：`kind` 决定动作；`chapter_id` 仅 retry/skip 时必填。 */
+export type ResumeAction =
+  | { kind: 'retry'; chapter_id: number }
+  | { kind: 'skip'; chapter_id: number }
+  | { kind: 'terminate' };
 
 /**
  * `transformation_chapters.status` 状态机:
  * `pending` → `running` → (`done` | `failed` | `cancelled`)
  * 失败不自动重试 — 用户手动调 `enqueue_transformation_chapters` 重排队。
  */
-export type TransformStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+export type TransformStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'cancelled';
 
 /**
  * `list_transformation_chapters` / `list_transformation_chapters_for_chapter` 返回:
@@ -173,6 +244,8 @@ export interface TransformationChapterRow {
   error: string | null;
   started_at: string | null;
   completed_at: string | null;
+  batch_id: number | null;
+  style_ref_chapter_id: number | null;
 }
 
 /**

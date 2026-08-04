@@ -13,8 +13,10 @@ import type {
   DataAssetChapter, DataAssetRow, CommitDataAssetInput,
   ChapterSegment, ChapterMeta, ChapterContentRow, Chapter, ChapterInput,
   TransformationNovelSummary, TransformationChapterRow,
+  CreateTransformationNovelInput, UpdateTransformationNovelInput,
   EnqueuePayload, EnqueueAllPayload, QueueSnapshot,
   Prompt, PromptInput,
+  Batch, BatchStatusCount, CreateBatchInput, OnFailurePolicy, ResumeAction,
 } from './types';
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -138,11 +140,11 @@ export function listTransformationNovels(dataAssetId?: number): Promise<Transfor
   return invoke<TransformationNovelSummary[]>('list_transformation_novels', { dataAssetId });
 }
 
-export function createTransformationNovel(payload: { data_asset_id: number; title: string }): Promise<number> {
+export function createTransformationNovel(payload: CreateTransformationNovelInput): Promise<number> {
   return invoke<number>('create_transformation_novel', { payload });
 }
 
-export function updateTransformationNovel(payload: { id: number; title: string }): Promise<void> {
+export function updateTransformationNovel(payload: UpdateTransformationNovelInput): Promise<void> {
   return invoke<void>('update_transformation_novel', { payload });
 }
 
@@ -166,6 +168,28 @@ export function enqueueTransformationChapters(payload: EnqueuePayload): Promise<
 export function enqueueAllChapters(payload: EnqueueAllPayload): Promise<number[]> {
   return invoke<number[]>('enqueue_all_chapters', { payload });
 }
+
+// ─── Batches ───────────────────────────────────────────────────────────────
+export const listBatches = (tnId: number): Promise<Batch[]> =>
+  invoke<Batch[]>('list_batches', { tnId });
+
+export const getBatch = (batchId: number): Promise<Batch> =>
+  invoke<Batch>('get_batch', { batchId });
+
+export const createBatch = (payload: CreateBatchInput): Promise<number> =>
+  invoke<number>('create_batch', { payload });
+
+export const updateBatch = (
+  batchId: number,
+  payload: { label?: string | null; on_failure_policy?: OnFailurePolicy },
+): Promise<void> =>
+  invoke<void>('update_batch', { batchId, payload });
+
+export const listBatchChapters = (batchId: number): Promise<TransformationChapterRow[]> =>
+  invoke<TransformationChapterRow[]>('list_batch_chapters', { batchId });
+
+export const countBatchesByStatus = (tnId: number): Promise<BatchStatusCount> =>
+  invoke<BatchStatusCount>('count_batches_by_status', { tnId });
 
 // ─── Queue ─────────────────────────────────────────────────────────────────
 export function getQueueSnapshot(): Promise<QueueSnapshot> {
@@ -192,3 +216,8 @@ export function deletePrompt(id: number): Promise<void> {
 export function countPromptUsage(promptId: number): Promise<number> {
   return invoke<number>('count_transformation_chapters_by_prompt', { promptId });
 }
+export const resumeBatch = (
+  batchId: number,
+  action: ResumeAction,
+): Promise<Batch> =>
+  invoke<Batch>('resume_batch', { batchId, action });

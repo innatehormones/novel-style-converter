@@ -25,6 +25,9 @@ const sampleTn: TransformationNovelSummary = {
   title: 'A_热血版',
   created_at: '2026-07-26T00:00:00Z',
   chapters_count: 0,
+  default_model_config_id: null,
+  default_prompt_id: null,
+  default_mode: null,
 };
 
 const sampleDa: DataAssetRow = {

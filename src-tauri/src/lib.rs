@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use nsc_core::ai::{AiProvider, OpenAiProvider};
 use nsc_core::db::Db;
-use nsc_core::transformer::{JobQueue, Notifier};
+use nsc_core::transformer::{BatchScheduler, JobQueue, Notifier};
 
 mod commands;
 
@@ -23,7 +23,7 @@ pub fn run() {
     db.lock().expect("seed lock").seed_default_model_from_env().expect("seed default model from env");
 
     let db_path_for_workers = path.clone();
-    let queue = Arc::new(JobQueue::new(
+    let job_queue = Arc::new(JobQueue::new(
         2,
         move || Ok(Db::open(&db_path_for_workers).expect("worker db open")),
         |cfg: &nsc_core::models::ModelConfig| -> Box<dyn AiProvider> {
@@ -36,13 +36,27 @@ pub fn run() {
             )
         },
     ));
-    let notify: Notifier = Arc::new(|| {});
-    queue.set_notifier(notify);
+    let scheduler = Arc::new(BatchScheduler::new(path.clone(), job_queue.clone()));
+    {
+        let sched = scheduler.clone();
+        let notify: Notifier = Arc::new(move |tid, success, error| {
+            let res = if success {
+                sched.on_chapter_done(tid)
+            } else {
+                sched.on_chapter_failed(tid, error.unwrap_or_default())
+            };
+            if let Err(e) = res {
+                eprintln!("[BatchScheduler] notify 处理失败: {e}");
+            }
+        });
+        job_queue.set_notifier(notify);
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(db)
-        .manage(queue)
+        .manage(job_queue)
+        .manage(scheduler)
         .setup(|_app| Ok(()))
         .invoke_handler(tauri::generate_handler![
             commands::models::list_models,
@@ -82,6 +96,13 @@ pub fn run() {
             commands::prompts::upsert_prompt,
             commands::prompts::delete_prompt,
             commands::prompts::count_transformation_chapters_by_prompt,
+            commands::batches::list_batches,
+            commands::batches::get_batch,
+            commands::batches::create_batch,
+            commands::batches::update_batch,
+            commands::batches::list_batch_chapters,
+            commands::batches::count_batches_by_status,
+            commands::batches::resume_batch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

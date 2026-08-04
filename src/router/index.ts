@@ -36,6 +36,12 @@ const router = createRouter({
       component: Transform,
       name: 'transform',
     },
+    {
+      path: '/library/transformation/:tnId',
+      name: 'transformation-detail',
+      component: () => import('../views/TransformationNovelDetail.vue'),
+      props: true,
+    },
     { path: '/prompts', component: Prompts },
     { path: '/models', component: Models },
   ],

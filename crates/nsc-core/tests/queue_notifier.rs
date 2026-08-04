@@ -32,7 +32,7 @@ fn enqueue_fires_notifier() {
 
     let count = Arc::new(AtomicUsize::new(0));
     let count_for_cb = count.clone();
-    queue.set_notifier(Arc::new(move || {
+    queue.set_notifier(Arc::new(move |_tid, _success, _err| {
         count_for_cb.fetch_add(1, Ordering::SeqCst);
     }));
 

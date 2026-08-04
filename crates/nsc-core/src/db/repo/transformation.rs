@@ -17,11 +17,13 @@ impl<'a> TransformationChapterRepo<'a> {
         self.conn.execute(
             "INSERT INTO transformation_chapters \
              (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
-              ctx_prev_original, ctx_prev_transformed, ctx_next_original, status) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending')",
+              ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
+              batch_id, style_ref_chapter_id, status) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending')",
             params![
                 t.transformation_novel_id, t.chapter_id, mode, t.prompt_id, t.model_config_id,
                 t.ctx_prev_original, t.ctx_prev_transformed, t.ctx_next_original,
+                t.batch_id, t.style_ref_chapter_id,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -66,6 +68,42 @@ impl<'a> TransformationChapterRepo<'a> {
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
+    /// 同一 batch 内所有 tc 行,按 chapter_idx ASC 排(join chapters 表)。
+    /// 排序列 idx 在重排序时稳定;同 idx 用 tc.id 兜底。
+    pub fn list_by_batch(&self, batch_id: i64) -> Result<Vec<TransformationChapter>> {
+        // 显式列前缀避免 SELECT id 歧义(chapters / transformation_chapters 都有 id)。
+        let sql = format!(
+            "SELECT transformation_chapters.id, transformation_chapters.transformation_novel_id, \
+                    transformation_chapters.chapter_id, transformation_chapters.mode, \
+                    transformation_chapters.prompt_id, transformation_chapters.model_config_id, \
+                    transformation_chapters.ctx_prev_original, \
+                    transformation_chapters.ctx_prev_transformed, \
+                    transformation_chapters.ctx_next_original, \
+                    transformation_chapters.status, transformation_chapters.result_content, \
+                    transformation_chapters.tokens_in, transformation_chapters.tokens_out, \
+                    transformation_chapters.error, transformation_chapters.started_at, \
+                    transformation_chapters.completed_at, transformation_chapters.batch_id, \
+                    transformation_chapters.style_ref_chapter_id \
+             FROM transformation_chapters \
+             JOIN chapters c ON c.id = transformation_chapters.chapter_id \
+             WHERE transformation_chapters.batch_id = ?1 \
+             ORDER BY c.idx ASC, transformation_chapters.id ASC"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![batch_id], |row| from_row(row))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// 同一 batch 内 tc 行数(给 UI 进度条用)。
+    pub fn count_by_batch(&self, batch_id: i64) -> Result<i64> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM transformation_chapters WHERE batch_id = ?1",
+            params![batch_id],
+            |r| r.get(0),
+        )?;
+        Ok(n)
+    }
+
     pub fn mark_running(&self, id: i64) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         self.conn.execute(
@@ -96,6 +134,18 @@ impl<'a> TransformationChapterRepo<'a> {
         Ok(())
     }
 
+    /// 标 skipped —— 保留 error 字段（用户事后能看到原因）；清空 result_content 与 tokens。
+    pub fn mark_skipped(&self, id: i64, error: String) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE transformation_chapters \
+             SET status='skipped', error=?2, result_content=NULL, tokens_in=NULL, tokens_out=NULL, \
+                 completed_at=?3 WHERE id=?1",
+            params![id, error, now],
+        )?;
+        Ok(())
+    }
+
     pub fn reset_to_pending(&self, id: i64) -> Result<()> {
         self.conn.execute(
             "UPDATE transformation_chapters \
@@ -112,7 +162,7 @@ const SELECT_SQL: &str =
     "SELECT id, transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
             ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
             status, result_content, tokens_in, tokens_out, \
-            error, started_at, completed_at \
+            error, started_at, completed_at, batch_id, style_ref_chapter_id \
      FROM transformation_chapters";
 
 fn parse_ts(idx: usize, s: &str) -> rusqlite::Result<DateTime<Utc>> {
@@ -145,6 +195,7 @@ fn from_row(row: &Row) -> rusqlite::Result<TransformationChapter> {
             "running" => TransformStatus::Running,
             "done" => TransformStatus::Done,
             "failed" => TransformStatus::Failed,
+            "skipped" => TransformStatus::Skipped,
             _ => TransformStatus::Cancelled,
         },
         result_content: row.get(10)?,
@@ -153,6 +204,8 @@ fn from_row(row: &Row) -> rusqlite::Result<TransformationChapter> {
         error: row.get(13)?,
         started_at: started.as_deref().map(|s| parse_ts(14, s)).transpose()?,
         completed_at: completed.as_deref().map(|s| parse_ts(15, s)).transpose()?,
+        batch_id: row.get(16)?,
+        style_ref_chapter_id: row.get(17)?,
     })
 }
 
@@ -162,6 +215,7 @@ fn status_str(s: TransformStatus) -> &'static str {
         TransformStatus::Running => "running",
         TransformStatus::Done => "done",
         TransformStatus::Failed => "failed",
+        TransformStatus::Skipped => "skipped",
         TransformStatus::Cancelled => "cancelled",
     }
 }

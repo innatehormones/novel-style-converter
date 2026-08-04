@@ -16,7 +16,12 @@ use super::job::SharedQueue;
 
 pub type DbFactory = Arc<dyn Fn() -> Result<Db> + Send + Sync>;
 pub type ProviderFactory = Arc<dyn Fn(&ModelConfig) -> Box<dyn AiProvider> + Send + Sync>;
-pub type Notifier = Arc<dyn Fn() + Send + Sync>;
+/// 队列状态变更回调。`(tid, success, error)`:
+/// - `enqueue` → `(tid, false, None)`
+/// - Done → `(tid, true, None)`
+/// - Failed (含 prep 失败) → `(tid, false, Some(err))`
+/// 闭包在 worker 线程上执行 —— 不要在闭包里做重活或再次阻塞。
+pub type Notifier = Arc<dyn Fn(i64, bool, Option<String>) + Send + Sync>;
 
 type NotifySlot = Arc<std::sync::Mutex<Option<Notifier>>>;
 
@@ -92,9 +97,9 @@ impl JobQueue {
         *self.notify.lock().expect("notify lock") = Some(notifier);
     }
 
-    fn fire(notify: &NotifySlot) {
+    fn fire(notify: &NotifySlot, tid: i64, success: bool, error: Option<String>) {
         if let Some(n) = notify.lock().expect("notify lock").as_ref() {
-            n();
+            n(tid, success, error);
         }
     }
 
@@ -104,7 +109,7 @@ impl JobQueue {
     pub fn enqueue(&self, job: JobSpec) -> i64 {
         let id = job.transformation_id;
         self.tx.send(job).expect("queue alive");
-        Self::fire(&self.notify);
+        Self::fire(&self.notify, id, false, None);
         id
     }
 
@@ -151,8 +156,8 @@ async fn run_job(
         Ok(p) => p,
         Err(err) => {
             let _ = db.transformation_chapters().mark_failed(tid, err.clone());
-            push_failed(&shared, tid, String::new(), 0, err).await;
-            JobQueue::fire(&notify);
+            push_failed(&shared, tid, String::new(), 0, err.clone()).await;
+            JobQueue::fire(&notify, tid, false, Some(err));
             return db;
         }
     };
@@ -189,17 +194,18 @@ async fn run_job(
                 final_state.chapter_idx,
                 tokens_in, tokens_out,
             ).await;
+            JobQueue::fire(&notify, tid, true, None);
         }
         DbWrite::Failed { err } => {
             push_failed(
                 &shared, tid,
                 final_state.chapter_title,
                 final_state.chapter_idx,
-                err,
+                err.clone(),
             ).await;
+            JobQueue::fire(&notify, tid, false, Some(err));
         }
     }
-    JobQueue::fire(&notify);
 
     db
 }

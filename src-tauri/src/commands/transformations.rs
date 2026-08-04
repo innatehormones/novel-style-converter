@@ -24,6 +24,8 @@ pub struct TransformationChapterRow {
     pub error: Option<String>,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
+    pub batch_id: Option<i64>,
+    pub style_ref_chapter_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,6 +82,8 @@ fn join_chapter_info(
                 error: r.error,
                 started_at: r.started_at.map(|t| t.to_rfc3339()),
                 completed_at: r.completed_at.map(|t| t.to_rfc3339()),
+                batch_id: r.batch_id,
+                style_ref_chapter_id: r.style_ref_chapter_id,
             }
         })
         .collect()
@@ -187,6 +191,8 @@ pub fn enqueue_transformation_chapters(
                     ctx_prev_original: payload.ctx_prev_original,
                     ctx_prev_transformed: payload.ctx_prev_transformed,
                     ctx_next_original: payload.ctx_next_original,
+                    batch_id: None,            // 既有 enqueue 路径不接 batch
+                    style_ref_chapter_id: None,
                 })
                 .map_err(|e| e.to_string())?;
             ids.push(id);

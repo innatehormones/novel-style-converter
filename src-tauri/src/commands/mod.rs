@@ -1,3 +1,4 @@
+pub mod batches;
 pub mod chapters;
 pub mod cleaning;
 pub mod data_assets;

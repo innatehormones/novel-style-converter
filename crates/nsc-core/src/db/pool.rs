@@ -6,7 +6,7 @@ use crate::models::default_from_env;
 
 use super::migrate::SCHEMAS;
 use super::repo::{
-    ChapterRepo, DataAssetRepo, ModelConfigRepo, PromptRepo, TransformationChapterRepo,
+    BatchRepo, ChapterRepo, DataAssetRepo, ModelConfigRepo, PromptRepo, TransformationChapterRepo,
     TransformationNovelRepo, UploadRepo,
 };
 
@@ -19,7 +19,7 @@ use super::repo::{
 /// 捕获 `db_path: PathBuf`,在 worker 内部调 `Db::open(&path)` 拿 owned `Db`,
 /// 操作完即 drop。
 #[derive(Debug)]
-pub struct Db { conn: Connection }
+pub struct Db { pub conn: Connection }
 
 impl Db {
     /// 打开或创建 SQLite 文件,跑未应用的 migrations。父目录需自行 `create_dir_all`。
@@ -53,6 +53,7 @@ impl Db {
     pub fn prompts(&self) -> PromptRepo<'_> { PromptRepo { conn: &self.conn } }
     pub fn model_configs(&self) -> ModelConfigRepo<'_> { ModelConfigRepo { conn: &self.conn } }
     pub fn data_assets(&self) -> DataAssetRepo<'_> { DataAssetRepo { conn: &self.conn } }
+    pub fn batches(&self) -> BatchRepo<'_> { BatchRepo { conn: &self.conn } }
 
     pub fn seed_builtin_prompts(&self) -> Result<()> {
         self.prompts().seed_builtin_if_empty()
@@ -66,9 +67,11 @@ impl Db {
 
     /// 返回已应用的 schema 版本列表(按 version 升序)。供迁移测试和
     /// 升级诊断用;生产代码不需要直接关心。
+    /// 排序按 `LENGTH(version), version`,让 "v10" 排在 "v9" 之后
+    /// (纯字符串排序会让 "v10" 排在 "v2" 前,版本号进两位后会撞这个坑)。
     pub fn applied_schema_versions(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
-            "SELECT version FROM schema_versions ORDER BY version",
+            "SELECT version FROM schema_versions ORDER BY LENGTH(version), version",
         )?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

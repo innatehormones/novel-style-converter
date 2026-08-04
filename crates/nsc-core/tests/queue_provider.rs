@@ -100,6 +100,8 @@ fn seed_db(path: &std::path::Path) -> (Chapter, nsc_core::models::Prompt, i64, i
             ctx_prev_original: 0,
             ctx_prev_transformed: 0,
             ctx_next_original: 0,
+            batch_id: None,
+            style_ref_chapter_id: None,
         })
         .expect("insert transformation_chapter");
 
@@ -172,6 +174,8 @@ async fn worker_hits_url_from_model_config_base_url() {
                 ctx_prev_original: 0,
                 ctx_prev_transformed: 0,
                 ctx_next_original: 0,
+                batch_id: None,
+                style_ref_chapter_id: None,
             })
             .unwrap()
     };
@@ -265,6 +269,8 @@ async fn worker_marks_failed_on_http_401() {
                 ctx_prev_original: 0,
                 ctx_prev_transformed: 0,
                 ctx_next_original: 0,
+                batch_id: None,
+                style_ref_chapter_id: None,
             })
             .unwrap()
     };
@@ -387,6 +393,8 @@ async fn provider_factory_receives_correct_base_url_per_job() {
                 ctx_prev_original: 0,
                 ctx_prev_transformed: 0,
                 ctx_next_original: 0,
+                batch_id: None,
+                style_ref_chapter_id: None,
             })
             .unwrap();
         let tb = db
@@ -400,6 +408,8 @@ async fn provider_factory_receives_correct_base_url_per_job() {
                 ctx_prev_original: 0,
                 ctx_prev_transformed: 0,
                 ctx_next_original: 0,
+                batch_id: None,
+                style_ref_chapter_id: None,
             })
             .unwrap();
         (ta, tb)

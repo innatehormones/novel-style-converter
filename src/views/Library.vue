@@ -86,6 +86,7 @@
             <Button size="small" @click="onTransform(row.id)" disabled title="Phase 3 上线">
               ▶ 转换
             </Button>
+            <Button size="small" @click="goDetail(row.id)">详情</Button>
             <Button size="small" @click="startRename(row.id, row.title)">重命名</Button>
             <Button size="small" kind="danger" @click="onDeleteTn(row.id, row.title)">删除</Button>
           </template>
@@ -339,6 +340,10 @@ function goDataAsset(id: number) {
 
 function goParse(uploadId: number) {
   void router.push({ name: 'parse-wizard', params: { uploadId } });
+}
+
+function goDetail(tnId: number) {
+  void router.push({ name: 'transformation-detail', params: { tnId: String(tnId) } });
 }
 </script>
 
