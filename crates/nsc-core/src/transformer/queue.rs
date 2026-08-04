@@ -1,5 +1,5 @@
 use std::result::Result as StdResult;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 
 use tokio::sync::{mpsc, Mutex};
 
@@ -56,6 +56,11 @@ impl JobQueue {
         let db_factory: DbFactory = Arc::new(db_factory);
         let provider_factory: ProviderFactory = Arc::new(provider_factory);
         let notify: NotifySlot = Arc::new(std::sync::Mutex::new(None));
+        // 屏障同步 worker 与主线程:`JobQueue::new` 返回前确保每个 worker
+        // 都已进入 recv 循环,避免 `q.enqueue()` 在 worker 还没 ready 时就 send,
+        // 导致 rx 被 drop → SendError。失败路径(runtime 构建失败 / db_factory
+        // 返回 Err)也 wait,保证主线程不死锁。
+        let ready = Arc::new(Barrier::new(workers + 1));
 
         for _ in 0..workers {
             let shared = shared.clone();
@@ -63,19 +68,27 @@ impl JobQueue {
             let provider_factory = provider_factory.clone();
             let rx = rx.clone();
             let notify = notify.clone();
+            let ready = ready.clone();
             std::thread::spawn(move || {
                 let rt = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                 {
                     Ok(rt) => rt,
-                    Err(_) => return,
+                    Err(_) => {
+                        ready.wait();
+                        return;
+                    }
                 };
                 rt.block_on(async move {
                     let mut db = match db_factory() {
                         Ok(d) => d,
-                        Err(_) => return,
+                        Err(_) => {
+                            ready.wait();
+                            return;
+                        }
                     };
+                    ready.wait();
                     loop {
                         let job = {
                             let mut guard = rx.lock().await;
@@ -88,6 +101,7 @@ impl JobQueue {
                 });
             });
         }
+        ready.wait();
         Self { tx, shared, notify }
     }
 
