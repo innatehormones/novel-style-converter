@@ -2,7 +2,7 @@
 
 **日期**:2026-08-03
 **作者**:brainstorming 阶段产物
-**状态**:已批准（待 writing-plans → 实施）
+**状态**:已被 `2026-08-04-workflow-results-design.md` 部分替代；工作流结果模型、章节重复转换、生命周期与失败处理以新 spec 为准
 **关联 backlog**:压缩+文风组合 prompt、全本自动逐章转换、`auto_continue` 接力实现、章节一览 tab 内的"新建批量/勾选"交互
 **关联旧文档**:本 spec 替代先前围绕"批号/frontier/serial/auto_continue"的非正式约定（无 doc 落盘）
 
