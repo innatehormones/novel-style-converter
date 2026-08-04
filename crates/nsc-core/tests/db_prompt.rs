@@ -37,6 +37,9 @@ fn setup_tn(db: &Db) -> (i64, i64) {
     let tn_id = db.transformation_novels().insert(&NewTransformationNovel {
         data_asset_id: da_id,
         title: "N".into(),
+        default_model_config_id: None,
+        default_prompt_id: None,
+        default_mode: None,
     }).unwrap();
     let cid = db.chapters().insert(&NewChapter {
         data_asset_id: da_id,

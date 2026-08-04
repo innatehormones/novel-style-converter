@@ -83,6 +83,9 @@ pub fn create_transformation_novel(
         .insert(&NewTransformationNovel {
             data_asset_id: payload.data_asset_id,
             title: title.to_string(),
+            default_model_config_id: None,
+            default_prompt_id: None,
+            default_mode: None,
         })
         .map_err(|e| e.to_string())
 }
@@ -107,6 +110,9 @@ pub fn update_transformation_novel(
         data_asset_id: cur.data_asset_id,
         title: title.to_string(),
         created_at: cur.created_at,
+        default_model_config_id: cur.default_model_config_id,
+        default_prompt_id: cur.default_prompt_id,
+        default_mode: cur.default_mode,
     };
     db.transformation_novels().update(&next).map_err(|e| e.to_string())
 }

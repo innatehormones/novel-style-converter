@@ -9,6 +9,9 @@ fn n() -> TransformationNovel {
         data_asset_id: 1,
         title: "T".into(),
         created_at: chrono::Utc::now(),
+        default_model_config_id: None,
+        default_prompt_id: None,
+        default_mode: None,
     }
 }
 fn ch(id: i64, idx: i32, body: &str) -> (Chapter, String) {

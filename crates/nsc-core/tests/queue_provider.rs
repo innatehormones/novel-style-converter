@@ -71,6 +71,9 @@ fn seed_db(path: &std::path::Path) -> (Chapter, nsc_core::models::Prompt, i64, i
         .insert(&NewTransformationNovel {
             data_asset_id: da_id,
             title: "Test".into(),
+            default_model_config_id: None,
+            default_prompt_id: None,
+            default_mode: None,
         })
         .expect("insert transformation_novel");
 

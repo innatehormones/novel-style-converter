@@ -13,6 +13,9 @@ fn tn_references_data_asset_id() {
     let da_id = db.data_assets().insert(&NewDataAsset { upload_id: uid, title: "n".into() }).unwrap();
     let tn_id = db.transformation_novels().insert(&NewTransformationNovel {
         data_asset_id: da_id, title: "compact".into(),
+        default_model_config_id: None,
+        default_prompt_id: None,
+        default_mode: None,
     }).unwrap();
     let got = db.transformation_novels().get(tn_id).unwrap().unwrap();
     assert_eq!(got.data_asset_id, da_id);
@@ -30,8 +33,18 @@ fn list_by_data_asset() {
         word_count: 0,
     }).unwrap();
     let da_id = db.data_assets().insert(&NewDataAsset { upload_id: uid, title: "n".into() }).unwrap();
-    db.transformation_novels().insert(&NewTransformationNovel { data_asset_id: da_id, title: "a".into() }).unwrap();
-    db.transformation_novels().insert(&NewTransformationNovel { data_asset_id: da_id, title: "b".into() }).unwrap();
+    db.transformation_novels().insert(&NewTransformationNovel {
+        data_asset_id: da_id, title: "a".into(),
+        default_model_config_id: None,
+        default_prompt_id: None,
+        default_mode: None,
+    }).unwrap();
+    db.transformation_novels().insert(&NewTransformationNovel {
+        data_asset_id: da_id, title: "b".into(),
+        default_model_config_id: None,
+        default_prompt_id: None,
+        default_mode: None,
+    }).unwrap();
     let list = db.transformation_novels().list_by_data_asset(da_id).unwrap();
     assert_eq!(list.len(), 2);
 }

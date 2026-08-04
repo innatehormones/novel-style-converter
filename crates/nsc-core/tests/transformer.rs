@@ -20,6 +20,9 @@ fn fixture() -> (TransformationNovel, Chapter, Prompt, ModelConfig) {
     let novel = TransformationNovel {
         id: 1, data_asset_id: 1, title: "T".into(),
         created_at: chrono::Utc::now(),
+        default_model_config_id: None,
+        default_prompt_id: None,
+        default_mode: None,
     };
     let chapter = Chapter {
         id: 2, data_asset_id: 1, idx: 5, title: "ch5".into(),
