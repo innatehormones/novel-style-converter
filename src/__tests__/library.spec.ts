@@ -35,10 +35,10 @@ const sampleDa: DataAssetRow = {
   upload_id: 1,
   title: 'A',
   parsed_at: '2026-07-26T00:00:00Z',
-  locked_at: null,
   filename: 'A.txt',
   byte_size: 100,
   word_count: 0,
+  tn_count: 0,
 };
 
 describe('library store', () => {

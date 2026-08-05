@@ -45,7 +45,7 @@ describe('State 1 → 2 transition via parse.vue → DataAsset.vue', () => {
           return fullText;
         case 'list_data_assets':
           return [
-            { id: 42, upload_id: 7, title: '第一卷', parsed_at: '2026-07-29T00:00:00Z', locked_at: null, filename: 'novel.txt', byte_size: fullBytes, word_count: 8 },
+            { id: 42, upload_id: 7, title: '第一卷', parsed_at: '2026-07-29T00:00:00Z', filename: 'novel.txt', byte_size: fullBytes, word_count: 8, tn_count: 0 },
           ];
         default:
           throw new Error(`unexpected cmd: ${cmd}`);
@@ -116,7 +116,7 @@ describe('State 1 → 2 transition via parse.vue → DataAsset.vue', () => {
       if (cmd === 'list_data_asset_chapters') return chList;
       if (cmd === 'get_data_asset_content') return text;
       if (cmd === 'list_data_assets') {
-        return [{ id: 1, upload_id: 0, title: 'multi', parsed_at: '2026-07-29T00:00:00Z', locked_at: null, filename: 'multi.txt', byte_size: text.length, word_count: 0 }];
+        return [{ id: 1, upload_id: 0, title: 'multi', parsed_at: '2026-07-29T00:00:00Z', filename: 'multi.txt', byte_size: text.length, word_count: 0, tn_count: 0 }];
       }
       throw new Error(`unexpected cmd: ${cmd}`);
     });
@@ -131,16 +131,16 @@ describe('State 1 → 2 transition via parse.vue → DataAsset.vue', () => {
     expect(store.selectedContent).toBe('第六章 归家\n回家吃饭。');
   });
 
-  it('locked data_asset 不再 commit 同一 upload', async () => {
-    // simulate: 已经有 data_asset,parse wizard 试图再次 commit 应被后端拒绝
+  it('重复 commit 同 upload 被 UNIQUE 约束拦下', async () => {
+    // simulate: data_assets.upload_id UNIQUE 约束触发,后端把 SQLite 错误冒出来。
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === 'commit_data_asset') {
-        throw new Error('upload 7 已有 data_asset,无法重复提交');
+        throw new Error('UNIQUE constraint failed: data_assets.upload_id');
       }
       return [];
     });
     const chaptersStore = useChaptersStore();
     await chaptersStore.load(7);
-    await expect(chaptersStore.commit('dup')).rejects.toThrow('已有 data_asset');
+    await expect(chaptersStore.commit('dup')).rejects.toThrow('UNIQUE constraint');
   });
 });
