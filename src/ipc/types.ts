@@ -173,63 +173,71 @@ export interface UpdateTransformationNovelInput {
 /** 转换模式:`compress` = 内容压缩,`style` = 文风转换。prompt.kind 必须与此对齐。 */
 export type TransformMode = 'compress' | 'style';
 
-// === Batch 工作流 ===
-/** 后端 `BatchStatus` 状态机:`pending` → `running` → (`completed`|`terminated`|`cancelled`),失败时可转 `paused` 等用户决策。 */
-export type BatchStatus =
-  | 'pending' | 'running' | 'paused'
-  | 'completed' | 'terminated' | 'cancelled';
+// === Workflow 工作流 ===
+/** 后端 `BatchStatus` 收敛到两态:`running` / `stopped`(spec §3.3)。Stopped 后只能 retry 空槽。 */
+export type WorkflowStatus = 'running' | 'stopped';
 
-/** 章节失败时的整批处置策略。 */
-export type OnFailurePolicy =
-  | 'pause_and_review' | 'terminate' | 'skip_failed';
-
-export interface Batch {
+/**
+ * `list_workflows` / `get_workflow` 返回:工作流汇总 + 章节计数。
+ * counts 直接嵌在行内 —— 不用单独调 count 接口。
+ */
+export interface WorkflowSummary {
   id: number;
   tn_id: number;
   label: string | null;
-  on_failure_policy: OnFailurePolicy;
-  status: BatchStatus;
+  status: WorkflowStatus;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;
+  done_count: number;
+  failed_count: number;
+  skipped_count: number;
+  total_count: number;
 }
 
-export interface BatchStatusCount {
-  pending: number;
-  running: number;
-  paused: number;
-  completed: number;
-  terminated: number;
-  cancelled: number;
+/** `list_workflow_chapters` 返回:tc 行 + 章节标题/idx + 关联结果槽预览。 */
+export interface WorkflowChapterRow {
+  tc_id: number;
+  chapter_id: number;
+  chapter_idx: number;
+  chapter_title: string;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+  error: string | null;
+  content_preview: string | null;
+  is_empty_slot: boolean;
 }
 
-export interface CreateBatchInput {
+/** `list_transformation_source_chapters` 返回:tn 下全部源章节 + 非空结果数。 */
+export interface SourceChapterRow {
+  chapter_id: number;
+  idx: number;
+  title: string;
+  word_count: number;
+  non_empty_result_count: number;
+}
+
+/** `list_chapter_workflow_results` 返回:某源章节在所有工作流里的结果(按 batch_id DESC)。 */
+export interface ChapterWorkflowResultRow {
+  batch_id: number;
+  batch_label: string | null;
+  batch_status: WorkflowStatus;
+  batch_ended_at: string | null;
+  content: string | null;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+}
+
+/** `create_workflow` 入参:后端 snake_case DTO,所有字段必填(spec §5.1)。 */
+export interface CreateWorkflowInput {
   tn_id: number;
   label: string | null;
-  on_failure_policy: OnFailurePolicy;
   chapter_ids: number[];
+  prompt_id: number;
+  model_config_id: number;
+  mode: 'compress' | 'style';
+  ctx_prev_original: number;
+  ctx_prev_transformed: number;
+  ctx_next_original: number;
 }
-
-/** `dispatch_batch` overrides：任一字段为 null 时后端回退到 TN 默认。 */
-export interface DispatchBatchOverrides {
-  prompt_id?: number | null;
-  model_config_id?: number | null;
-  mode?: 'compress' | 'style' | null;
-  ctx_prev_original?: number | null;
-  ctx_prev_transformed?: number | null;
-  ctx_next_original?: number | null;
-}
-
-export interface DispatchBatchInput {
-  batch_id: number;
-  overrides?: DispatchBatchOverrides;
-}
-
-/** `resume_batch` 入参：`kind` 决定动作；`chapter_id` 仅 retry/skip 时必填。 */
-export type ResumeAction =
-  | { kind: 'retry'; chapter_id: number }
-  | { kind: 'skip'; chapter_id: number }
-  | { kind: 'terminate' };
 
 /**
  * `transformation_chapters.status` 状态机:

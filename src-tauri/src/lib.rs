@@ -103,14 +103,14 @@ pub fn run() {
             commands::prompts::upsert_prompt,
             commands::prompts::delete_prompt,
             commands::prompts::count_transformation_chapters_by_prompt,
-            commands::batches::list_batches,
-            commands::batches::get_batch,
-            commands::batches::create_batch,
-            commands::batches::update_batch,
-            commands::batches::list_batch_chapters,
-            commands::batches::count_batches_by_status,
-            commands::batches::dispatch_batch,
-            commands::batches::resume_batch,
+            commands::workflows::list_transformation_source_chapters,
+            commands::workflows::create_workflow,
+            commands::workflows::list_workflows,
+            commands::workflows::get_workflow,
+            commands::workflows::list_workflow_chapters,
+            commands::workflows::stop_workflow,
+            commands::workflows::retry_workflow_chapters,
+            commands::workflows::list_chapter_workflow_results,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

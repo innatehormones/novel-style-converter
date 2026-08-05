@@ -3,7 +3,9 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { listTransformationChapters } from '../ipc/commands';
 import { useBatchesStore } from '../stores/batches';
-import type { Batch, TransformationChapterRow } from '../ipc/types';
+import type { TransformationChapterRow } from '../ipc/types';
+// Task 10 删除本文件前,Batch 类型从旧 store shim 借。
+import type { Batch } from '../stores/batches';
 
 const route = useRoute();
 const router = useRouter();
@@ -82,14 +84,13 @@ const batches = computed<Batch[]>(() => batchesStore.byTn.get(tnId.value) ?? [])
     </table>
 
     <div v-else>
-      <div v-if="batches.find((b) => b.status === 'paused')" class="paused-banner">
-        ⚠ 有工作流处于暂停状态，请处理
+      <div v-if="batches.find((b) => b.status === 'stopped')" class="paused-banner">
+        ⚠ 有工作流处于停止状态,请处理(Task 10 替换为详情页)
       </div>
       <table class="batch-table">
         <thead>
           <tr>
             <th>Label</th>
-            <th>策略</th>
             <th>状态</th>
             <th>创建</th>
             <th>结束</th>
@@ -98,7 +99,6 @@ const batches = computed<Batch[]>(() => batchesStore.byTn.get(tnId.value) ?? [])
         <tbody>
           <tr v-for="b in batches" :key="b.id" @click="openBatchPanel(b)">
             <td>{{ b.label ?? '—' }}</td>
-            <td>{{ b.on_failure_policy }}</td>
             <td>{{ b.status }}</td>
             <td>{{ b.created_at }}</td>
             <td>{{ b.ended_at ?? '—' }}</td>

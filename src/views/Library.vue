@@ -159,6 +159,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import { useLibraryStore } from '../stores/library';
 import { useBatchesStore } from '../stores/batches';
+import { createWorkflow, listTransformationSourceChapters } from '../ipc/commands';
 import { formatSize, formatTime, formatWordCount } from '../utils/format';
 
 const route = useRoute();
@@ -372,16 +373,28 @@ async function onCreateBatch(input: {
   };
 }) {
   try {
-    const batch = await batchesStore.createAndDispatch(
-      {
-        tn_id: createBatchTnId.value,
-        label: input.label,
-        on_failure_policy: input.on_failure_policy,
-        chapter_ids: [],
-      },
-      input.overrides,
-    );
-    void router.push({ name: 'transformation-detail', params: { tnId: String(batch.tn_id) } });
+    // 旧 create_batch+dispatch_batch 隐含"处理 tn 全部章节"语义;这里
+    // 把 source_chapters 拉全 → create_workflow,让 Task 9 之前不破流程。
+    // Task 10 的 CreateBatchDialog 改造后会改成多选 chapter_ids。
+    const sources = await listTransformationSourceChapters(createBatchTnId.value);
+    const chapterIds = sources.map((s) => s.chapter_id);
+    if (chapterIds.length === 0) {
+      showAlert('创建工作流失败', '该转换小说没有可处理的章节。');
+      return;
+    }
+    const workflow = await createWorkflow({
+      tn_id: createBatchTnId.value,
+      label: input.label,
+      chapter_ids: chapterIds,
+      prompt_id: input.overrides.prompt_id,
+      model_config_id: input.overrides.model_config_id,
+      mode: input.overrides.mode,
+      ctx_prev_original: input.overrides.ctx_prev_original,
+      ctx_prev_transformed: input.overrides.ctx_prev_transformed,
+      ctx_next_original: input.overrides.ctx_next_original,
+    });
+    void batchesStore.refresh(workflow.id);
+    void router.push({ name: 'transformation-detail', params: { tnId: String(workflow.tn_id) } });
   } catch (e: unknown) {
     showAlert('创建工作流失败', e instanceof Error ? e.message : String(e));
   }

@@ -67,7 +67,9 @@ import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
 import NumberInput from './ui/NumberInput.vue';
 import { listModels, listPrompts } from '../ipc/commands';
-import type { ModelConfig, OnFailurePolicy, Prompt } from '../ipc/types';
+import type { ModelConfig, Prompt } from '../ipc/types';
+// Task 10 删除本文件前,OnFailurePolicy 临时从旧 store shim 借类型。
+import type { OnFailurePolicy } from '../stores/batches';
 
 const props = defineProps<{
   tnId: number;

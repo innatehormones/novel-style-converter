@@ -16,7 +16,8 @@ import type {
   CreateTransformationNovelInput, UpdateTransformationNovelInput,
   EnqueuePayload, EnqueueAllPayload, QueueSnapshot,
   Prompt, PromptInput,
-  Batch, BatchStatusCount, CreateBatchInput, DispatchBatchInput, OnFailurePolicy, ResumeAction,
+  CreateWorkflowInput, WorkflowSummary, WorkflowChapterRow,
+  SourceChapterRow, ChapterWorkflowResultRow,
 } from './types';
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -169,30 +170,30 @@ export function enqueueAllChapters(payload: EnqueueAllPayload): Promise<number[]
   return invoke<number[]>('enqueue_all_chapters', { payload });
 }
 
-// ─── Batches ───────────────────────────────────────────────────────────────
-export const listBatches = (tnId: number): Promise<Batch[]> =>
-  invoke<Batch[]>('list_batches', { tnId });
+// ─── Workflows ─────────────────────────────────────────────────────────────
+export const listTransformationSourceChapters = (tnId: number): Promise<SourceChapterRow[]> =>
+  invoke<SourceChapterRow[]>('list_transformation_source_chapters', { tnId });
 
-export const getBatch = (batchId: number): Promise<Batch> =>
-  invoke<Batch>('get_batch', { batchId });
+export const createWorkflow = (payload: CreateWorkflowInput): Promise<WorkflowSummary> =>
+  invoke<WorkflowSummary>('create_workflow', { payload });
 
-export const createBatch = (payload: CreateBatchInput): Promise<number> =>
-  invoke<number>('create_batch', { payload });
+export const listWorkflows = (tnId: number): Promise<WorkflowSummary[]> =>
+  invoke<WorkflowSummary[]>('list_workflows', { tnId });
 
-export const dispatchBatch = (input: DispatchBatchInput): Promise<Batch> =>
-  invoke<Batch>('dispatch_batch', { batchId: input.batch_id, overrides: input.overrides ?? {} });
+export const getWorkflow = (batchId: number): Promise<WorkflowSummary> =>
+  invoke<WorkflowSummary>('get_workflow', { batchId });
 
-export const updateBatch = (
-  batchId: number,
-  payload: { label?: string | null; on_failure_policy?: OnFailurePolicy },
-): Promise<void> =>
-  invoke<void>('update_batch', { batchId, payload });
+export const listWorkflowChapters = (batchId: number): Promise<WorkflowChapterRow[]> =>
+  invoke<WorkflowChapterRow[]>('list_workflow_chapters', { batchId });
 
-export const listBatchChapters = (batchId: number): Promise<TransformationChapterRow[]> =>
-  invoke<TransformationChapterRow[]>('list_batch_chapters', { batchId });
+export const stopWorkflow = (batchId: number): Promise<WorkflowSummary> =>
+  invoke<WorkflowSummary>('stop_workflow', { batchId });
 
-export const countBatchesByStatus = (tnId: number): Promise<BatchStatusCount> =>
-  invoke<BatchStatusCount>('count_batches_by_status', { tnId });
+export const retryWorkflowChapters = (batchId: number, chapterIds: number[]): Promise<WorkflowSummary> =>
+  invoke<WorkflowSummary>('retry_workflow_chapters', { batchId, chapterIds });
+
+export const listChapterWorkflowResults = (tnId: number, chapterId: number): Promise<ChapterWorkflowResultRow[]> =>
+  invoke<ChapterWorkflowResultRow[]>('list_chapter_workflow_results', { tnId, chapterId });
 
 // ─── Queue ─────────────────────────────────────────────────────────────────
 export function getQueueSnapshot(): Promise<QueueSnapshot> {
@@ -219,8 +220,3 @@ export function deletePrompt(id: number): Promise<void> {
 export function countPromptUsage(promptId: number): Promise<number> {
   return invoke<number>('count_transformation_chapters_by_prompt', { promptId });
 }
-export const resumeBatch = (
-  batchId: number,
-  action: ResumeAction,
-): Promise<Batch> =>
-  invoke<Batch>('resume_batch', { batchId, action });
