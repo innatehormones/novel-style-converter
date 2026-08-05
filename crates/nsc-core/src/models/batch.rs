@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 pub enum BatchStatus {
     Pending,
     Running,
+    /// 已停(spec §3.3) — 启动失败 / 用户手动停止 / 启动安全恢复统一收口。
+    /// 生命周期不再回 Running;只有 retry_empty_slots 才能往这批里加新 tc 行。
+    Stopped,
     Paused,
     Completed,
     Terminated,

@@ -7,11 +7,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use nsc_core::ai::{AiProvider, ChatRequest, ChatResponse};
 use nsc_core::db::Db;
+use nsc_core::error::Error;
 use nsc_core::models::{
     BatchStatus, NewBatch, NewChapter, NewDataAsset, NewModelConfig, NewTransformationChapter,
     NewTransformationNovel, NewUpload, OnFailurePolicy, ResumeAction, TransformMode, TransformStatus,
 };
-use nsc_core::transformer::{BatchScheduler, JobQueue};
+use nsc_core::transformer::{BatchScheduler, JobQueue, WorkflowCreate};
 
 /// 假 AI provider —— 直接把 user content 作为 response 返还。
 /// 用于不真发 HTTP 的批调度测试。
@@ -326,4 +327,138 @@ fn dispatch_batch_fills_chapters_and_advances() {
     assert!(format!("{err}").contains("不是 Pending"), "got: {err}");
 
     let _ = queue;
+}
+
+/// 原子创建工作流 → 立刻 Running，且 tc 行数与 slot 数都 = chapter_ids.len()。
+#[test]
+fn create_workflow_is_atomic_and_initial_running() {
+    let (_dir, path, _db, tn_id, _da, cids) = seed_with_chapters(3);
+    let (_queue, sched) = build_pair(path.clone());
+
+    let batch = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id,
+        label: Some("v1".into()),
+        chapter_ids: vec![cids[0], cids[1]],
+        prompt_id: 1,
+        model_config_id: 1,
+        mode: TransformMode::Compress,
+        ctx_prev_original: 0,
+        ctx_prev_transformed: 0,
+        ctx_next_original: 0,
+    }).unwrap();
+
+    assert_eq!(batch.status, BatchStatus::Running);
+
+    let db = Db::open(&path).unwrap();
+    // tc 数 == chapter_ids 数
+    let tc_count: i64 = db.conn.query_row(
+        "SELECT COUNT(*) FROM transformation_chapters WHERE batch_id = ?1",
+        rusqlite::params![batch.id], |r| r.get(0)
+    ).unwrap();
+    assert_eq!(tc_count, 2);
+    // slot 数 == chapter_ids 数
+    let slot_count: i64 = db.conn.query_row(
+        "SELECT COUNT(*) FROM workflow_result_chapters wrc \
+         JOIN workflow_results wr ON wr.id = wrc.workflow_result_id \
+         WHERE wr.batch_id = ?1",
+        rusqlite::params![batch.id], |r| r.get(0)
+    ).unwrap();
+    assert_eq!(slot_count, 2);
+}
+
+/// 空 chapter_ids → ValidationError，事务回滚：batches 表零行。
+#[test]
+fn create_workflow_empty_chapter_ids_rejected() {
+    let (_dir, path, _db, tn_id, _da, _cids) = seed_with_chapters(3);
+    let (_queue, sched) = build_pair(path.clone());
+
+    let err = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id,
+        label: None,
+        chapter_ids: vec![],
+        prompt_id: 1,
+        model_config_id: 1,
+        mode: TransformMode::Compress,
+        ctx_prev_original: 0,
+        ctx_prev_transformed: 0,
+        ctx_next_original: 0,
+    }).unwrap_err();
+    assert!(matches!(err, Error::Validation(_)), "got {err:?}");
+
+    let db = Db::open(&path).unwrap();
+    let batch_count: i64 = db.conn.query_row(
+        "SELECT COUNT(*) FROM batches", [], |r| r.get(0)
+    ).unwrap();
+    assert_eq!(batch_count, 0);
+}
+
+/// chapter 归属不一致 → ValidationError，所有写表零行（事务原子回滚）。
+#[test]
+fn create_workflow_chapter_not_in_data_asset_rejected() {
+    let (_dir, path, _db, tn_id, _da, cids) = seed_with_chapters(2);
+    // 第二个 data_asset,塞一个 chapter 不属于 tn 关联的 da。
+    let db = Db::open(&path).unwrap();
+    let upload2 = db.uploads().insert(&NewUpload {
+        sha256: "h2".into(), filename: "y.txt".into(), byte_size: 0,
+        file_path: "/tmp/y.txt".into(), original_text: "".into(), word_count: 0,
+    }).unwrap();
+    let da2 = db.data_assets().insert(&NewDataAsset { upload_id: upload2, title: "DA2".into() }).unwrap();
+    let foreign_cid = db.chapters().insert(&NewChapter {
+        data_asset_id: da2, idx: 1, title: "X".into(),
+        byte_start: 0, byte_end: 1, word_count: 1,
+    }).unwrap();
+    drop(db);
+
+    let (_queue, sched) = build_pair(path.clone());
+    let err = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id,
+        label: None,
+        chapter_ids: vec![cids[0], foreign_cid],
+        prompt_id: 1,
+        model_config_id: 1,
+        mode: TransformMode::Compress,
+        ctx_prev_original: 0,
+        ctx_prev_transformed: 0,
+        ctx_next_original: 0,
+    }).unwrap_err();
+    assert!(matches!(err, Error::Validation(_)), "got {err:?}");
+
+    let db = Db::open(&path).unwrap();
+    let n: i64 = db.conn.query_row("SELECT COUNT(*) FROM batches", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 0);
+    let n: i64 = db.conn.query_row("SELECT COUNT(*) FROM workflow_results", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 0);
+    let n: i64 = db.conn.query_row("SELECT COUNT(*) FROM transformation_chapters", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 0);
+    let n: i64 = db.conn.query_row("SELECT COUNT(*) FROM workflow_result_chapters", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 0);
+}
+
+/// prompt.kind 与 mode 不一致 → ValidationError，不写任何 batch 行。
+#[test]
+fn create_workflow_prompt_kind_mode_mismatch_rejected() {
+    let (_dir, path, db, tn_id, _da, cids) = seed_with_chapters(2);
+    // 取 id=2 那个 Style prompt,与 Compress mode 故意不一致。
+    let style_prompt_id: i64 = db.conn.query_row(
+        "SELECT id FROM prompts WHERE kind = 'style' LIMIT 1", [], |r| r.get(0)
+    ).unwrap();
+    drop(db);
+
+    let (_queue, sched) = build_pair(path.clone());
+    let err = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id,
+        label: None,
+        chapter_ids: vec![cids[0]],
+        prompt_id: style_prompt_id,
+        model_config_id: 1,
+        mode: TransformMode::Compress,
+        ctx_prev_original: 0,
+        ctx_prev_transformed: 0,
+        ctx_next_original: 0,
+    }).unwrap_err();
+    assert!(matches!(err, Error::Validation(_)), "got {err:?}");
+
+    let db = Db::open(&path).unwrap();
+    let n: i64 = db.conn.query_row("SELECT COUNT(*) FROM batches", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 0);
 }

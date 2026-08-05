@@ -40,7 +40,7 @@ impl<'a> BatchRepo<'a> {
 
     /// 设 status 同时自动维护 started_at / ended_at 时间戳。
     /// - Running:started_at 已有则不动,首次写入。
-    /// - Completed/Terminated/Cancelled:ended_at 设 NOW。
+    /// - Completed/Terminated/Cancelled/Stopped:ended_at 设 NOW。
     /// - 其它:仅改 status。
     pub fn set_status(&self, id: i64, status: BatchStatus) -> Result<()> {
         let status_s = status_to_str(status);
@@ -52,7 +52,7 @@ impl<'a> BatchRepo<'a> {
                     params![id, status_s, now],
                 )?;
             }
-            BatchStatus::Completed | BatchStatus::Terminated | BatchStatus::Cancelled => {
+            BatchStatus::Completed | BatchStatus::Terminated | BatchStatus::Cancelled | BatchStatus::Stopped => {
                 self.conn.execute(
                     "UPDATE batches SET status = ?2, ended_at = ?3 WHERE id = ?1",
                     params![id, status_s, now],
@@ -92,6 +92,7 @@ impl<'a> BatchRepo<'a> {
             match s.as_str() {
                 "pending" => counts.pending = n,
                 "running" => counts.running = n,
+                "stopped" => counts.stopped = n,
                 "paused" => counts.paused = n,
                 "completed" => counts.completed = n,
                 "terminated" => counts.terminated = n,
@@ -107,6 +108,7 @@ impl<'a> BatchRepo<'a> {
 pub struct BatchStatusCount {
     pub pending: i64,
     pub running: i64,
+    pub stopped: i64,
     pub paused: i64,
     pub completed: i64,
     pub terminated: i64,
@@ -148,6 +150,7 @@ fn status_to_str(s: BatchStatus) -> &'static str {
     match s {
         BatchStatus::Pending    => "pending",
         BatchStatus::Running    => "running",
+        BatchStatus::Stopped    => "stopped",
         BatchStatus::Paused     => "paused",
         BatchStatus::Completed  => "completed",
         BatchStatus::Terminated => "terminated",
@@ -158,6 +161,7 @@ fn str_to_status(s: &str) -> rusqlite::Result<BatchStatus> {
     match s {
         "pending"    => Ok(BatchStatus::Pending),
         "running"    => Ok(BatchStatus::Running),
+        "stopped"    => Ok(BatchStatus::Stopped),
         "paused"     => Ok(BatchStatus::Paused),
         "completed"  => Ok(BatchStatus::Completed),
         "terminated" => Ok(BatchStatus::Terminated),

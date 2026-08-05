@@ -42,6 +42,20 @@ pub struct BatchOverrides {
     pub ctx_next_original: Option<i32>,
 }
 
+/// `create_workflow` 入参 —— 不走 TN 默认覆盖,字段全是必填。
+#[derive(Debug, Clone)]
+pub struct WorkflowCreate {
+    pub transformation_novel_id: i64,
+    pub label: Option<String>,
+    pub chapter_ids: Vec<i64>,
+    pub prompt_id: i64,
+    pub model_config_id: i64,
+    pub mode: TransformMode,
+    pub ctx_prev_original: i32,
+    pub ctx_prev_transformed: i32,
+    pub ctx_next_original: i32,
+}
+
 impl BatchScheduler {
     pub fn new(db_path: PathBuf, job_queue: Arc<JobQueue>) -> Self {
         Self { db_path, job_queue }
@@ -141,6 +155,127 @@ impl BatchScheduler {
         let batch = db.batches().get(batch_id)?
             .ok_or_else(|| Error::NotFound("batch 写入后回读失败".into()))?;
         Ok(batch)
+    }
+
+    /// 原子创建工作流（spec §5.1）：单事务里写 batches(status='running') +
+    /// workflow_results + N × transformation_chapters(status='pending') +
+    /// N × 空 workflow_result_chapters；事务外派首章。
+    /// 字段全是必填,不回退 TN 默认 —— TN 默认覆盖在 CreateBatchDialog
+    /// 已经收敛到具体值(spec 字段),这里只校验合法性与一致性。
+    pub fn create_workflow(&self, spec: WorkflowCreate) -> Result<Batch> {
+        if spec.chapter_ids.is_empty() {
+            return Err(Error::Validation("必须选择至少一个章节".into()));
+        }
+        let db = Db::open(&self.db_path)?;
+
+        // 1. 校验 TN / chapter 归属 / prompt / model / mode↔prompt.kind 一致
+        let tn = db.transformation_novels().get(spec.transformation_novel_id)?
+            .ok_or_else(|| Error::NotFound(format!("tn {} 不存在", spec.transformation_novel_id)))?;
+        for cid in &spec.chapter_ids {
+            let ch = db.chapters().get(*cid)?
+                .ok_or_else(|| Error::NotFound(format!("chapter {cid} 不存在")))?;
+            if ch.data_asset_id != tn.data_asset_id {
+                return Err(Error::Validation(format!(
+                    "chapter {cid} 不属于 tn 的 data_asset {}", tn.data_asset_id
+                )));
+            }
+        }
+        let prompt = db.prompts().get(spec.prompt_id)?
+            .ok_or_else(|| Error::NotFound(format!("prompt {} 不存在", spec.prompt_id)))?;
+        let model = db.model_configs().get(spec.model_config_id)?
+            .ok_or_else(|| Error::NotFound(format!("model_config {} 不存在", spec.model_config_id)))?;
+        if TransformMode::from(prompt.kind) != spec.mode {
+            return Err(Error::Validation("prompt kind 与 mode 不一致".into()));
+        }
+
+        // 2. 单事务：batch + 结果集 + N × tc + N × 空槽
+        let now = Utc::now().to_rfc3339();
+        let (batch_id, first_tid) = {
+            let tx = db.conn.unchecked_transaction()?;
+            tx.execute(
+                "INSERT INTO batches (transformation_novel_id, label, on_failure_policy, status, created_at) \
+                 VALUES (?1, ?2, 'pause_and_review', 'running', ?3)",
+                rusqlite::params![spec.transformation_novel_id, spec.label, now],
+            )?;
+            let batch_id = tx.last_insert_rowid();
+            tx.execute(
+                "INSERT INTO workflow_results (batch_id, created_at) VALUES (?1, ?2)",
+                rusqlite::params![batch_id, now],
+            )?;
+            let result_id: i64 = tx.query_row(
+                "SELECT id FROM workflow_results WHERE batch_id = ?1",
+                rusqlite::params![batch_id], |r| r.get(0),
+            )?;
+            let mut first_tid: Option<i64> = None;
+            for cid in &spec.chapter_ids {
+                tx.execute(
+                    "INSERT INTO transformation_chapters \
+                     (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
+                      ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
+                      batch_id, style_ref_chapter_id, status) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, 'pending')",
+                    rusqlite::params![
+                        spec.transformation_novel_id, *cid, mode_str(spec.mode),
+                        spec.prompt_id, spec.model_config_id,
+                        spec.ctx_prev_original, spec.ctx_prev_transformed, spec.ctx_next_original,
+                        batch_id,
+                    ],
+                )?;
+                let tid = tx.last_insert_rowid();
+                if first_tid.is_none() { first_tid = Some(tid); }
+                tx.execute(
+                    "INSERT INTO workflow_result_chapters \
+                     (workflow_result_id, chapter_id, content, created_at, updated_at) \
+                     VALUES (?1, ?2, NULL, ?3, ?3)",
+                    rusqlite::params![result_id, cid, now],
+                )?;
+            }
+            tx.execute(
+                "UPDATE batches SET started_at = ?1 WHERE id = ?2",
+                rusqlite::params![now, batch_id],
+            )?;
+            tx.commit()?;
+            (batch_id, first_tid.expect("chapter_ids 非空已校验"))
+        };
+
+        // 3. 派首章（事务外）
+        let dispatch_res = self.dispatch(
+            &db, &tn, &prompt, &model, first_tid,
+            spec.ctx_prev_original, spec.ctx_prev_transformed, spec.ctx_next_original,
+        );
+        if let Err(e) = dispatch_res {
+            // 兜底 safe_stop：原 dispatch 错误回给调用方,batch 内部转 Stopped。
+            self.safe_stop_on_dispatch_failure(batch_id, first_tid, &e.to_string())?;
+            return Err(e);
+        }
+
+        let batch = db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound("batch 写入后回读失败".into()))?;
+        Ok(batch)
+    }
+
+    /// `create_workflow` dispatch 失败的兜底：首章标 failed(若 worker 已置 running 也要拉回),
+    /// 同 batch 其他 pending → skipped,batch → stopped 带 ended_at。
+    fn safe_stop_on_dispatch_failure(&self, batch_id: i64, first_tid: i64, msg: &str) -> Result<()> {
+        let db = Db::open(&self.db_path)?;
+        let now = Utc::now().to_rfc3339();
+        let tx = db.conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE transformation_chapters SET status='failed', error=?2, completed_at=?3 \
+             WHERE id=?1",
+            rusqlite::params![first_tid, msg, now],
+        )?;
+        tx.execute(
+            "UPDATE transformation_chapters SET status='skipped', completed_at=?2 \
+             WHERE batch_id=?1 AND status='pending'",
+            rusqlite::params![batch_id, now],
+        )?;
+        tx.execute(
+            "UPDATE batches SET status='stopped', ended_at=?1 WHERE id=?2",
+            rusqlite::params![now, batch_id],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// 派发一个已有的 Pending batch：自动取 TN 全量章节 → 落 tc 行 → 派首章。
