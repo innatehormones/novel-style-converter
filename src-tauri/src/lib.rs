@@ -21,6 +21,8 @@ pub fn run() {
     }
     let db = Arc::new(Mutex::new(Db::open(&path).expect("failed to open db")));
     db.lock().expect("seed lock").seed_default_model_from_env().expect("seed default model from env");
+    nsc_core::startup_recovery::run(&db.lock().expect("recovery lock").conn)
+        .expect("startup safe-recovery failed");
 
     let db_path_for_workers = path.clone();
     let job_queue = Arc::new(JobQueue::new(

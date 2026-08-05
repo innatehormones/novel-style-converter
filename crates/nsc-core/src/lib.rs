@@ -9,5 +9,6 @@ pub mod transformer;
 pub mod upload;
 pub mod prompts;
 pub mod cleaner;
+pub mod startup_recovery;
 
 pub use error::{Error, Result};
