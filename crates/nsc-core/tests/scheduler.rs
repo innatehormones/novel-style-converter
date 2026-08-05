@@ -540,3 +540,37 @@ fn failed_chapter_marks_failed_and_next_chapter_runs_then_workflow_stops() {
     let final_status = db.batches().get(batch.id).unwrap().unwrap().status;
     assert_eq!(final_status, BatchStatus::Stopped);
 }
+
+/// 回归 guard:1 章 batch 的唯一章节失败后 active=0,batch 必须收尾为 Stopped
+/// (若有人把 'failed' 加回 maybe_finalize_batch 的 active 集合,此测试立即失败)。
+#[test]
+fn last_chapter_failure_finalizes_batch_as_stopped() {
+    let (_dir, path, _db, tn_id, _da, cids) = seed_with_chapters(1);
+    let (_queue, sched) = build_pair(path.clone());
+
+    let batch = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id,
+        label: None,
+        chapter_ids: vec![cids[0]],
+        prompt_id: 1,
+        model_config_id: 1,
+        mode: TransformMode::Compress,
+        ctx_prev_original: 0,
+        ctx_prev_transformed: 0,
+        ctx_next_original: 0,
+    }).unwrap();
+
+    let tid = {
+        let db = Db::open(&path).unwrap();
+        db.transformation_chapters().list_by_batch(batch.id).unwrap()[0].id
+    };
+
+    sched.on_chapter_failed(tid, "simulated LLM error".into()).unwrap();
+
+    let db = Db::open(&path).unwrap();
+    let tc = db.transformation_chapters().get(tid).unwrap().unwrap();
+    assert_eq!(tc.status, TransformStatus::Failed);
+    let b = db.batches().get(batch.id).unwrap().unwrap();
+    assert_eq!(b.status, BatchStatus::Stopped, "1-chapter batch whose only chapter fails must finalize as Stopped");
+    assert!(b.ended_at.is_some(), "ended_at must be set");
+}
