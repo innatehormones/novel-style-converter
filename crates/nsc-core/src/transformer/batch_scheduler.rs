@@ -487,14 +487,19 @@ impl BatchScheduler {
         };
 
         if let Some(tid) = next_tid {
-            // 还有 pending → 取 TN + prompt + model 派发
+            // 还有 pending → 派下一章。prompt_id / model_config_id 从 tc 行直接读,
+            // 跟 create_workflow 派首章对齐:WorkflowCreate.prompt_id/model_config_id
+            // 在事务里已经写进每个 tc 行(`INSERT ... prompt_id, model_config_id`),
+            // 不再回退 tn.default_*(TN 默认可能是 null,而 workflow 显式提供了值)。
+            // 不读 TN 默认这条路径本来会让"用户没填 TN 默认 + workflow 显式选 prompt"
+            // 的合法组合 advance 时 NotFound,工作流卡在第一个 done 不再派下一章。
             let tn_id = batch.transformation_novel_id;
             let tn = db.transformation_novels().get(tn_id)?
                 .ok_or_else(|| Error::NotFound(format!("tn {tn_id} 不存在")))?;
-            let prompt_id = tn.default_prompt_id
-                .ok_or_else(|| Error::NotFound("default_prompt 缺失".into()))?;
-            let model_cfg_id = tn.default_model_config_id
-                .ok_or_else(|| Error::NotFound("default_model_config 缺失".into()))?;
+            let next_tc = db.transformation_chapters().get(tid)?
+                .ok_or_else(|| Error::NotFound(format!("tc {tid} 不存在")))?;
+            let prompt_id = next_tc.prompt_id;
+            let model_cfg_id = next_tc.model_config_id;
             let prompt = db.prompts().get(prompt_id)?
                 .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
             let model = db.model_configs().get(model_cfg_id)?

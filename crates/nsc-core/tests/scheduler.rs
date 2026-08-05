@@ -809,6 +809,104 @@ fn retry_empty_slots_after_stop_succeeds_and_finalizes() {
     }
 }
 
+/// 回归 guard:advance_batch 必须从 tc 行读 prompt_id/model_config_id,
+/// 不能回退到 tn.default_*。用户创建 TN 时若 defaults 留空(常见:TransformDialog
+/// 里点过"重置"),工作流必须仍能用 create_workflow 显式提供的值跑完所有章节。
+///
+/// 旧实现从 tn.default_prompt_id/default_model_config_id 取值,两者为 NULL 时
+/// advance_batch → dispatch → 抛 NotFound → notifier 闭包 eprintln + 吞掉,
+/// batch 永远卡在首章已完成 + 次章 Pending 的状态。
+#[test]
+fn advance_batch_uses_tc_prompt_and_model_when_tn_defaults_null() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tn_null_defaults.db");
+    let db = Db::open(&path).unwrap();
+    db.seed_builtin_prompts().unwrap();
+    let body = "第一章 山村少年\n第二章 走出门\n";
+    let b1 = "第一章 山村少年\n".len() as i64;  // 19 字节
+    let b2 = body.len() as i64;                  // 36 字节
+    let upload_id = db.uploads().insert(&NewUpload {
+        sha256: "h".into(), filename: "x.txt".into(), byte_size: body.len() as i64,
+        file_path: "/tmp/x.txt".into(), original_text: body.into(), word_count: 8,
+    }).unwrap();
+    let da_id = db.data_assets().insert(&NewDataAsset { upload_id, title: "DA".into() }).unwrap();
+    let cfg_id = db.model_configs().insert(&NewModelConfig {
+        name: "mock".into(), base_url: "http://localhost".into(), api_key: "k".into(),
+        model: "m".into(), max_tokens: None, temperature: None, concurrency: 1,
+    }).unwrap();
+    let tn_id = db.transformation_novels().insert(&NewTransformationNovel {
+        data_asset_id: da_id,
+        title: "TN-no-defaults".into(),
+        default_model_config_id: None,
+        default_prompt_id: None,
+        default_mode: None,
+    }).unwrap();
+    let c1 = db.chapters().insert(&NewChapter {
+        data_asset_id: da_id, idx: 1, title: "第一章".into(),
+        byte_start: 0, byte_end: b1, word_count: 4,
+    }).unwrap();
+    let c2 = db.chapters().insert(&NewChapter {
+        data_asset_id: da_id, idx: 2, title: "第二章".into(),
+        byte_start: b1, byte_end: b2, word_count: 4,
+    }).unwrap();
+    let cids = vec![c1, c2];
+    drop(db);
+
+    let (_queue, sched) = build_pair(path.clone());
+
+    let batch = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id,
+        label: Some("null-defaults".into()),
+        chapter_ids: vec![cids[0], cids[1]],
+        prompt_id: 1,           // builtin compress prompt
+        model_config_id: cfg_id,
+        mode: TransformMode::Compress,
+        ctx_prev_original: 0,
+        ctx_prev_transformed: 0,
+        ctx_next_original: 0,
+    }).unwrap();
+    assert_eq!(batch.status, BatchStatus::Running);
+
+    let db = Db::open(&path).unwrap();
+    let tids: Vec<i64> = db.conn.prepare(
+        "SELECT id FROM transformation_chapters WHERE batch_id=?1 ORDER BY id ASC"
+    ).unwrap().query_map(rusqlite::params![batch.id], |r| r.get(0))
+    .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+    // 双保险:tc 行本身已经写入了 prompt_id/model_config_id(供 advance_batch 直接读取)
+    let tc0 = db.transformation_chapters().get(tids[0]).unwrap().unwrap();
+    let tc1 = db.transformation_chapters().get(tids[1]).unwrap().unwrap();
+    assert_eq!(tc0.prompt_id, 1);
+    assert_eq!(tc0.model_config_id, cfg_id);
+    assert_eq!(tc1.prompt_id, 1);
+    assert_eq!(tc1.model_config_id, cfg_id);
+
+    // 手动模拟 worker 完成 c1:noop notifier 不会触发 on_chapter_done,需要手动调。
+    // advance_batch 内部会读 tc1 的 prompt_id/model_config_id(都是有效值,不是 NULL)。
+    db.transformation_chapters().mark_done(tids[0], "OK1".into(), 10, 8).unwrap();
+    drop(db);
+    sched.on_chapter_done(tids[0], String::new()).unwrap();
+
+    // 关键断言:advance_batch 没抛错,tc1 已派发 → status 从 Pending 变成 Running。
+    // 这里不等待 worker 完成(EchoProvider 同步返回,实际会很快 Done),只确认不再 Pending。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let db = Db::open(&path).unwrap();
+        let s = db.transformation_chapters().get(tids[1]).unwrap().unwrap().status;
+        drop(db);
+        if !matches!(s, TransformStatus::Pending) { break; }
+        if std::time::Instant::now() > deadline {
+            panic!("tc1 应被派发(离开 Pending),仍为 {s:?}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let db = Db::open(&path).unwrap();
+    let tc1_after = db.transformation_chapters().get(tids[1]).unwrap().unwrap();
+    assert!(
+        matches!(tc1_after.status, TransformStatus::Running | TransformStatus::Done),
+        "tc1 必须被派发,实际 {:?},error={:?}", tc1_after.status, tc1_after.error
+    );
+}
+
 /// Running 工作流禁止直接重试(spec §10 / Validation:必须先停止)。
 #[test]
 fn retry_on_running_workflow_rejected() {
