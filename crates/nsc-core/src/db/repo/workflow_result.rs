@@ -57,16 +57,6 @@ impl<'a> WorkflowResultRepo<'a> {
         Ok(rows)
     }
 
-    /// 按结果槽 id 写 content;id 不存在时静默 noop(避免干扰 worker 重试路径)。
-    pub fn write_content(&self, slot_id: i64, content: &str) -> Result<()> {
-        let now = Utc::now().to_rfc3339();
-        self.conn.execute(
-            "UPDATE workflow_result_chapters SET content = ?2, updated_at = ?3 WHERE id = ?1",
-            params![slot_id, content, now],
-        )?;
-        Ok(())
-    }
-
     /// 按 (batch_id, chapter_id) 写入内容;槽不存在或结果集缺失时静默 noop,
     /// 让 worker 回调和 retry 路径无需先查 slot id。
     pub fn write_content_by_chapter(

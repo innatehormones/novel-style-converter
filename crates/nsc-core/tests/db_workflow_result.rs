@@ -38,17 +38,10 @@ fn create_result_and_slots_then_list_chapters_returns_empty_slots() {
     assert!(chapters.iter().all(|c| c.content.is_none()));
 
     // 写内容并验证
-    let c2 = chapters.iter().find(|c| c.chapter_id == 2).unwrap();
-    db.workflow_results().write_content(c2.id, "hello").unwrap();
+    db.workflow_results().write_content_by_chapter(batch_id, 2, "hello").unwrap();
     let updated = db.workflow_results().list_chapters(result_id).unwrap();
     let c2_again = updated.iter().find(|c| c.chapter_id == 2).unwrap();
     assert_eq!(c2_again.content.as_deref(), Some("hello"));
-}
-
-#[test]
-fn write_content_unknown_id_is_a_noop() {
-    let db = Db::open_in_memory().unwrap();
-    db.workflow_results().write_content(9999, "x").unwrap(); // 不 panic
 }
 
 /// 与首个用例同构的最小 fixture,多插一章(id=4)供幂等并集用例使用。
