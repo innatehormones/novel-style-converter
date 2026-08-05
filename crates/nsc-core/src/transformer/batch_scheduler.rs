@@ -1,16 +1,14 @@
-//! 批号调度器：按 frontier（context inheritance）串行派发，跨 batch 取前序 done。
+//! 批号调度器:按 frontier 串行派发,跨工作流不共享结果。
 //!
-//! 单例；持 `db_path`（不在 Db 上 Sync）；由 lib.rs 在 JobQueue::set_notifier 时注册。
+//! 单例;持 `db_path`(不在 Db 上 Sync);由 lib.rs 在 JobQueue::set_notifier 时注册。
 //!
-//! 本片只接：
-//! - `create_batch` 写 batch + tc 行 + 算 frontier + 派首章
-//! - `on_chapter_done` / `on_chapter_failed` 派下一章（SkipFailed 不接 → Slice 5）
-//! - 完成判据 → batch 状态迁移
+//! 本片接:
+//! - `create_workflow` 原子事务:batch + workflow_results + N 个 tc + N 个空 slot
+//! - `on_chapter_done` / `on_chapter_failed` 派下一章(失败固定继续,不分支)
+//! - 完成判据 → batch 状态迁移到 Running/Stopped 两态之一
+//! - `safe_stop_on_dispatch_failure` dispatch 失败的兜底
 //!
-//! Slice 5 再加：
-//! - `on_failure_policy` 三分支
-//! - `TransformStatus::Skipped`
-//! - `resume(batch_id, action)`
+//! Task 7 之后还会加:`stop_workflow` 人工停止 + `retry_empty_slots` 重试空槽。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -419,7 +417,7 @@ impl BatchScheduler {
         self.advance_batch(&db, batch_id)
     }
 
-    /// 失败回调:标 failed + 清空 result_content,再 advance_batch 派下一章。
+    /// 失败回调:标 failed + 清空 result_content/tokens,再 advance_batch 派下一章。
     /// 不再按 on_failure_policy 分流(spec §3.3 收敛到单一行为)。
     /// batch 收尾交给 advance_batch → maybe_finalize_batch。
     pub fn on_chapter_failed(&self, tid: i64, error: String) -> Result<()> {
@@ -432,7 +430,8 @@ impl BatchScheduler {
             let tx = db.conn.unchecked_transaction()?;
             tx.execute(
                 "UPDATE transformation_chapters \
-                 SET status='failed', error=?2, completed_at=?3, result_content=NULL \
+                 SET status='failed', error=?2, completed_at=?3, result_content=NULL, \
+                     tokens_in=NULL, tokens_out=NULL \
                  WHERE id=?1",
                 rusqlite::params![tid, error, now],
             )?;

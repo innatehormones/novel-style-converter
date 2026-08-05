@@ -193,10 +193,11 @@ fn seed_batch_world(path: &std::path::Path, policy: OnFailurePolicy) -> (Db, i64
 }
 
 #[test]
-fn failure_marks_failed_and_advances_no_policy_branch() {
+fn failure_marks_failed_and_advances() {
     // Task 4 后 on_chapter_failed 不再按 policy 分流:失败一律 Failed + advance_batch。
     // c1 失败后 batch 仍 Running(noop notifier 不会触发 on_chapter_done),
     // t2 由 advance_batch 派发进入 JobQueue 但尚未完成 → status 还是 Pending/Running。
+    // 单行为已被 Task 4 收敛,本测试不区分 OnFailurePolicy:policy 参数仅做种子注入。
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("fail.db");
     let (db, tn_id, cids) = seed_batch_world(&path, OnFailurePolicy::PauseAndReview);
@@ -219,6 +220,7 @@ fn failure_marks_failed_and_advances_no_policy_branch() {
 
     let t1 = db.transformation_chapters().get(tids[0]).unwrap().unwrap();
     assert_eq!(t1.status, TransformStatus::Failed);
+    // 错误必须保留(旧 SkipFailed 分支会清掉 error)。
     assert_eq!(t1.error.as_deref(), Some("fake error"));
     assert!(t1.result_content.is_none(), "失败时 result_content 必须清空");
 
@@ -263,37 +265,6 @@ fn failure_does_not_cancel_remaining_tc() {
 
     let b = db.batches().get(batch.id).unwrap().unwrap();
     assert_ne!(b.status, BatchStatus::Terminated);
-
-    let _ = queue;
-}
-
-#[test]
-fn failure_marks_failed_not_skipped() {
-    // 旧 SkipFailed 分支:tc 标 Skipped + 继续。新行为:tc 标 Failed + 继续。
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("skip.db");
-    let (db, tn_id, cids) = seed_batch_world(&path, OnFailurePolicy::SkipFailed);
-    let (queue, scheduler) = build_pair(path.clone());
-
-    let batch = scheduler.create_batch(NewBatch {
-        transformation_novel_id: tn_id, label: None,
-        on_failure_policy: OnFailurePolicy::SkipFailed,
-    }, vec![cids[0], cids[1]], nsc_core::transformer::BatchOverrides::default()).unwrap();
-
-    let tids: Vec<i64> = db.conn.prepare(
-        "SELECT id FROM transformation_chapters WHERE batch_id=?1 ORDER BY id ASC"
-    ).unwrap().query_map(rusqlite::params![batch.id], |r| r.get(0))
-    .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-
-    db.transformation_chapters().mark_failed(tids[0], "boom".into()).unwrap();
-    scheduler.on_chapter_failed(tids[0], "boom".into()).unwrap();
-
-    let t1 = db.transformation_chapters().get(tids[0]).unwrap().unwrap();
-    assert_eq!(t1.status, TransformStatus::Failed);
-    assert_ne!(t1.status, TransformStatus::Skipped);
-
-    let b = db.batches().get(batch.id).unwrap().unwrap();
-    assert!(matches!(b.status, BatchStatus::Running), "got {:?}", b.status);
 
     let _ = queue;
 }
