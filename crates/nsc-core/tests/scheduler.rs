@@ -643,3 +643,63 @@ fn worker_success_writes_workflow_result_slot_not_tc_result_content() {
     assert!(!slot_content.is_empty(), "结果槽必须有内容,实际为空");
 }
 
+/// 回归 guard:frontier 不得跨工作流引用兄弟工作流的结果集。
+/// 构造 W1(只灌 c1 结果)+ 散点 tc(c1 done, batch_id=NULL)+ W2(只含 c2),
+/// 期望 W2 内 c2 的 tc.style_ref_chapter_id = None;若有人把 frontier 重新按
+/// tn_id 跨 batch 读 tc 或读 wrc 但忘了过滤 batch_id,本测试立即失败。
+#[test]
+fn frontier_only_reads_current_workflow_result_set() {
+    let (_dir, path, _db, tn_id, _da, cids) = seed_with_chapters(2);
+
+    // 直接插数据,绕过 create_workflow(测试只验证 frontier SQL 的 batch_id 收口)
+    let db = Db::open(&path).unwrap();
+    db.conn.execute(
+        "INSERT INTO batches (transformation_novel_id, label, on_failure_policy, status, created_at, started_at) \
+         VALUES (?1, NULL, 'pause_and_review', 'stopped', '2026-08-04T00:00:00+00:00', '2026-08-04T00:00:00+00:00')",
+        rusqlite::params![tn_id],
+    ).unwrap();
+    let w1_id: i64 = db.conn.query_row("SELECT last_insert_rowid()", [], |r| r.get(0)).unwrap();
+    db.conn.execute(
+        "INSERT INTO workflow_results (batch_id, created_at) VALUES (?1, '2026-08-04T00:00:00+00:00')",
+        rusqlite::params![w1_id],
+    ).unwrap();
+    let w1_result_id: i64 = db.conn.query_row(
+        "SELECT id FROM workflow_results WHERE batch_id = ?1",
+        rusqlite::params![w1_id], |r| r.get(0),
+    ).unwrap();
+    db.conn.execute(
+        "INSERT INTO workflow_result_chapters (workflow_result_id, chapter_id, content, created_at, updated_at) \
+         VALUES (?1, ?2, 'w1-result', '2026-08-04T00:00:00+00:00', '2026-08-04T00:00:00+00:00')",
+        rusqlite::params![w1_result_id, cids[0]],
+    ).unwrap();
+    // 散点 tc(c1 done, batch_id=NULL):若 frontier 错误地跨 batch 读 tc,会返回 cids[0]
+    db.conn.execute(
+        "INSERT INTO transformation_chapters (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, ctx_prev_original, ctx_prev_transformed, ctx_next_original, batch_id, status, result_content) \
+         VALUES (?1, ?2, 'compress', 1, 1, 0, 0, 0, NULL, 'done', 'tc1-content')",
+        rusqlite::params![tn_id, cids[0]],
+    ).unwrap();
+    drop(db);
+
+    // W2 只含 cids[1],c1 的内容(无论是 W1 槽还是散点 tc)都不应被跨工作流引用
+    let (_queue, sched) = build_pair(path.clone());
+    let batch2 = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id,
+        label: None,
+        chapter_ids: vec![cids[1]],
+        prompt_id: 1,
+        model_config_id: 1,
+        mode: TransformMode::Compress,
+        ctx_prev_original: 0,
+        ctx_prev_transformed: 0,
+        ctx_next_original: 0,
+    }).unwrap();
+
+    let db = Db::open(&path).unwrap();
+    let tc = db.transformation_chapters().list_by_batch(batch2.id).unwrap().remove(0);
+    assert!(
+        tc.style_ref_chapter_id.is_none(),
+        "frontier 不得跨工作流引用 cids[0];tc.style_ref_chapter_id={:?}",
+        tc.style_ref_chapter_id,
+    );
+}
+

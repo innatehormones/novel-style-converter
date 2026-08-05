@@ -107,16 +107,16 @@ impl BatchScheduler {
             )?;
             batch_id = tx.last_insert_rowid();
 
-            // INSERT N × transformation_chapters（带 frontier 算的 style_ref_chapter_id）
+            // INSERT N × transformation_chapters（legacy 路径:style_ref_chapter_id = NULL,
+            // 跨工作流读取结果已由 spec §5.3 禁止,老 create_batch/dispatch_batch 路径保留兼容行为）
             let mut ids = Vec::with_capacity(chapter_ids.len());
             for cid in &chapter_ids {
-                let frontier_cid = frontier_chapter_id(&tx, tn_id, *cid)?;
                 tx.execute(
                     "INSERT INTO transformation_chapters \
                      (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
                       ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
                       batch_id, style_ref_chapter_id, status) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending')",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, 'pending')",
                     rusqlite::params![
                         tn_id,
                         *cid,
@@ -127,7 +127,6 @@ impl BatchScheduler {
                         overrides.ctx_prev_transformed.unwrap_or(0),
                         overrides.ctx_next_original.unwrap_or(0),
                         batch_id,
-                        frontier_cid,
                     ],
                 )?;
                 ids.push(tx.last_insert_rowid());
@@ -206,17 +205,19 @@ impl BatchScheduler {
             )?;
             let mut first_tid: Option<i64> = None;
             for cid in &spec.chapter_ids {
+                let frontier_cid = frontier_chapter_id_in_workflow(&tx, batch_id, *cid)?;
                 tx.execute(
                     "INSERT INTO transformation_chapters \
                      (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
                       ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
                       batch_id, style_ref_chapter_id, status) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, 'pending')",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending')",
                     rusqlite::params![
                         spec.transformation_novel_id, *cid, mode_str(spec.mode),
                         spec.prompt_id, spec.model_config_id,
                         spec.ctx_prev_original, spec.ctx_prev_transformed, spec.ctx_next_original,
                         batch_id,
+                        frontier_cid,
                     ],
                 )?;
                 let tid = tx.last_insert_rowid();
@@ -323,13 +324,12 @@ impl BatchScheduler {
             let tx = db.conn.unchecked_transaction()?;
             let mut ids = Vec::with_capacity(chapter_ids.len());
             for cid in &chapter_ids {
-                let frontier_cid = frontier_chapter_id(&tx, batch.transformation_novel_id, *cid)?;
                 tx.execute(
                     "INSERT INTO transformation_chapters \
                      (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
                       ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
                       batch_id, style_ref_chapter_id, status) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending')",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, 'pending')",
                     rusqlite::params![
                         batch.transformation_novel_id,
                         *cid,
@@ -340,7 +340,6 @@ impl BatchScheduler {
                         overrides.ctx_prev_transformed.unwrap_or(0),
                         overrides.ctx_next_original.unwrap_or(0),
                         batch_id,
-                        frontier_cid,
                     ],
                 )?;
                 ids.push(tx.last_insert_rowid());
@@ -614,23 +613,23 @@ impl BatchScheduler {
     }
 }
 
-/// frontier 章节 id（spec §5.8）：
-/// 跨 batch、跨 prompt/model 取同 tn 内 idx 严格小于当前章节、status='done' 的最近一次 tc。
-/// 返回 None（首次转换 / 无前置）→ tc.style_ref_chapter_id = NULL。
-fn frontier_chapter_id(
+/// frontier 章节 id（spec §5.3）：仅读当前工作流结果集里的最近非空 slot。
+/// 跨工作流读取被禁止;失败/跳过的 slot 不计入。
+fn frontier_chapter_id_in_workflow(
     conn: &rusqlite::Connection,
-    tn_id: i64,
+    batch_id: i64,
     chapter_id: i64,
 ) -> Result<Option<i64>> {
     let mut stmt = conn.prepare(
-        "SELECT c.id FROM transformation_chapters tc \
-         JOIN chapters c ON c.id = tc.chapter_id \
-         WHERE tc.transformation_novel_id = ?1 \
-           AND tc.status = 'done' \
+        "SELECT c.id FROM workflow_result_chapters wrc \
+         JOIN workflow_results wr ON wr.id = wrc.workflow_result_id \
+         JOIN chapters c ON c.id = wrc.chapter_id \
+         WHERE wr.batch_id = ?1 \
+           AND wrc.content IS NOT NULL \
            AND c.idx < (SELECT idx FROM chapters WHERE id = ?2) \
          ORDER BY c.idx DESC LIMIT 1",
     )?;
-    let mut rows = stmt.query(rusqlite::params![tn_id, chapter_id])?;
+    let mut rows = stmt.query(rusqlite::params![batch_id, chapter_id])?;
     if let Some(row) = rows.next()? {
         Ok(Some(row.get(0)?))
     } else {
