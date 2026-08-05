@@ -7,7 +7,7 @@ use crate::models::default_from_env;
 use super::migrate::SCHEMAS;
 use super::repo::{
     BatchRepo, ChapterRepo, DataAssetRepo, ModelConfigRepo, PromptRepo, TransformationChapterRepo,
-    TransformationNovelRepo, UploadRepo,
+    TransformationNovelRepo, UploadRepo, WorkflowResultRepo,
 };
 
 /// SQLite 连接包装。`open` / `open_in_memory` 都会按 `migrations/` 顺序跑未应用的 schema 版本。
@@ -54,6 +54,9 @@ impl Db {
     pub fn model_configs(&self) -> ModelConfigRepo<'_> { ModelConfigRepo { conn: &self.conn } }
     pub fn data_assets(&self) -> DataAssetRepo<'_> { DataAssetRepo { conn: &self.conn } }
     pub fn batches(&self) -> BatchRepo<'_> { BatchRepo { conn: &self.conn } }
+    pub fn workflow_results(&self) -> WorkflowResultRepo<'_> {
+        WorkflowResultRepo { conn: &self.conn }
+    }
 
     pub fn seed_builtin_prompts(&self) -> Result<()> {
         self.prompts().seed_builtin_if_empty()

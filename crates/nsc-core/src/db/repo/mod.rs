@@ -13,3 +13,6 @@ pub use prompt::PromptRepo;
 pub use model_config::ModelConfigRepo;
 pub use data_asset::DataAssetRepo;
 pub use batch::{BatchRepo, BatchStatusCount};
+pub mod workflow_result;
+
+pub use workflow_result::WorkflowResultRepo;

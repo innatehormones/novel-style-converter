@@ -13,3 +13,6 @@ pub use prompt::{Prompt, PromptKind};
 pub use model_config::{default_from_env, ModelConfig, NewModelConfig};
 pub use data_asset::{DataAsset, NewDataAsset};
 pub use batch::{Batch, BatchStatus, NewBatch, OnFailurePolicy, ResumeAction};
+pub mod workflow_result;
+
+pub use workflow_result::{WorkflowResult, WorkflowResultChapter};
