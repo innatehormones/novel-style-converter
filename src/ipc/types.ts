@@ -48,7 +48,9 @@ export interface DataAssetSummary {
   upload_id: number;
   title: string;
   parsed_at: string;
-  locked_at: string | null;
+  /// COUNT(transformation_novels.id) WHERE data_asset_id = da.id。
+  /// 前端按钮禁用按这个走:>0 表示有工作区引用,不允许随便删。
+  tn_count: number;
 }
 
 /// Library.vue "数据资产" tab 行:data_asset 元数据 + 来源 upload 文件名 + 章节总字数。
@@ -57,11 +59,12 @@ export interface DataAssetRow {
   upload_id: number;
   title: string;
   parsed_at: string;
-  locked_at: string | null;
   filename: string;
   byte_size: number;
   /// SUM(chapters.word_count) WHERE data_asset_id = da.id。
   word_count: number;
+  /// COUNT(transformation_novels.id) WHERE data_asset_id = da.id。
+  tn_count: number;
 }
 
 /// State 2 章节元数据(从 list_data_asset_chapters 返回)。正文由前端按 byte 切片 original_text。

@@ -12,7 +12,7 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
   const title = ref<string>('');
   const filename = ref<string>('');
   const parsedAt = ref<string | null>(null);
-  const lockedAt = ref<string | null>(null);
+  const tnCount = ref<number>(0);
   const chapters = ref<ChapterSegment[]>([]);
   const originalText = ref<string>('');
   const selectedIdx = ref<number | null>(null);
@@ -30,7 +30,7 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
     title.value = '';
     filename.value = '';
     parsedAt.value = null;
-    lockedAt.value = null;
+    tnCount.value = 0;
     ++requestToken;
     const token = requestToken;
     try {
@@ -53,7 +53,7 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
         title.value = row.title;
         filename.value = row.filename;
         parsedAt.value = row.parsed_at;
-        lockedAt.value = row.locked_at;
+        tnCount.value = row.tn_count;
       }
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
@@ -85,7 +85,7 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
   });
 
   return {
-    dataAssetId, title, filename, parsedAt, lockedAt,
+    dataAssetId, title, filename, parsedAt, tnCount,
     chapters, originalText, selectedIdx, selectedContent,
     loading, error,
     load, selectChapter, selectFirstIfNone,

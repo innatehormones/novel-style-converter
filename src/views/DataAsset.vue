@@ -7,16 +7,15 @@
         </Button>
       </template>
       <template #meta>
-        <span class="badge" :class="{ locked: !!store.lockedAt }">
-          {{ store.lockedAt ? '已锁定' : '已解析' }}
-        </span>
+        <span v-if="store.tnCount > 0" class="badge locked">有 {{ store.tnCount }} 个工作区</span>
+        <span v-else class="badge">已解析</span>
         <span v-if="store.parsedAt" class="src">{{ formatTime(store.parsedAt) }}</span>
       </template>
       <template #actions>
         <Button
           kind="danger"
-          :disabled="!!store.lockedAt"
-          :title="store.lockedAt ? '数据资产已锁定,无法删除' : ''"
+          :disabled="store.tnCount > 0"
+          :title="store.tnCount > 0 ? `有 ${store.tnCount} 个工作区引用,请先删除工作区` : ''"
           @click="onDelete"
         >删除资产</Button>
       </template>
@@ -106,7 +105,7 @@ onMounted(async () => {
 });
 
 async function onDelete() {
-  if (store.lockedAt) return;
+  if (store.tnCount > 0) return;
   confirmOpen.value = true;
 }
 

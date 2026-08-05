@@ -46,14 +46,20 @@
         </template>
         <template #cell-words="{ row }">{{ formatWordCount(row.word_count) }}</template>
         <template #cell-status="{ row }">
-          <Tag v-if="row.locked_at" kind="warn">已锁定</Tag>
-          <Tag v-else kind="success">可重解析</Tag>
+          <Tag v-if="row.tn_count > 0" kind="warn">有 {{ row.tn_count }} 个工作区</Tag>
+          <Tag v-else kind="success">无引用</Tag>
         </template>
         <template #cell-parsed="{ row }">{{ formatTime(row.parsed_at) }}</template>
         <template #cell-actions="{ row }">
           <Button size="small" @click="goDataAsset(row.id)">打开</Button>
           <Button size="small" @click="openCreateTn(row.id)">转换</Button>
-          <Button size="small" kind="danger" :disabled="!!row.locked_at" :title="row.locked_at ? 'data_asset 已锁定,无法删除' : ''" @click="onDeleteDa(row.id, row.title)">删除</Button>
+          <Button
+            size="small"
+            kind="danger"
+            :disabled="row.tn_count > 0"
+            :title="row.tn_count > 0 ? `有 ${row.tn_count} 个工作区引用,请先删除工作区` : ''"
+            @click="onDeleteDa(row.id, row.title)"
+          >删除</Button>
         </template>
       </Table>
     </template>
@@ -83,7 +89,6 @@
             <Button size="small" @click="cancelRename">取消</Button>
           </template>
           <template v-else>
-            <Button size="small" kind="primary" @click="openCreateBatch(row)">▶ 新建工作流</Button>
             <Button size="small" @click="goDetail(row.id)">详情</Button>
             <Button size="small" @click="startRename(row.id, row.title)">重命名</Button>
             <Button size="small" kind="danger" @click="onDeleteTn(row.id, row.title)">删除</Button>
@@ -322,11 +327,6 @@ async function doDeleteDa() {
   } catch (e: unknown) {
     showAlert('提示', e instanceof Error ? e.message : String(e));
   }
-}
-
-function openCreateBatch(row: { id: number }) {
-  // 章节选择发生在详情页(spec §9.2);Library 页只负责跳过去。
-  void router.push({ name: 'transformation-detail', params: { tnId: String(row.id) } });
 }
 
 function goUpload(id: number) {
