@@ -271,42 +271,48 @@ fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
     let prev_chapters = db
         .chapters()
         .prev_n(data_asset_id, idx, job.ctx_prev_original)
-        .unwrap_or_default();
+        .map_err(|e| e.to_string())?;
     let next_chapters = db
         .chapters()
         .next_n(data_asset_id, idx, job.ctx_next_original)
-        .unwrap_or_default();
+        .map_err(|e| e.to_string())?;
 
     let prev_orig: Vec<(String, String)> = prev_chapters
         .into_iter()
         .map(|c| {
-            let body = slice_chapter(original, &c).unwrap_or_default();
-            (c.title, body)
+            let body = slice_chapter(original, &c).ok_or_else(|| {
+                format!("邻章 {} 切片失败:byte_start={} byte_end={} text_len={}",
+                    c.id, c.byte_start, c.byte_end, original.len())
+            })?;
+            Ok::<_, String>((c.title, body))
         })
-        .collect();
+        .collect::<StdResult<Vec<_>, String>>()?;
     let next_orig: Vec<(String, String)> = next_chapters
         .into_iter()
         .map(|c| {
-            let body = slice_chapter(original, &c).unwrap_or_default();
-            (c.title, body)
+            let body = slice_chapter(original, &c).ok_or_else(|| {
+                format!("邻章 {} 切片失败:byte_start={} byte_end={} text_len={}",
+                    c.id, c.byte_start, c.byte_end, original.len())
+            })?;
+            Ok::<_, String>((c.title, body))
         })
-        .collect();
+        .collect::<StdResult<Vec<_>, String>>()?;
 
     let prev_tx: Vec<TransformationChapter> = {
         let mut out = Vec::new();
-        if let Ok(chs) = db.chapters().prev_n(data_asset_id, idx, 32) {
-            let take = job.ctx_prev_transformed.max(0) as usize;
-            for ch in chs.iter().take(take) {
-                if let Ok(list) = db.transformation_chapters().list_by_chapter(ch.id) {
-                    if let Some(t) = list.into_iter().find(|t| {
-                        t.transformation_novel_id == tn_id
-                            && t.prompt_id == job.prompt.id
-                            && t.model_config_id == job.model_config.id
-                            && matches!(t.status, TransformStatus::Done)
-                    }) {
-                        out.push(t);
-                    }
-                }
+        let chs = db.chapters().prev_n(data_asset_id, idx, 32)
+            .map_err(|e| e.to_string())?;
+        let take = job.ctx_prev_transformed.max(0) as usize;
+        for ch in chs.iter().take(take) {
+            let list = db.transformation_chapters().list_by_chapter(ch.id)
+                .map_err(|e| e.to_string())?;
+            if let Some(t) = list.into_iter().find(|t| {
+                t.transformation_novel_id == tn_id
+                    && t.prompt_id == job.prompt.id
+                    && t.model_config_id == job.model_config.id
+                    && matches!(t.status, TransformStatus::Done)
+            }) {
+                out.push(t);
             }
         }
         out

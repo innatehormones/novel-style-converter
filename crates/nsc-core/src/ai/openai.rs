@@ -75,7 +75,7 @@ impl AiProvider for OpenAiProvider {
         let resp = self.client.post(&url).headers(headers).json(&body).send().await?;
         let status = resp.status();
         if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = resp.text().await?;
             return Err(Error::Ai(format!("http {status}: {text}")));
         }
         let wire: WireResponse = resp.json().await?;
@@ -84,7 +84,7 @@ impl AiProvider for OpenAiProvider {
             .message.content;
         let (in_t, out_t) = wire.usage
             .map(|u| (u.prompt_tokens, u.completion_tokens))
-            .unwrap_or((0, 0));
+            .ok_or_else(|| Error::Ai("usage field missing in response".into()))?;
         Ok(ChatResponse {
             content,
             tokens_in: in_t,

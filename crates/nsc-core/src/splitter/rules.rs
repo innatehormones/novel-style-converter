@@ -248,7 +248,8 @@ fn merge_suppressed(chapters: &mut Vec<ParsedChapter>, suppressed: &[usize], tex
                 // content 拼接方便前端展示;byte 范围仍以 byte_start/byte_end 为准。
                 // 末章覆盖文末时,text 截到 text.len() 保护 panic。
                 let end = ch.byte_end.min(text.len());
-                let slice = text.get(ch.byte_start..end).unwrap_or("");
+                let slice = text.get(ch.byte_start..end)
+                    .expect("suppress merge: byte range out of bounds — data integrity violation");
                 prev.content.push('\n');
                 prev.content.push_str(slice);
                 continue;
