@@ -115,8 +115,11 @@ fn make_spec(path: &std::path::Path, tid: i64) -> JobSpec {
     }
 }
 
-/// 跑通成功路径:fake provider → snapshot 进入 done,DB 状态 = done 且
-/// result_content 写入。
+/// 跑通成功路径:fake provider → snapshot 进入 done,DB 状态 = done。
+/// spec §5.x 收敛后,worker 不再写 `tc.result_content`(正文走结果集槽,本测试
+/// 不接 scheduler/result_slot,只能验证 tokens)。槽写入由
+/// `BatchScheduler::on_chapter_done` 在 notifier 回调里完成,见
+/// `tests/scheduler.rs::worker_success_writes_workflow_result_slot_not_tc_result_content`。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn runs_one_job_to_done_with_fake_provider() {
     let (_dir, path, tid) = setup();
@@ -140,11 +143,13 @@ async fn runs_one_job_to_done_with_fake_provider() {
     assert_eq!(snap.done[0].tokens_in, Some(4));
     assert_eq!(snap.done[0].tokens_out, Some(6));
 
-    // DB 写库验证
+    // DB 写库验证 —— tokens 写入,但 result_content 留 NULL(spec 收口到结果集)。
     let db = Db::open(&path).unwrap();
     let t = db.transformation_chapters().get(tid).unwrap().unwrap();
     assert_eq!(t.status, TransformStatus::Done);
-    assert_eq!(t.result_content.as_deref(), Some("ok"));
+    assert_eq!(t.tokens_in, Some(4));
+    assert_eq!(t.tokens_out, Some(6));
+    assert!(t.result_content.is_none(), "tc.result_content 不再写;走结果集槽");
 }
 
 /// 跑通失败路径:fake provider → snapshot 进入 failed,DB 状态 = failed

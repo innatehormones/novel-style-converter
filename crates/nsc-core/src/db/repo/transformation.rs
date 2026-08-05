@@ -115,9 +115,11 @@ impl<'a> TransformationChapterRepo<'a> {
 
     pub fn mark_done(&self, id: i64, result_content: String, tokens_in: i32, tokens_out: i32) -> Result<()> {
         let now = Utc::now().to_rfc3339();
+        // NULLIF(?2,'') 让 worker 在 spec §5.x 收口后传空串时,result_content 列保持 NULL
+        // (正文写在 workflow_result_chapters.content 槽);其他调用方传实际正文时不变。
         self.conn.execute(
             "UPDATE transformation_chapters \
-             SET status='done', result_content=?2, tokens_in=?3, tokens_out=?4, completed_at=?5 \
+             SET status='done', result_content=NULLIF(?2,''), tokens_in=?3, tokens_out=?4, completed_at=?5 \
              WHERE id=?1",
             params![id, result_content, tokens_in, tokens_out, now],
         )?;

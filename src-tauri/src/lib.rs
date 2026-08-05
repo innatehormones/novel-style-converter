@@ -39,9 +39,14 @@ pub fn run() {
     let scheduler = Arc::new(BatchScheduler::new(path.clone(), job_queue.clone()));
     {
         let sched = scheduler.clone();
-        let notify: Notifier = Arc::new(move |tid, success, error| {
+        let notify: Notifier = Arc::new(move |tid, success, error, content| {
+            // enqueue 事件(success=false, error=None)不是状态变更 —— 只是入队计数脉冲;
+            // 不归 scheduler 管。原实现把它当失败处理会触发 race:实 tid 时写入 empty error。
+            if !success && error.is_none() {
+                return;
+            }
             let res = if success {
-                sched.on_chapter_done(tid)
+                sched.on_chapter_done(tid, content)
             } else {
                 sched.on_chapter_failed(tid, error.unwrap_or_default())
             };

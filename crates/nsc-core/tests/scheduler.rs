@@ -42,7 +42,7 @@ fn build_pair(db_path: std::path::PathBuf) -> (Arc<JobQueue>, Arc<BatchScheduler
         move || Db::open(&path_for_factory),
         |_cfg| -> Box<dyn AiProvider> { Box::new(EchoProvider) },
     ));
-    queue.set_notifier(Arc::new(|_tid, _success, _err| {}));
+    queue.set_notifier(Arc::new(|_tid, _success, _err, _content| {}));
     let scheduler = Arc::new(BatchScheduler::new(db_path, queue.clone()));
     (queue, scheduler)
 }
@@ -499,7 +499,7 @@ fn failed_chapter_marks_failed_and_next_chapter_runs_then_workflow_stops() {
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    sched.on_chapter_done(tids[1]).unwrap();
+    sched.on_chapter_done(tids[1], String::new()).unwrap();
 
     let db = Db::open(&path).unwrap();
     let statuses: Vec<TransformStatus> = db.transformation_chapters()
@@ -545,3 +545,101 @@ fn last_chapter_failure_finalizes_batch_as_stopped() {
     assert_eq!(b.status, BatchStatus::Stopped, "1-chapter batch whose only chapter fails must finalize as Stopped");
     assert!(b.ended_at.is_some(), "ended_at must be set");
 }
+
+/// 构造 JobQueue + Scheduler,wired with **真实** notifier 走 `on_chapter_done/_failed`。
+/// 这条路径正是修复前的 `std::sync::Mutex` 重入死锁路径 —— 现在 `JobQueue::fire`
+/// 已用 clone-then-dropguard,闭包内再调 `enqueue` → `fire` 不再死锁。
+fn build_pair_with_scheduler_notifier(db_path: std::path::PathBuf) -> (Arc<JobQueue>, Arc<BatchScheduler>) {
+    let path_for_factory = db_path.clone();
+    let queue = Arc::new(JobQueue::new(
+        1,
+        move || Db::open(&path_for_factory),
+        |_cfg| -> Box<dyn AiProvider> { Box::new(EchoProvider) },
+    ));
+    // 必须在 scheduler 之前注册 notifier(否则首批 done 事件会丢失回调)。
+    // 先建 scheduler,再闭包循环里捕获 weak 引用:scheduler 必须在 notifier 存活期间不被 drop。
+    let scheduler = Arc::new(BatchScheduler::new(db_path.clone(), queue.clone()));
+    let sched_for_cb = scheduler.clone();
+    queue.set_notifier(Arc::new(move |tid, success, error, content| {
+        // 同 lib.rs:enqueue 事件(success=false,error=None)不是状态变更,跳过。
+        if !success && error.is_none() {
+            return;
+        }
+        let res = if success {
+            sched_for_cb.on_chapter_done(tid, content)
+        } else {
+            sched_for_cb.on_chapter_failed(tid, error.unwrap_or_default())
+        };
+        if let Err(e) = res {
+            eprintln!("[scheduler test] notify 处理失败: {e}");
+        }
+    }));
+    (queue, scheduler)
+}
+
+/// 轮询 batch.status 直到非 Running/Pending(stopped / paused / terminated 任一),
+/// 或超过 deadline。返回最终状态。
+fn wait_until_stopped(sched: &Arc<BatchScheduler>, batch_id: i64, deadline: std::time::Duration) -> BatchStatus {
+    let start = std::time::Instant::now();
+    loop {
+        let s = sched.batch_status(batch_id).unwrap();
+        if !matches!(s, BatchStatus::Running | BatchStatus::Pending) {
+            return s;
+        }
+        if std::time::Instant::now() > start + deadline {
+            return s;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Task 5 回归测试 —— `worker_success_writes_workflow_result_slot_not_tc_result_content`。
+///
+/// 闭包形态:notifier 走真实 `on_chapter_done` → `advance_batch` → `dispatch` → `enqueue` →
+/// `fire`(worker 端,持锁)→ `scheduler.on_chapter_done`(再次走 `fire`)。修复前
+/// `std::sync::Mutex` 这里必死锁;修复后,worker→fire 的锁已被 clone-then-dropguard 释放,
+/// 可以再次进入。
+///
+/// 验证两点:
+/// 1. `tc.result_content` 为 None(正文已从 `transformation_chapters.result_content` 收口
+///    到结果集;老路径不再写)。
+/// 2. `workflow_result_chapters.content` 对应行非空(`on_chapter_done` 同步写入)。
+#[test]
+fn worker_success_writes_workflow_result_slot_not_tc_result_content() {
+    let (_dir, path, _db, tn_id, _da, cids) = seed_with_chapters(1);
+    let (_queue, sched) = build_pair_with_scheduler_notifier(path.clone());
+
+    let batch = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id,
+        label: None,
+        chapter_ids: vec![cids[0]],
+        prompt_id: 1,
+        model_config_id: 1,
+        mode: TransformMode::Compress,
+        ctx_prev_original: 0,
+        ctx_prev_transformed: 0,
+        ctx_next_original: 0,
+    }).unwrap();
+
+    // 1 章 batch:worker 完成 → notifier → on_chapter_done(写槽)→ advance_batch(无 pending)
+    // → maybe_finalize_batch → Stopped。超时 5s。
+    let final_status = wait_until_stopped(&sched, batch.id, std::time::Duration::from_secs(5));
+    assert_eq!(final_status, BatchStatus::Stopped, "1 章 batch 必须收尾 Stopped,实际 {final_status:?}");
+
+    let db = Db::open(&path).unwrap();
+    let tcs = db.transformation_chapters().list_by_batch(batch.id).unwrap();
+    assert_eq!(tcs.len(), 1);
+    let tc = &tcs[0];
+    assert_eq!(tc.status, TransformStatus::Done,
+        "tc 状态必须 Done,实际 {:?}, error={:?}", tc.status, tc.error);
+    assert!(tc.result_content.is_none(), "tc.result_content 不再写,内容走结果槽");
+
+    let slot_content: String = db.conn.query_row(
+        "SELECT wrc.content FROM workflow_result_chapters wrc \
+         JOIN workflow_results wr ON wr.id = wrc.workflow_result_id \
+         WHERE wr.batch_id = ?1",
+        rusqlite::params![batch.id], |r| r.get(0),
+    ).unwrap();
+    assert!(!slot_content.is_empty(), "结果槽必须有内容,实际为空");
+}
+

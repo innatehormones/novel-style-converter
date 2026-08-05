@@ -16,12 +16,12 @@ use super::job::SharedQueue;
 
 pub type DbFactory = Arc<dyn Fn() -> Result<Db> + Send + Sync>;
 pub type ProviderFactory = Arc<dyn Fn(&ModelConfig) -> Box<dyn AiProvider> + Send + Sync>;
-/// 队列状态变更回调。`(tid, success, error)`:
-/// - `enqueue` → `(tid, false, None)`
-/// - Done → `(tid, true, None)`
-/// - Failed (含 prep 失败) → `(tid, false, Some(err))`
+/// 队列状态变更回调。`(tid, success, error, content)`:
+/// - `enqueue` → `(tid, false, None, "")`
+/// - Done → `(tid, true, None, <正文>)`
+/// - Failed (含 prep 失败) → `(tid, false, Some(err), "")`
 /// 闭包在 worker 线程上执行 —— 不要在闭包里做重活或再次阻塞。
-pub type Notifier = Arc<dyn Fn(i64, bool, Option<String>) + Send + Sync>;
+pub type Notifier = Arc<dyn Fn(i64, bool, Option<String>, String) + Send + Sync>;
 
 type NotifySlot = Arc<std::sync::Mutex<Option<Notifier>>>;
 
@@ -111,9 +111,16 @@ impl JobQueue {
         *self.notify.lock().expect("notify lock") = Some(notifier);
     }
 
-    fn fire(notify: &NotifySlot, tid: i64, success: bool, error: Option<String>) {
-        if let Some(n) = notify.lock().expect("notify lock").as_ref() {
-            n(tid, success, error);
+    /// 点火 notifier —— **必须先克隆闭包出锁,再调用**(`std::sync::Mutex` 不可重入;
+    /// 若闭包里再调 `enqueue` 会重锁导致死锁)。
+    fn fire(notify: &NotifySlot, tid: i64, success: bool, error: Option<String>, content: String) {
+        let cb = notify
+            .lock()
+            .expect("notify lock")
+            .as_ref()
+            .cloned();
+        if let Some(n) = cb {
+            n(tid, success, error, content);
         }
     }
 
@@ -123,7 +130,7 @@ impl JobQueue {
     pub fn enqueue(&self, job: JobSpec) -> i64 {
         let id = job.transformation_id;
         self.tx.send(job).expect("queue alive");
-        Self::fire(&self.notify, id, false, None);
+        Self::fire(&self.notify, id, false, None, String::new());
         id
     }
 
@@ -147,6 +154,11 @@ struct Final {
     chapter_title: String,
     chapter_idx: i32,
     db_write: DbWrite,
+    /// worker 写出的正文 —— 成功路径带正文,失败路径留空。
+    /// 仅用于通过 notifier 透传给 `BatchScheduler::on_chapter_done`,
+    /// 写 `workflow_result_chapters.content` 槽;
+    /// `transformation_chapters.result_content` 不再写(spec §5.x 收口到结果集)。
+    content: String,
 }
 
 enum DbWrite {
@@ -171,7 +183,7 @@ async fn run_job(
         Err(err) => {
             let _ = db.transformation_chapters().mark_failed(tid, err.clone());
             push_failed(&shared, tid, String::new(), 0, err.clone()).await;
-            JobQueue::fire(&notify, tid, false, Some(err));
+            JobQueue::fire(&notify, tid, false, Some(err), String::new());
             return db;
         }
     };
@@ -196,7 +208,7 @@ async fn run_job(
     let final_state: Final = apply_result(&db, tid, chapter_title, chapter_idx, ai_result);
 
     match final_state.db_write {
-        DbWrite::Done { tokens_in, tokens_out, .. } => {
+        DbWrite::Done { tokens_in, tokens_out } => {
             push_running(
                 &shared, tid,
                 final_state.chapter_title.clone(),
@@ -208,7 +220,7 @@ async fn run_job(
                 final_state.chapter_idx,
                 tokens_in, tokens_out,
             ).await;
-            JobQueue::fire(&notify, tid, true, None);
+            JobQueue::fire(&notify, tid, true, None, final_state.content);
         }
         DbWrite::Failed { err } => {
             push_failed(
@@ -217,7 +229,7 @@ async fn run_job(
                 final_state.chapter_idx,
                 err.clone(),
             ).await;
-            JobQueue::fire(&notify, tid, false, Some(err));
+            JobQueue::fire(&notify, tid, false, Some(err), String::new());
         }
     }
 
@@ -332,8 +344,10 @@ fn apply_result(
 ) -> Final {
     match ai_result {
         Ok(out) => {
+            // `tc.result_content` 不再写(spec §5.x 收口到结果集);正文走 `Final.content`
+            // → notifier → `BatchScheduler::on_chapter_done` → `workflow_result_chapters.content`。
             let _ = db.transformation_chapters().mark_done(
-                tid, out.result_content, out.tokens_in, out.tokens_out,
+                tid, String::new(), out.tokens_in, out.tokens_out,
             );
             Final {
                 chapter_title, chapter_idx,
@@ -341,6 +355,7 @@ fn apply_result(
                     tokens_in: out.tokens_in,
                     tokens_out: out.tokens_out,
                 },
+                content: out.result_content,
             }
         }
         Err(e) => {
@@ -349,6 +364,7 @@ fn apply_result(
             Final {
                 chapter_title, chapter_idx,
                 db_write: DbWrite::Failed { err: err_str },
+                content: String::new(),
             }
         }
     }

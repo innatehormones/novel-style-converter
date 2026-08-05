@@ -370,7 +370,7 @@ impl BatchScheduler {
     pub(crate) fn dispatch(
         &self,
         db: &Db,
-        tn: &TransformationNovel,
+        _tn: &TransformationNovel,
         prompt: &Prompt,
         model: &ModelConfig,
         tid: i64,
@@ -385,7 +385,11 @@ impl BatchScheduler {
 
         let spec = JobSpec {
             transformation_id: tid,
-            mode: tn.default_mode.unwrap_or(tc.mode),
+            // tc.mode 由 `create_workflow` / `create_batch` / `dispatch_batch`
+            // 在 tc 行 INSERT 时写入(`mode_str(spec.mode)`),是 per-task 的权威值;
+            // TN 默认覆盖已由 caller 用 `BatchOverrides::default().mode.unwrap_or(tn.default_mode)`
+            // 收敛到具体值,这里再回退会双重叠加。
+            mode: tc.mode,
             chapter: Chapter {
                 id: chapter.id,
                 data_asset_id: chapter.data_asset_id,
@@ -405,8 +409,10 @@ impl BatchScheduler {
         Ok(())
     }
 
-    /// JobQueue 完成回调：派发 batch 内的下一章（若还有）。
-    pub fn on_chapter_done(&self, tid: i64) -> Result<()> {
+    /// JobQueue 完成回调：把正文写入结果集 + 派下一章（若还有）。
+    /// 单事务里标 tc done（清空 `tc.result_content` 回到结果槽），同步写
+    /// `workflow_result_chapters.content`，然后 `advance_batch`。
+    pub fn on_chapter_done(&self, tid: i64, content: String) -> Result<()> {
         let db = Db::open(&self.db_path)?;
         let tc = db.transformation_chapters().get(tid)?
             .ok_or_else(|| Error::NotFound(format!("tc {tid} 不存在")))?;
@@ -414,6 +420,28 @@ impl BatchScheduler {
             Some(b) => b,
             None => return Ok(()),  // 散点行（非 batch 入队）不归 scheduler 管
         };
+        let now = Utc::now().to_rfc3339();
+        {
+            let tx = db.conn.unchecked_transaction()?;
+            // tc 行：保留已由 worker 写入的 tokens_in/out，清空 result_content（spec §5.x 收口到结果集）。
+            tx.execute(
+                "UPDATE transformation_chapters \
+                 SET result_content=NULL, completed_at=?1 \
+                 WHERE id=?2",
+                rusqlite::params![now, tid],
+            )?;
+            // 同步写结果槽 —— `WorkflowResultRepo::write_content_by_chapter` 通过
+            // sub-select 找 workflow_results.id，对未建结果集 / 缺槽的 batch 静默 noop，
+            // 让老 batch（非工作流）路径也能调到这里而不报错。
+            tx.execute(
+                "UPDATE workflow_result_chapters \
+                 SET content=?2, updated_at=?3 \
+                 WHERE workflow_result_id = (SELECT id FROM workflow_results WHERE batch_id=?4) \
+                   AND chapter_id=?1",
+                rusqlite::params![tc.chapter_id, content, now, batch_id],
+            )?;
+            tx.commit()?;
+        }
         self.advance_batch(&db, batch_id)
     }
 
