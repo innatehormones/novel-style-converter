@@ -1,5 +1,8 @@
 <template>
   <Dialog v-model:open="open" title="新建工作流" :width="540">
+    <div class="summary">
+      已选 <strong>{{ selectedChapterIds.length }}</strong> 章
+    </div>
     <div class="row">
       <label>提示词模板 *</label>
       <select v-model="promptId" class="prompt-select">
@@ -12,14 +15,6 @@
       <select v-model="modelConfigId" class="model-select">
         <option :value="0" disabled>{{ models.length === 0 ? '加载中...' : '选择 model...' }}</option>
         <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }} ({{ m.model }})</option>
-      </select>
-    </div>
-    <div class="row">
-      <label>失败策略 *</label>
-      <select v-model="policy" class="policy-select">
-        <option value="pause_and_review">失败时暂停,人工介入</option>
-        <option value="terminate">失败时终止整批</option>
-        <option value="skip_failed">失败时跳过该章</option>
       </select>
     </div>
     <div class="row">
@@ -46,8 +41,7 @@
     </div>
     <div v-if="error" class="error">{{ error }}</div>
     <div class="hint">
-      默认从转换小说继承 prompt / model / mode;此处覆盖后仅作用于本次工作流。
-      该工作流将处理转换小说下全部章节。
+      默认从转换小说继承 prompt / model;此处覆盖后仅作用于本次工作流。
     </div>
     <template #footer>
       <Button @click="open = false">取消</Button>
@@ -67,37 +61,24 @@ import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
 import NumberInput from './ui/NumberInput.vue';
 import { listModels, listPrompts } from '../ipc/commands';
-import type { ModelConfig, Prompt } from '../ipc/types';
-// Task 10 删除本文件前,OnFailurePolicy 临时从旧 store shim 借类型。
-import type { OnFailurePolicy } from '../stores/batches';
+import type { ModelConfig, Prompt, CreateWorkflowInput } from '../ipc/types';
 
 const props = defineProps<{
   tnId: number;
   defaultPromptId?: number | null;
   defaultModelConfigId?: number | null;
   defaultMode?: 'compress' | 'style' | null;
+  selectedChapterIds: number[];
 }>();
 const open = defineModel<boolean>('open', { required: true });
 const emit = defineEmits<{
-  submit: [{
-    label: string | null;
-    on_failure_policy: OnFailurePolicy;
-    overrides: {
-      prompt_id: number;
-      model_config_id: number;
-      mode: 'compress' | 'style';
-      ctx_prev_original: number;
-      ctx_prev_transformed: number;
-      ctx_next_original: number;
-    };
-  }];
+  submit: [CreateWorkflowInput];
 }>();
 
 const prompts = ref<Prompt[]>([]);
 const models = ref<ModelConfig[]>([]);
 const promptId = ref(0);
 const modelConfigId = ref(0);
-const policy = ref<OnFailurePolicy>('pause_and_review');
 const label = ref('');
 const ctxPrevOriginal = ref<number | null>(0);
 const ctxPrevTransformed = ref<number | null>(0);
@@ -117,6 +98,7 @@ const canSubmit = computed(() =>
   ctxPrevOriginal.value !== null &&
   ctxPrevTransformed.value !== null &&
   ctxNextOriginal.value !== null &&
+  props.selectedChapterIds.length > 0 &&
   !submitting.value,
 );
 
@@ -141,7 +123,7 @@ watch(open, async (v) => {
 
 async function onSubmit() {
   if (!canSubmit.value) return;
-  // mode 由所选 prompt 的 kind 决定(后端 BatchOverrides 也接受 mode 字符串)。
+  // mode 由所选 prompt 的 kind 决定(后端 create_workflow 会再次校验)。
   const selectedPrompt = prompts.value.find((p) => p.id === promptId.value);
   const mode = selectedPrompt?.kind;
   if (mode !== 'compress' && mode !== 'style') {
@@ -152,16 +134,15 @@ async function onSubmit() {
   error.value = null;
   try {
     emit('submit', {
+      tn_id: props.tnId,
       label: label.value.trim() === '' ? null : label.value.trim(),
-      on_failure_policy: policy.value,
-      overrides: {
-        prompt_id: promptId.value,
-        model_config_id: modelConfigId.value,
-        mode,
-        ctx_prev_original: ctxPrevOriginal.value ?? 0,
-        ctx_prev_transformed: ctxPrevTransformed.value ?? 0,
-        ctx_next_original: ctxNextOriginal.value ?? 0,
-      },
+      chapter_ids: [...props.selectedChapterIds],
+      prompt_id: promptId.value,
+      model_config_id: modelConfigId.value,
+      mode,
+      ctx_prev_original: ctxPrevOriginal.value ?? 0,
+      ctx_prev_transformed: ctxPrevTransformed.value ?? 0,
+      ctx_next_original: ctxNextOriginal.value ?? 0,
     });
     open.value = false;
   } catch (e: unknown) {
@@ -173,6 +154,21 @@ async function onSubmit() {
 </script>
 
 <style scoped>
+.summary {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: var(--bg-section);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pin);
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.summary strong {
+  color: var(--color-cinnabar);
+  font-size: 16px;
+  font-family: var(--font-mono);
+  margin: 0 4px;
+}
 .row { display: flex; align-items: center; margin-bottom: 12px; gap: 12px; }
 .row > label { width: 100px; font-size: 14px; color: var(--text-secondary); flex-shrink: 0; }
 .row select, .row input { flex: 1; height: 32px; }

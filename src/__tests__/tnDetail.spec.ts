@@ -6,15 +6,13 @@ import TransformationNovelDetail from '../views/TransformationNovelDetail.vue';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockImplementation((cmd: string) => {
-    if (cmd === 'list_transformation_chapters') return Promise.resolve([]);
-    if (cmd === 'list_batches') return Promise.resolve([]);
-    if (cmd === 'count_batches_by_status') return Promise.resolve({
-      pending: 0, running: 0, paused: 0,
-      completed: 0, terminated: 0, cancelled: 0,
-    });
+    if (cmd === 'list_transformation_source_chapters') return Promise.resolve([]);
+    if (cmd === 'list_workflows') return Promise.resolve([]);
     return Promise.resolve(null);
   }),
 }));
+
+import { invoke } from '@tauri-apps/api/core';
 
 const router = createRouter({
   history: createMemoryHistory(),
@@ -26,6 +24,12 @@ const router = createRouter({
 describe('TransformationNovelDetail', () => {
   beforeEach(async () => {
     setActivePinia(createPinia());
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === 'list_transformation_source_chapters') return Promise.resolve([]);
+      if (cmd === 'list_workflows') return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
     await router.push('/library/transformation/42');
     await router.isReady();
   });
@@ -38,5 +42,6 @@ describe('TransformationNovelDetail', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('TN #42');
     expect(wrapper.text()).toContain('章节一览');
+    expect(wrapper.text()).toContain('工作流');
   });
 });

@@ -100,15 +100,6 @@
       @submit="onCreateTn"
     />
 
-    <CreateBatchDialog
-      v-model:open="createBatchOpen"
-      :tn-id="createBatchTnId"
-      :default-prompt-id="createBatchDefaults.default_prompt_id"
-      :default-model-config-id="createBatchDefaults.default_model_config_id"
-      :default-mode="createBatchDefaults.default_mode"
-      @submit="onCreateBatch"
-    />
-
     <ConfirmDialog
       v-model:open="deleteUploadConfirmOpen"
       title="删除上传"
@@ -154,18 +145,14 @@ import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
 import UploadDialog from '../components/UploadDialog.vue';
 import TransformationNovelDialog from '../components/TransformationNovelDialog.vue';
-import CreateBatchDialog from '../components/CreateBatchDialog.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import { useLibraryStore } from '../stores/library';
-import { useBatchesStore } from '../stores/batches';
-import { createWorkflow, listTransformationSourceChapters } from '../ipc/commands';
 import { formatSize, formatTime, formatWordCount } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
 const store = useLibraryStore();
-const batchesStore = useBatchesStore();
 type Page = 'uploads' | 'data-assets' | 'transformations';
 const page = computed<Page>(() => (route.meta.libraryPage as Page | undefined) ?? 'uploads');
 const pageTitle = computed(() => ({
@@ -179,14 +166,6 @@ const tnDialogOpen = ref(false);
 const tnDialogDataAssetId = ref(0);
 const renamingId = ref<number | null>(null);
 const renameDraft = ref('');
-
-const createBatchOpen = ref(false);
-const createBatchTnId = ref(0);
-const createBatchDefaults = ref<{
-  default_prompt_id: number | null;
-  default_model_config_id: number | null;
-  default_mode: 'compress' | 'style' | null;
-}>({ default_prompt_id: null, default_model_config_id: null, default_mode: null });
 
 const deleteUploadConfirmOpen = ref(false);
 const deleteUploadMessage = ref('');
@@ -345,59 +324,9 @@ async function doDeleteDa() {
   }
 }
 
-function openCreateBatch(row: {
-  id: number;
-  default_prompt_id: number | null;
-  default_model_config_id: number | null;
-  default_mode: 'compress' | 'style' | null;
-}) {
-  createBatchTnId.value = row.id;
-  createBatchDefaults.value = {
-    default_prompt_id: row.default_prompt_id,
-    default_model_config_id: row.default_model_config_id,
-    default_mode: row.default_mode,
-  };
-  createBatchOpen.value = true;
-}
-
-async function onCreateBatch(input: {
-  label: string | null;
-  on_failure_policy: 'pause_and_review' | 'terminate' | 'skip_failed';
-  overrides: {
-    prompt_id: number;
-    model_config_id: number;
-    mode: 'compress' | 'style';
-    ctx_prev_original: number;
-    ctx_prev_transformed: number;
-    ctx_next_original: number;
-  };
-}) {
-  try {
-    // 旧 create_batch+dispatch_batch 隐含"处理 tn 全部章节"语义;这里
-    // 把 source_chapters 拉全 → create_workflow,让 Task 9 之前不破流程。
-    // Task 10 的 CreateBatchDialog 改造后会改成多选 chapter_ids。
-    const sources = await listTransformationSourceChapters(createBatchTnId.value);
-    const chapterIds = sources.map((s) => s.chapter_id);
-    if (chapterIds.length === 0) {
-      showAlert('创建工作流失败', '该转换小说没有可处理的章节。');
-      return;
-    }
-    const workflow = await createWorkflow({
-      tn_id: createBatchTnId.value,
-      label: input.label,
-      chapter_ids: chapterIds,
-      prompt_id: input.overrides.prompt_id,
-      model_config_id: input.overrides.model_config_id,
-      mode: input.overrides.mode,
-      ctx_prev_original: input.overrides.ctx_prev_original,
-      ctx_prev_transformed: input.overrides.ctx_prev_transformed,
-      ctx_next_original: input.overrides.ctx_next_original,
-    });
-    void batchesStore.refresh(workflow.id);
-    void router.push({ name: 'transformation-detail', params: { tnId: String(workflow.tn_id) } });
-  } catch (e: unknown) {
-    showAlert('创建工作流失败', e instanceof Error ? e.message : String(e));
-  }
+function openCreateBatch(row: { id: number }) {
+  // 章节选择发生在详情页(spec §9.2);Library 页只负责跳过去。
+  void router.push({ name: 'transformation-detail', params: { tnId: String(row.id) } });
 }
 
 function goUpload(id: number) {

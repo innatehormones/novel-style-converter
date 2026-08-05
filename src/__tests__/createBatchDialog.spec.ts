@@ -22,13 +22,14 @@ describe('CreateBatchDialog', () => {
     setActivePinia(createPinia());
   });
 
-  it('opens, shows 6 fields, then submits via emit', async () => {
+  it('opens, shows 6 fields + selected count, submits snake_case CreateWorkflowInput', async () => {
     const wrapper = mount(CreateBatchDialog, {
       props: {
         tnId: 42,
         defaultPromptId: 1,
         defaultModelConfigId: 1,
         defaultMode: 'compress',
+        selectedChapterIds: [10, 11],
         open: true,
       },
       attachTo: document.body,
@@ -37,9 +38,11 @@ describe('CreateBatchDialog', () => {
     await flushPromises();
 
     expect(document.body.textContent ?? '').toContain('新建工作流');
+    expect(document.body.textContent ?? '').toContain('已选');
+    expect(document.body.textContent ?? '').toContain('2');
     expect(document.body.textContent ?? '').toContain('提示词模板');
     expect(document.body.textContent ?? '').toContain('模型配置');
-    expect(document.body.textContent ?? '').toContain('失败策略');
+    expect(document.body.textContent ?? '').not.toContain('失败策略');
     expect(document.body.textContent ?? '').toContain('前文原文');
     expect(document.body.textContent ?? '').toContain('前文转换');
     expect(document.body.textContent ?? '').toContain('后文原文');
@@ -53,16 +56,27 @@ describe('CreateBatchDialog', () => {
     expect(submits).toBeTruthy();
     expect(submits!.length).toBeGreaterThan(0);
     const payload = (submits![0] as any)[0];
-    expect(payload.overrides.mode).toBe('compress');
-    expect(payload.overrides.prompt_id).toBe(1);
-    expect(payload.overrides.model_config_id).toBe(1);
-    expect(payload.on_failure_policy).toBe('pause_and_review');
-    expect(payload.label).toBeNull();
+    expect(payload).toEqual({
+      tn_id: 42,
+      label: null,
+      chapter_ids: [10, 11],
+      prompt_id: 1,
+      model_config_id: 1,
+      mode: 'compress',
+      ctx_prev_original: 0,
+      ctx_prev_transformed: 0,
+      ctx_next_original: 0,
+    });
   });
 
   it('infers mode from selected prompt kind even when TN defaultMode is null', async () => {
     const wrapper = mount(CreateBatchDialog, {
-      props: { tnId: 1, defaultMode: null, open: true },
+      props: {
+        tnId: 1,
+        defaultMode: null,
+        selectedChapterIds: [7],
+        open: true,
+      },
       attachTo: document.body,
     });
     await flushPromises();
@@ -75,6 +89,23 @@ describe('CreateBatchDialog', () => {
 
     const submits = wrapper.emitted('submit');
     expect(submits).toBeTruthy();
-    expect((submits![0] as any)[0].overrides.mode).toBe('style');
+    expect((submits![0] as any)[0].mode).toBe('style');
+  });
+
+  it('selectedChapterIds=[] 时 canSubmit=false', async () => {
+    const wrapper = mount(CreateBatchDialog, {
+      props: {
+        tnId: 1,
+        selectedChapterIds: [],
+        defaultPromptId: 1,
+        defaultModelConfigId: 1,
+        open: true,
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    expect(vm.canSubmit).toBe(false);
   });
 });
