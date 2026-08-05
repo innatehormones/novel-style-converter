@@ -171,7 +171,9 @@ fn open_old_db_runs_all_migrations() {
         versions,
         vec![
             "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10",
-            "0011_workflow_results",
+            "0011_workflow_results", "0012_batches_tn_cascade",
+            "0014_builtin_prompt_double_braces",
+            "0013_workflow_result_chapters_cascade",
         ]
     );
 

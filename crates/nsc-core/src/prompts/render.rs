@@ -14,7 +14,7 @@ pub struct PromptContext<'a> {
 
 fn join_chapter_pairs(parts: &[(String, String)], sep: &str, header: &str) -> String {
     if parts.is_empty() {
-        return "(无)".into();
+        return String::new();
     }
     let body = parts
         .iter()
@@ -30,11 +30,11 @@ fn join_transformations(parts: &[TransformationChapter], sep: &str, header: &str
         .filter(|t| t.result_content.is_some())
         .collect();
     if done.is_empty() {
-        return format!("{header}\n(暂无已转换参考)");
+        return String::new();
     }
     let body = done
         .into_iter()
-        .map(|t| t.result_content.clone().unwrap_or_default())
+        .filter_map(|t| t.result_content.clone())
         .collect::<Vec<_>>()
         .join(sep);
     format!("{header}\n{body}")

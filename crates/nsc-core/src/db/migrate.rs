@@ -10,4 +10,7 @@ pub const SCHEMAS: &[(&str, &str)] = &[
     ("v9", include_str!("../../../../migrations/0009_batches.sql")),
     ("v10", include_str!("../../../../migrations/0010_tc_batch_columns.sql")),
     ("0011_workflow_results", include_str!("../../../../migrations/0011_workflow_results.sql")),
+    ("0012_batches_tn_cascade", include_str!("../../../../migrations/0012_batches_tn_cascade.sql")),
+    ("0013_workflow_result_chapters_cascade", include_str!("../../../../migrations/0013_workflow_result_chapters_cascade.sql")),
+    ("0014_builtin_prompt_double_braces", include_str!("../../../../migrations/0014_builtin_prompt_double_braces.sql")),
 ];

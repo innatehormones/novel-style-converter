@@ -1,7 +1,7 @@
 use nsc_core::models::{
     Chapter, TransformationChapter, TransformationNovel, TransformMode, TransformStatus,
 };
-use nsc_core::prompts::{render, render_raw, PromptContext, PromptVars};
+use nsc_core::prompts::{builtin_prompts, render, render_raw, PromptContext, PromptVars, REQUIRED_PLACEHOLDERS};
 
 fn n() -> TransformationNovel {
     TransformationNovel {
@@ -47,7 +47,7 @@ fn substitutes_chapter_and_title() {
 }
 
 #[test]
-fn missing_prev_transformed_renders_placeholder() {
+fn missing_prev_transformed_renders_empty() {
     let novel = n();
     let (chapter, body) = ch(1, 1, "X");
     let prev_orig = vec![
@@ -64,11 +64,14 @@ fn missing_prev_transformed_renders_placeholder() {
         prev_transformed: &tx,
         next_original: &next,
     };
-    let tpl = "[prev_original]\n{{prev_original}}\n[prev_transformed]\n{{prev_transformed}}";
+    let tpl = "[prev_original]\n{{prev_original}}\n[prev_transformed]\n{{prev_transformed}}\n[end]";
     let out = render(tpl, &ctx).unwrap();
     assert!(out.contains("前文A"));
     assert!(out.contains("前文B"));
-    assert!(out.contains("(暂无已转换参考)"));
+    // 无已转换参考时:不输出"(暂无已转换参考)"占位符,prev_transformed 段保持空。
+    // 这样 LLM 看到的 prompt 在"有没有参考"上行为一致,不被模板提示词误导。
+    assert!(!out.contains("(暂无已转换参考)"));
+    assert!(out.contains("[prev_transformed]\n\n[end]"));
 }
 
 #[test]
@@ -183,4 +186,22 @@ fn raw_repeated_var_replaced_each_time() {
 fn raw_empty_template_returns_empty() {
     let vars = PromptVars::default();
     assert_eq!(render_raw("", &vars), "");
+}
+
+/// builtin 模板必须含 `{{chapter_title}}` 和 `{{chapter_content}}`,否则
+/// LLM 看不到章节正文 —— 历史 bug 是 builtin 用了单花括号 `{chapter_content}`,
+/// render_raw 只替换双花括号,LLM 收到字面量追问"请提供章节内容..."。
+/// 锁住这条契约,避免 builtin 再误写成单花括号。
+#[test]
+fn builtin_templates_reference_chapter_content() {
+    for bp in builtin_prompts() {
+        for needle in REQUIRED_PLACEHOLDERS {
+            assert!(
+                bp.template.contains(needle),
+                "builtin prompt `{}` missing required placeholder `{}`",
+                bp.name,
+                needle,
+            );
+        }
+    }
 }
