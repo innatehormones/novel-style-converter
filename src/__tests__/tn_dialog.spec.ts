@@ -16,9 +16,22 @@ function q(sel: string): HTMLElement {
   return el as HTMLElement;
 }
 
+const FAKE_PROMPTS = [
+  { id: 7, name: 'compress_default', kind: 'compress', template: '...', is_builtin: true },
+  { id: 8, name: 'style_default', kind: 'style', template: '...', is_builtin: true },
+];
+const FAKE_MODELS = [
+  { id: 3, name: 'GPT-4', model: 'gpt-4', base_url: 'https://api.openai.com/v1', api_key: 'sk-x', max_tokens: null, temperature: null, concurrency: 1 },
+];
+
 describe('TransformationNovelDialog', () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'list_prompts') return FAKE_PROMPTS;
+      if (cmd === 'list_models') return FAKE_MODELS;
+      return undefined;
+    });
   });
 
   it('默认未填字段时 emit 包含 null 值', async () => {
@@ -53,12 +66,12 @@ describe('TransformationNovelDialog', () => {
     await flushPromises();
     (q('.title-input') as HTMLInputElement).value = '斗破_热血版';
     q('.title-input').dispatchEvent(new Event('input', { bubbles: true }));
-    const modelInput = q('.default-model-input') as HTMLInputElement;
-    modelInput.value = '3';
-    modelInput.dispatchEvent(new Event('input', { bubbles: true }));
-    const promptInput = q('.default-prompt-input') as HTMLInputElement;
-    promptInput.value = '7';
-    promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+    const modelSelect = q('.default-model-select') as HTMLSelectElement;
+    modelSelect.value = '3';
+    modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    const promptSelect = q('.default-prompt-select') as HTMLSelectElement;
+    promptSelect.value = '7';
+    promptSelect.dispatchEvent(new Event('change', { bubbles: true }));
     (q('.default-mode-select') as HTMLSelectElement).value = 'style';
     q('.default-mode-select').dispatchEvent(new Event('change', { bubbles: true }));
     await flushPromises();
@@ -86,9 +99,9 @@ describe('TransformationNovelDialog', () => {
     // 填值
     (q('.title-input') as HTMLInputElement).value = 'X';
     q('.title-input').dispatchEvent(new Event('input', { bubbles: true }));
-    const modelInput = q('.default-model-input') as HTMLInputElement;
-    modelInput.value = '9';
-    modelInput.dispatchEvent(new Event('input', { bubbles: true }));
+    const modelSelect = q('.default-model-select') as HTMLSelectElement;
+    modelSelect.value = '3';
+    modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
     (q('.default-mode-select') as HTMLSelectElement).value = 'compress';
     q('.default-mode-select').dispatchEvent(new Event('change', { bubbles: true }));
     await flushPromises();
@@ -97,11 +110,23 @@ describe('TransformationNovelDialog', () => {
     await flushPromises();
     await wrapper.setProps({ open: true });
     await flushPromises();
-    // 表单应被复位
+    // 表单应被复位:v-model 回 null → 「（未选）」 placeholder 是 selectedIndex 0。
     expect((q('.title-input') as HTMLInputElement).value).toBe('');
-    expect((q('.default-model-input') as HTMLInputElement).value).toBe('');
-    expect((q('.default-prompt-input') as HTMLInputElement).value).toBe('');
+    expect((q('.default-model-select') as HTMLSelectElement).selectedIndex).toBe(0);
+    expect((q('.default-prompt-select') as HTMLSelectElement).selectedIndex).toBe(0);
     expect((q('.default-mode-select') as HTMLSelectElement).value).toBe('');
+    // 提交也带 null 默认值(title 必填,所以再填一下)
+    (q('.title-input') as HTMLInputElement).value = 'X';
+    q('.title-input').dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    q('.submit').click();
+    await flushPromises();
+    const emitted = wrapper.emitted('submit');
+    expect(emitted![0][0]).toMatchObject({
+      default_model_config_id: null,
+      default_prompt_id: null,
+      default_mode: null,
+    });
     wrapper.unmount();
   });
 
