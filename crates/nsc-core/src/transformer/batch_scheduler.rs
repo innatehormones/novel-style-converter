@@ -655,7 +655,6 @@ impl BatchScheduler {
         if chapter_ids.is_empty() {
             return Err(Error::Validation("必须至少选择一个章节".into()));
         }
-        let _now = Utc::now().to_rfc3339();
         let first_tid: i64 = {
             let tx = db.conn.unchecked_transaction()?;
             for cid in chapter_ids {

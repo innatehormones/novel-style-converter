@@ -798,15 +798,8 @@ fn retry_empty_slots_after_stop_succeeds_and_finalizes() {
     assert_eq!(after.status, BatchStatus::Running);
 
     // 等 worker 链式跑完两个槽 + finalize → Stopped
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let s = sched.batch_status(batch_id).unwrap();
-        if matches!(s, BatchStatus::Stopped) { break; }
-        if std::time::Instant::now() > deadline {
-            panic!("retry 后 10s 内 batch 未进入 Stopped,当前 {s:?}");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    let final_status = wait_until_stopped(&sched, batch_id, std::time::Duration::from_secs(10));
+    assert_eq!(final_status, BatchStatus::Stopped, "retry 后应回到 Stopped,实际 {final_status:?}");
 
     let db = Db::open(&path).unwrap();
     let tcs = db.transformation_chapters().list_by_batch(batch_id).unwrap();
