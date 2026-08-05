@@ -114,23 +114,24 @@ pub fn get_chapter_contents(
         .ok_or_else(|| format!("upload {} 不存在", da.upload_id))?;
     let original = crate::commands::uploads::read_upload_original_text(&upload)?;
     let chapters = db.chapters().list_by_data_asset(data_asset_id).map_err(|e| e.to_string())?;
-    Ok(chapters
-        .into_iter()
-        .map(|c| {
-            let s = c.byte_start.max(0) as usize;
-            let e = (c.byte_end.max(0) as usize).min(original.len());
-            let body = if s < e && e <= original.len() && original.is_char_boundary(s) && original.is_char_boundary(e) {
-                &original[s..e]
-            } else {
-                ""
-            };
-            ChapterContentRow {
-                idx: c.idx,
-                title: c.title.clone(),
-                content: extract_body(body, &c.title),
-            }
-        })
-        .collect())
+    let mut rows = Vec::with_capacity(chapters.len());
+    for c in chapters {
+        let s = c.byte_start.max(0) as usize;
+        let e = (c.byte_end.max(0) as usize).min(original.len());
+        if !(s < e && e <= original.len() && original.is_char_boundary(s) && original.is_char_boundary(e)) {
+            return Err(format!(
+                "chapter {} (idx={}) 切片失败:byte_start={} byte_end={} text_len={}",
+                c.id, c.idx, c.byte_start, c.byte_end, original.len()
+            ));
+        }
+        let body = &original[s..e];
+        rows.push(ChapterContentRow {
+            idx: c.idx,
+            title: c.title.clone(),
+            content: extract_body(body, &c.title),
+        });
+    }
+    Ok(rows)
 }
 
 /// 章节解析页重入用:从 DB 读已提交章节,带 byte 范围。
@@ -191,10 +192,10 @@ pub fn get_chapter(
 
 /// 章节解析页提交入口:对 upload.original_text 按 byte_start/byte_end 切片,
 /// 落库到 data_asset(chapters.data_asset_id 坐标系)。
-/// 锁死判定:data_asset.locked_at 非 NULL → 拒绝(对应 data_asset 已锁,不可重解析)。
 /// parse.vue 重解析入口:用前端传来的 `segments` 全量替换 `chapters` 表
-/// 该 `data_asset_id` 下的旧行(**不是**追加)。`data_asset.locked_at` 非 NULL
-/// 时拒绝(locked 表示已有 transformation_novel 在用此 data_asset)。
+/// 该 `data_asset_id` 下的旧行(**不是**追加)。FK CASCADE 会把挂着的
+/// transformation_chapters / workflow_result_chapters 一并清掉
+/// (migration 0005/0013),不需要应用层再判断锁。
 /// 返回新写入行数。
 #[tauri::command]
 pub fn parse_chapters(
@@ -206,9 +207,6 @@ pub fn parse_chapters(
         let db = db.lock().map_err(|e| e.to_string())?;
         let da = db.data_assets().get(data_asset_id).map_err(|e| e.to_string())?
             .ok_or_else(|| format!("data_asset {data_asset_id} 不存在"))?;
-        if db.data_assets().is_locked(data_asset_id).map_err(|e| e.to_string())? {
-            return Err("data_asset 已锁定,无法重新解析".into());
-        }
         let upload = db.uploads().get(da.upload_id).map_err(|e| e.to_string())?
             .ok_or_else(|| format!("upload {} 不存在", da.upload_id))?;
         crate::commands::uploads::read_upload_original_text(&upload)?

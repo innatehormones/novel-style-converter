@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -6,7 +6,6 @@ use tauri::ipc::Response;
 use tauri::State;
 
 use nsc_core::db::Db;
-use nsc_core::encoding::read_text_file;
 use nsc_core::models::Upload;
 use nsc_core::upload;
 
@@ -48,13 +47,16 @@ fn to_summary(u: &Upload) -> UploadSummary {
     }
 }
 
-/// Read `upload.original_text`; DB field empty (legacy uploads) falls
-/// back to reading the raw file from `file_path` and re-decoding.
+/// Read `upload.original_text`. Empty field is a data integrity error
+/// (new uploads always populate it; if it's empty, something wiped it).
 pub fn read_upload_original_text(u: &Upload) -> Result<String, String> {
-    if !u.original_text.is_empty() {
-        return Ok(u.original_text.clone());
+    if u.original_text.is_empty() {
+        return Err(format!(
+            "upload {} ({}) 的 original_text 为空,文件路径 {}。请重新上传该文件。",
+            u.id, u.filename, u.file_path
+        ));
     }
-    read_text_file(Path::new(&u.file_path)).map(|d| d.text)
+    Ok(u.original_text.clone())
 }
 
 #[tauri::command]
@@ -80,15 +82,16 @@ pub fn upload_file(
     Ok(to_summary(&u))
 }
 
+/// 删除 upload。data_asset 也通过 FK CASCADE 一起清掉,业务层不需要拦。
+/// 删 upload。如果有关联 data_asset,FK CASCADE 会把它一起带走(数据资产页看不到了),
+/// 所以必须让用户先去数据资产页删。计划文档 2026-07-31-upload-refactor.md 明确这条 guard。
 #[tauri::command]
 pub fn delete_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String> {
     let db = db.lock().map_err(|e| e.to_string())?;
     let u = db.uploads().get(id).map_err(|e| e.to_string())?
         .ok_or_else(|| format!("upload {id} 不存在"))?;
-    if let Some(da) = db.data_assets().find_by_upload(id).map_err(|e| e.to_string())? {
-        if db.data_assets().is_locked(da.id).map_err(|e| e.to_string())? {
-            return Err("upload 对应的 data_asset 已锁定,无法删除".into());
-        }
+    if db.data_assets().find_by_upload(id).map_err(|e| e.to_string())?.is_some() {
+        return Err("该 upload 有关联的数据资产,请先在数据资产页删除".into());
     }
     let _ = std::fs::remove_file(&u.file_path);
     db.uploads().delete(id).map_err(|e| e.to_string())
@@ -108,15 +111,20 @@ pub fn get_upload_text(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<Respons
         let db = db.lock().map_err(|e| e.to_string())?;
         let u = db.uploads().get(id).map_err(|e| e.to_string())?
             .ok_or_else(|| format!("upload {id} 不存在"))?;
-        if !u.original_text.is_empty() {
-            u.original_text.clone()
-        } else {
-            read_text_file(Path::new(&u.file_path))?.text
+        if u.original_text.is_empty() {
+            return Err(format!(
+                "upload {} 的 original_text 为空。请重新上传该文件。",
+                u.id
+            ));
         }
+        u.original_text.clone()
     };
     Ok(Response::new(text.into_bytes()))
 }
 
+/// 修改 upload.original_text。改完会让已存在的 chapter 切片坐标系失效,
+/// 所以如果该 upload 已有 data_asset,拒绝(让用户先在数据资产页删除)。
+/// 计划文档 2026-07-31-upload-refactor.md 明确这条 guard。
 #[tauri::command]
 pub fn update_upload_text(
     db: State<'_, Arc<Mutex<Db>>>,

@@ -58,10 +58,10 @@ pub fn get_data_asset_content(
 }
 
 /// 把 parse.vue 的章节切片结果落库到新 data_asset。
-/// 同 upload 已有 data_asset 时拒绝(走"删除已有再重新解析"路径)。
 /// parse.vue 提交入口:为 `upload_id` 创建一个 `data_assets` 行,并把 `chapters`
-/// 全部按 byte range 切片入 `chapters` 表。同 upload **已有 data_asset 则拒绝**
-/// (unique 约束 + 这里独立校验);要走"重解析"必须先调 `delete_data_asset`。
+/// 全部按 byte range 切片入 `chapters` 表。
+/// `data_assets.upload_id` 上有 UNIQUE 约束,重复提交会被 SQLite 报 unique
+/// violation —— 后端不加业务校验,让错误冒出来。
 /// 返回新 `data_asset.id`。
 #[tauri::command]
 pub fn commit_data_asset(
@@ -75,10 +75,6 @@ pub fn commit_data_asset(
         return Err("标题不能为空".into());
     }
     let db = db.lock().map_err(|e| e.to_string())?;
-
-    if db.data_assets().find_by_upload(upload_id).map_err(|e| e.to_string())?.is_some() {
-        return Err(format!("upload {upload_id} 已有 data_asset,无法重复提交"));
-    }
 
     let da_id = db.data_assets().insert(&NewDataAsset {
         upload_id,
@@ -117,18 +113,20 @@ pub fn commit_data_asset(
     Ok(da_id)
 }
 
-/// Library.vue "数据资产" tab:列所有 data_asset + 来源 upload 文件名 + 章节总字数。
+/// Library.vue "数据资产" tab:列所有 data_asset + 来源 upload 文件名 + 章节总字数 +
+/// 引用此 data_asset 的 transformation_novel 计数。前端按钮 disable 用 `tn_count`。
 #[derive(Debug, Serialize)]
 pub struct DataAssetRow {
     pub id: i64,
     pub upload_id: i64,
     pub title: String,
     pub parsed_at: String,
-    pub locked_at: Option<String>,
     pub filename: String,
     pub byte_size: i64,
     /// SUM(chapters.word_count) WHERE data_asset_id = da.id。
     pub word_count: i64,
+    /// COUNT(transformation_novels.id) WHERE data_asset_id = da.id。
+    pub tn_count: i64,
 }
 
 impl From<DataAssetWithUpload> for DataAssetRow {
@@ -138,10 +136,10 @@ impl From<DataAssetWithUpload> for DataAssetRow {
             upload_id: d.upload_id,
             title: d.title,
             parsed_at: d.parsed_at.to_rfc3339(),
-            locked_at: d.locked_at.map(|t| t.to_rfc3339()),
             filename: d.filename,
             byte_size: d.byte_size,
             word_count: d.word_count,
+            tn_count: d.tn_count,
         }
     }
 }
@@ -173,19 +171,14 @@ pub fn find_data_asset_by_upload(
         .map(|d| d.id))
 }
 
-/// 删除 data_asset。locked 时拒绝(已有 transformation_novel 关联);
-/// unlocked 时通过 FK CASCADE 自动清掉 chapters / transformation_novels /
-/// transformation_chapters(见 migration 0005/0006 + 0002)。
-/// 删 data_asset。**locked 时拒绝**(已有 transformation_novel 关联,直接删
-/// 会让 JobQueue 的 chapter 切片坐标失效)。unlocked 时通过 FK CASCADE 自动清掉
-/// chapters / transformation_novels / transformation_chapters
-/// (见 migration 0005 / 0006 + 0002 的外键约束)。
+/// 删除 data_asset。挂着的 transformation_novels / chapters / workflow_results
+/// 全部由 FK CASCADE 接走(migration 0005/0006/0012/0013),不需要应用层拦截。
 #[tauri::command]
 pub fn delete_data_asset(
     db: State<'_, Arc<Mutex<Db>>>,
     data_asset_id: i64,
 ) -> Result<(), String> {
     let db = db.lock().map_err(|e| e.to_string())?;
-    db.data_assets().delete_if_unlocked(data_asset_id)
+    db.data_assets().delete(data_asset_id)
         .map_err(|e| e.to_string())
 }
