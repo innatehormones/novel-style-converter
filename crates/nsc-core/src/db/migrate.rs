@@ -9,4 +9,5 @@ pub const SCHEMAS: &[(&str, &str)] = &[
     ("v8", include_str!("../../../../migrations/0008_tn_default_columns.sql")),
     ("v9", include_str!("../../../../migrations/0009_batches.sql")),
     ("v10", include_str!("../../../../migrations/0010_tc_batch_columns.sql")),
+    ("0011_workflow_results", include_str!("../../../../migrations/0011_workflow_results.sql")),
 ];

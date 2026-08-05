@@ -165,9 +165,15 @@ fn open_old_db_runs_all_migrations() {
     }
 
     let db = Db::open(&tmp).unwrap();
-    // 检查 schema_versions 表是否登记了 v1..v10
+    // 检查 schema_versions 表是否登记了所有已发布的版本(0011 加入时同步更新)。
     let versions = db.applied_schema_versions().unwrap();
-    assert_eq!(versions, vec!["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10"]);
+    assert_eq!(
+        versions,
+        vec![
+            "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10",
+            "0011_workflow_results",
+        ]
+    );
 
     let _ = std::fs::remove_file(&tmp);
 }
