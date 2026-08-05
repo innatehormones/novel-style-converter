@@ -8,7 +8,7 @@
 //! - 完成判据 → batch 状态迁移到 Running/Stopped 两态之一
 //! - `safe_stop_on_dispatch_failure` dispatch 失败的兜底
 //!
-//! Task 7 之后还会加:`stop_workflow` 人工停止 + `retry_empty_slots` 重试空槽。
+//! Task 7 已加:`stop_workflow` 人工停止 + `retry_empty_slots` 重试空槽。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -602,6 +602,117 @@ impl BatchScheduler {
         let b = db.batches().get(batch_id)?
             .ok_or_else(|| Error::NotFound("batch 回读失败".into()))?;
         Ok(b)
+    }
+
+    /// 人工停止运行中的工作流(spec §6.1):事务里把全部 Pending 标 Skipped、结果槽保持空;
+    /// 若当时没有 Running 任务,批次直接转 Stopped,否则等 worker 回调 finalize。
+    /// 对已 Stopped 批次幂等返回(spec §10);其余状态(非 Running、非 Stopped)→ Validation。
+    pub fn stop_workflow(&self, batch_id: i64) -> Result<Batch> {
+        let db = Db::open(&self.db_path)?;
+        let batch = db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
+        if matches!(batch.status, BatchStatus::Stopped) {
+            return Ok(batch);
+        }
+        if !matches!(batch.status, BatchStatus::Running) {
+            return Err(Error::Validation(format!(
+                "batch {batch_id} 状态 {:?} 不能 stop", batch.status
+            )));
+        }
+        let now = Utc::now().to_rfc3339();
+        let tx = db.conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE transformation_chapters SET status='skipped', completed_at=?2 \
+             WHERE batch_id=?1 AND status='pending'",
+            rusqlite::params![batch_id, now],
+        )?;
+        let has_running: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM transformation_chapters WHERE batch_id=?1 AND status='running'",
+            rusqlite::params![batch_id], |r| r.get(0),
+        )?;
+        if has_running == 0 {
+            tx.execute(
+                "UPDATE batches SET status='stopped', ended_at=?1 WHERE id=?2",
+                rusqlite::params![now, batch_id],
+            )?;
+        }
+        tx.commit()?;
+        let updated = db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound("batch 回读失败".into()))?;
+        Ok(updated)
+    }
+
+    /// Stopped 后重试空槽(spec §6.2):把所选 Failed/Skipped 任务重置为 Pending,
+    /// 仅当结果槽为 NULL 时通过;事务提交后 batch → Running,派序号最小的章节。
+    /// 已被填过的槽重试会返回 Validation(spec §10)。
+    pub fn retry_empty_slots(&self, batch_id: i64, chapter_ids: &[i64]) -> Result<Batch> {
+        let db = Db::open(&self.db_path)?;
+        let batch = db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
+        if !matches!(batch.status, BatchStatus::Stopped) {
+            return Err(Error::Validation("只有 Stopped 工作流可重试".into()));
+        }
+        if chapter_ids.is_empty() {
+            return Err(Error::Validation("必须至少选择一个章节".into()));
+        }
+        let _now = Utc::now().to_rfc3339();
+        let first_tid: i64 = {
+            let tx = db.conn.unchecked_transaction()?;
+            for cid in chapter_ids {
+                let updated = tx.execute(
+                    "UPDATE transformation_chapters \
+                     SET status='pending', error=NULL, result_content=NULL, \
+                         tokens_in=NULL, tokens_out=NULL, started_at=NULL, completed_at=NULL \
+                     WHERE batch_id=?1 \
+                       AND chapter_id=?2 \
+                       AND status IN ('failed','skipped') \
+                       AND (SELECT content FROM workflow_result_chapters wrc \
+                             JOIN workflow_results wr ON wr.id = wrc.workflow_result_id \
+                             WHERE wr.batch_id = transformation_chapters.batch_id \
+                               AND wrc.chapter_id = transformation_chapters.chapter_id) IS NULL",
+                    rusqlite::params![batch_id, cid],
+                )?;
+                if updated == 0 {
+                    return Err(Error::Validation(format!(
+                        "章节 {cid} 不是可重试空槽(不存在/非 failed-skipped/结果槽非空)"
+                    )));
+                }
+            }
+            tx.execute(
+                "UPDATE batches SET status='running', ended_at=NULL WHERE id=?1",
+                rusqlite::params![batch_id],
+            )?;
+            let first_tid: i64 = tx.query_row(
+                "SELECT tc.id FROM transformation_chapters tc \
+                 JOIN chapters c ON c.id = tc.chapter_id \
+                 WHERE tc.batch_id=?1 AND tc.status='pending' \
+                 ORDER BY c.idx ASC LIMIT 1",
+                rusqlite::params![batch_id],
+                |r| r.get(0),
+            )?;
+            tx.commit()?;
+            first_tid
+        };
+        // 派首章(事务外):仍然走 batch 上固化的 prompt/model,而不是回退到 TN 默认
+        // (TN 默认覆盖已在 CreateBatchDialog 收敛,这里与 create_workflow 行为一致)。
+        let tn = db.transformation_novels().get(batch.transformation_novel_id)?
+            .ok_or_else(|| Error::NotFound(format!("tn {} 不存在", batch.transformation_novel_id)))?;
+        let prompt_id: i64 = db.conn.query_row(
+            "SELECT prompt_id FROM transformation_chapters WHERE id=?1",
+            rusqlite::params![first_tid], |r| r.get(0),
+        )?;
+        let model_id: i64 = db.conn.query_row(
+            "SELECT model_config_id FROM transformation_chapters WHERE id=?1",
+            rusqlite::params![first_tid], |r| r.get(0),
+        )?;
+        let prompt = db.prompts().get(prompt_id)?
+            .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
+        let model = db.model_configs().get(model_id)?
+            .ok_or_else(|| Error::NotFound(format!("model {model_id} 不存在")))?;
+        self.dispatch(&db, &tn, &prompt, &model, first_tid, 0, 0, 0)?;
+        let updated = db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound("batch 回读失败".into()))?;
+        Ok(updated)
     }
 
     /// 测试用：当前 batch 状态（方便断言）。

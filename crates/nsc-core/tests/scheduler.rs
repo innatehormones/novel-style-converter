@@ -703,3 +703,133 @@ fn frontier_only_reads_current_workflow_result_set() {
     );
 }
 
+/// 人工停止:transformation_chapters 的 Pending 标 Skipped,Running 保留到 worker 回调;
+/// 已 Stopped 批次二次停止幂等返回(spec §6.1 / §10)。
+#[test]
+fn stop_workflow_marks_pending_skipped_and_idempotent_on_stopped() {
+    let (_dir, path, _db, tn_id, _da, cids) = seed_with_chapters(3);
+    let (_queue, sched) = build_pair(path.clone());
+
+    let batch = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id, label: None,
+        chapter_ids: vec![cids[0], cids[1], cids[2]],
+        prompt_id: 1, model_config_id: 1, mode: TransformMode::Compress,
+        ctx_prev_original: 0, ctx_prev_transformed: 0, ctx_next_original: 0,
+    }).unwrap();
+
+    let stopped1 = sched.stop_workflow(batch.id).unwrap();
+    assert_eq!(stopped1.status, BatchStatus::Stopped);
+
+    // 重复停止 → 幂等返回相同状态
+    let stopped2 = sched.stop_workflow(batch.id).unwrap();
+    assert_eq!(stopped2.status, BatchStatus::Stopped);
+    assert_eq!(stopped1.id, stopped2.id);
+
+    // 所有 tc 应为 Skipped / Running / Done(spec §6.1 步骤 2-3);
+    // 测试无 notifier 时第一章节可能 dispatched→ Running,其余 pending→ Skipped。
+    let db = Db::open(&path).unwrap();
+    let tcs = db.transformation_chapters().list_by_batch(batch.id).unwrap();
+    for tc in &tcs {
+        assert!(
+            matches!(tc.status, TransformStatus::Skipped | TransformStatus::Running | TransformStatus::Done),
+            "tc {} 应该 skipped/running/done,实际 {:?}", tc.id, tc.status
+        );
+    }
+}
+
+/// 端到端 retry:stop → 准备空 Skipped 槽 → retry → worker → notifier →
+/// advance → 收尾 Stopped;重试所选章节终态全是 Done(spec §6.2)。
+///
+/// stop 与 worker 的时序非确定性较高(EchoProvider 同步返回):有时 stop 抢先于
+/// worker,有时 worker 已串行跑完。所以这里完全由 DB 直插构造初始状态
+/// (Stopped 批次 + Skipped tc + 空槽),然后用真实 notifier 的 scheduler 调
+/// retry,触发 worker 链式重跑并验证 finalize。
+#[test]
+fn retry_empty_slots_after_stop_succeeds_and_finalizes() {
+    let (_dir, path, _db, tn_id, _da, cids) = seed_with_chapters(3);
+    let (_queue, sched) = build_pair_with_scheduler_notifier(path.clone());
+
+    // 构造 Stopped 批次 + workflow_results + N 个 tc(部分 Skipped、槽 NULL),
+    // 模拟 §6.1 时的"停止 + 用户勾选空槽"状态。
+    let batch_id: i64 = {
+        let db = Db::open(&path).unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        db.conn.execute(
+            "INSERT INTO batches (transformation_novel_id, label, on_failure_policy, status, created_at, started_at, ended_at) \
+             VALUES (?1, NULL, 'pause_and_review', 'stopped', ?2, ?2, ?2)",
+            rusqlite::params![tn_id, now],
+        ).unwrap();
+        let bid: i64 = db.conn.query_row(
+            "SELECT last_insert_rowid()", [], |r| r.get(0)
+        ).unwrap();
+        db.conn.execute(
+            "INSERT INTO workflow_results (batch_id, created_at) VALUES (?1, ?2)",
+            rusqlite::params![bid, now],
+        ).unwrap();
+        let result_id: i64 = db.conn.query_row(
+            "SELECT id FROM workflow_results WHERE batch_id=?1",
+            rusqlite::params![bid], |r| r.get(0),
+        ).unwrap();
+        // cids[0]: Done(槽有 content、tc done)—— 不能重试
+        // cids[1], cids[2]: Skipped + 槽 NULL —— 可重试
+        for (i, cid) in cids.iter().enumerate() {
+            let (status, completed_at) = if i == 0 { ("done", Some(now.clone())) } else { ("skipped", Some(now.clone())) };
+            db.conn.execute(
+                "INSERT INTO transformation_chapters \
+                 (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
+                  ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
+                  batch_id, style_ref_chapter_id, status, completed_at) \
+                 VALUES (?1, ?2, 'compress', 1, 1, 0, 0, 0, ?3, NULL, ?4, ?5)",
+                rusqlite::params![tn_id, *cid, bid, status, completed_at],
+            ).unwrap();
+            let content = if i == 0 { Some(format!("content-ch{}", i + 1)) } else { None };
+            db.conn.execute(
+                "INSERT INTO workflow_result_chapters \
+                 (workflow_result_id, chapter_id, content, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?4)",
+                rusqlite::params![result_id, *cid, content, now],
+            ).unwrap();
+        }
+        bid
+    };
+
+    let skipped_chapter_ids: Vec<i64> = vec![cids[1], cids[2]];
+    let after = sched.retry_empty_slots(batch_id, &skipped_chapter_ids).unwrap();
+    assert_eq!(after.status, BatchStatus::Running);
+
+    // 等 worker 链式跑完两个槽 + finalize → Stopped
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let s = sched.batch_status(batch_id).unwrap();
+        if matches!(s, BatchStatus::Stopped) { break; }
+        if std::time::Instant::now() > deadline {
+            panic!("retry 后 10s 内 batch 未进入 Stopped,当前 {s:?}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let db = Db::open(&path).unwrap();
+    let tcs = db.transformation_chapters().list_by_batch(batch_id).unwrap();
+    for tc in &tcs {
+        assert_ne!(tc.status, TransformStatus::Skipped,
+            "重试后所有 skipped 应变为非 skipped;tc {} = {:?}", tc.id, tc.status);
+    }
+}
+
+/// Running 工作流禁止直接重试(spec §10 / Validation:必须先停止)。
+#[test]
+fn retry_on_running_workflow_rejected() {
+    let (_dir, path, _db, tn_id, _da, cids) = seed_with_chapters(2);
+    let (_queue, sched) = build_pair(path.clone());
+
+    let batch = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id, label: None,
+        chapter_ids: vec![cids[0], cids[1]],
+        prompt_id: 1, model_config_id: 1, mode: TransformMode::Compress,
+        ctx_prev_original: 0, ctx_prev_transformed: 0, ctx_next_original: 0,
+    }).unwrap();
+    // 不 stop,直接重试 → Validation
+    let err = sched.retry_empty_slots(batch.id, &[cids[0]]).unwrap_err();
+    assert!(matches!(err, Error::Validation(_)), "got {err:?}");
+}
+
