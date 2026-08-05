@@ -30,9 +30,8 @@ pub struct NewUpload {
     pub word_count: i64,
 }
 
-/// 转换小说工作台条目:引用某个 data_asset(已锁定的 State 2 行)。
+/// 转换小说工作台条目:引用某个 data_asset(已解析的 State 2 行)。
 /// 同一 data_asset 可被多本 transformation_novel 引用(fan-out)。
-/// 创建 transformation_novel 时即触发 data_assets.locked_at = now()。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransformationNovel {
     pub id: i64,

@@ -115,16 +115,16 @@ fn from_row(row: &Row) -> rusqlite::Result<Upload> {
 pub struct TransformationNovelRepo<'a> { pub(crate) conn: &'a rusqlite::Connection }
 
 impl<'a> TransformationNovelRepo<'a> {
-    /// 创建 transformation_novel 并锁定 data_asset(单事务)。
-    /// 失败回滚:transformation_novel 与 data_asset.locked_at 都不会留下脏数据。
+    /// 创建 transformation_novel。不再写 `data_assets.locked_at`(该列已废弃)——
+    /// 是否被引用看 `transformation_novels` 真实行,前端按钮按 join 出来的
+    /// tn_count 走。
     pub fn insert(&self, n: &NewTransformationNovel) -> Result<i64> {
-        let tx = self.conn.unchecked_transaction()?;
         let now = Utc::now().to_rfc3339();
         let mode_str = n.default_mode.map(|m| match m {
             crate::models::TransformMode::Compress => "compress",
             crate::models::TransformMode::Style => "style",
         });
-        tx.execute(
+        self.conn.execute(
             "INSERT INTO transformation_novels \
              (data_asset_id, title, created_at, default_model_config_id, default_prompt_id, default_mode) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -133,13 +133,7 @@ impl<'a> TransformationNovelRepo<'a> {
                 n.default_model_config_id, n.default_prompt_id, mode_str,
             ],
         )?;
-        let id = tx.last_insert_rowid();
-        tx.execute(
-            "UPDATE data_assets SET locked_at = ?2 WHERE id = ?1",
-            params![n.data_asset_id, now],
-        )?;
-        tx.commit()?;
-        Ok(id)
+        Ok(self.conn.last_insert_rowid())
     }
 
     pub fn get(&self, id: i64) -> Result<Option<TransformationNovel>> {

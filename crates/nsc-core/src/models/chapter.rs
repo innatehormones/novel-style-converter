@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 /// 章节切片。byte_start / byte_end 在 uploads.original_text 坐标系(详见 data_asset.rs 顶部 doc)。
-/// 一旦 data_asset 锁(locked_at 非 NULL),本表 immutable。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Chapter {
     pub id: i64,

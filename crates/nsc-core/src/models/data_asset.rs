@@ -7,7 +7,6 @@ pub struct DataAsset {
     pub upload_id: i64,
     pub title: String,
     pub parsed_at: DateTime<Utc>,
-    pub locked_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
