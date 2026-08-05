@@ -21,18 +21,30 @@ fn insert_get_data_asset() {
     assert_eq!(got.upload_id, upload_id);
     assert_eq!(got.title, "test");
     assert!(got.parsed_at.timestamp() > 0);
-    assert!(got.locked_at.is_none());
 }
 
 #[test]
-fn lock_state_blocks_reparse() {
+fn delete_data_asset_cascades_chapters_and_tns() {
+    // 删 data_asset → FK CASCADE 把 chapters + transformation_novels +
+    // transformation_chapters 一起带走(migration 0004/0005/0006 + 0002 + 0012)。
     let db = Db::open_in_memory().unwrap();
     let uid = seed_upload(&db);
     let da_id = db.data_assets().insert(&NewDataAsset { upload_id: uid, title: "t".into() }).unwrap();
-    assert!(!db.data_assets().is_locked(da_id).unwrap());
-    db.data_assets().set_locked(da_id).unwrap();
-    assert!(db.data_assets().is_locked(da_id).unwrap());
-    assert!(db.data_assets().delete_if_unlocked(da_id).is_err());
+    let tn_id = db.transformation_novels().insert(&nsc_core::models::NewTransformationNovel {
+        data_asset_id: da_id, title: "tn".into(),
+        default_model_config_id: None, default_prompt_id: None, default_mode: None,
+    }).unwrap();
+    db.chapters().insert(&NewChapter {
+        data_asset_id: da_id, idx: 0, title: "ch1".into(),
+        byte_start: 0, byte_end: 5, word_count: 1,
+    }).unwrap();
+    assert_eq!(db.chapters().list_by_data_asset(da_id).unwrap().len(), 1);
+    assert_eq!(db.transformation_novels().list_by_data_asset(da_id).unwrap().len(), 1);
+    db.data_assets().delete(da_id).unwrap();
+    assert!(db.data_assets().get(da_id).unwrap().is_none());
+    assert_eq!(db.chapters().list_by_data_asset(da_id).unwrap().len(), 0);
+    assert_eq!(db.transformation_novels().list_by_data_asset(da_id).unwrap().len(), 0);
+    assert!(db.transformation_novels().get(tn_id).unwrap().is_none());
 }
 
 #[test]
@@ -54,7 +66,7 @@ fn cascade_delete_on_upload() {
 
 #[test]
 fn delete_data_asset_cascades_to_chapters() {
-    // 删除未锁定的 data_asset → chapters 关联行应被 FK CASCADE 清掉。
+    // 删 data_asset → FK CASCADE 把 chapters 关联行清掉(migration 0005)。
     let db = Db::open_in_memory().unwrap();
     let uid = seed_upload(&db);
     let da_id = db.data_assets().insert(&NewDataAsset { upload_id: uid, title: "t".into() }).unwrap();
@@ -67,7 +79,7 @@ fn delete_data_asset_cascades_to_chapters() {
         byte_start: 10, byte_end: 20, word_count: 5,
     }).unwrap();
     assert_eq!(db.chapters().list_by_data_asset(da_id).unwrap().len(), 2);
-    db.data_assets().delete_if_unlocked(da_id).unwrap();
+    db.data_assets().delete(da_id).unwrap();
     assert_eq!(db.chapters().list_by_data_asset(da_id).unwrap().len(), 0);
     assert!(db.data_assets().get(da_id).unwrap().is_none());
 }
@@ -75,6 +87,6 @@ fn delete_data_asset_cascades_to_chapters() {
 #[test]
 fn delete_data_asset_nonexistent_returns_error() {
     let db = Db::open_in_memory().unwrap();
-    let err = db.data_assets().delete_if_unlocked(999).unwrap_err();
+    let err = db.data_assets().delete(999).unwrap_err();
     assert!(err.to_string().contains("不存在"));
 }

@@ -19,8 +19,7 @@ fn tn_references_data_asset_id() {
     }).unwrap();
     let got = db.transformation_novels().get(tn_id).unwrap().unwrap();
     assert_eq!(got.data_asset_id, da_id);
-    // 创建时锁定 data_asset
-    assert!(db.data_assets().is_locked(da_id).unwrap());
+    // data_asset 不再有"业务锁"概念;TN 引用状态由 list_with_upload.tn_count 实时统计。
 }
 
 #[test]
