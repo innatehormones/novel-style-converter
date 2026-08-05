@@ -419,59 +419,26 @@ impl BatchScheduler {
         self.advance_batch(&db, batch_id)
     }
 
-    /// 失败回调：占位实现 —— Slice 5 才接 policy 分流。
-    /// 本片只保证不 panic、不重复 dispatch。
+    /// 失败回调:标 failed + 清空 result_content,再 advance_batch 派下一章。
+    /// 不再按 on_failure_policy 分流(spec §3.3 收敛到单一行为)。
+    /// batch 收尾交给 advance_batch → maybe_finalize_batch。
     pub fn on_chapter_failed(&self, tid: i64, error: String) -> Result<()> {
         let db = Db::open(&self.db_path)?;
         let tc = db.transformation_chapters().get(tid)?
             .ok_or_else(|| Error::NotFound(format!("tc {tid} 不存在")))?;
-        let batch_id = match tc.batch_id {
-            Some(b) => b,
-            None => return Ok(()),
-        };
-        let batch = db.batches().get(batch_id)?
-            .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
-
+        let Some(batch_id) = tc.batch_id else { return Ok(()); };
         let now = Utc::now().to_rfc3339();
-        let tx = db.conn.unchecked_transaction()?;
-        match batch.on_failure_policy {
-            OnFailurePolicy::PauseAndReview => {
-                // tc 已是 failed（JobQueue worker 在 mark_failed 时写了）。
-                tx.execute(
-                    "UPDATE batches SET status='paused' WHERE id=?1",
-                    rusqlite::params![batch_id],
-                )?;
-            }
-            OnFailurePolicy::Terminate => {
-                // 同 batch 内所有 pending → cancelled
-                tx.execute(
-                    "UPDATE transformation_chapters SET status='cancelled' \
-                     WHERE batch_id=?1 AND status='pending'",
-                    rusqlite::params![batch_id],
-                )?;
-                tx.execute(
-                    "UPDATE batches SET status='terminated', ended_at=?1 WHERE id=?2",
-                    rusqlite::params![now, batch_id],
-                )?;
-            }
-            OnFailurePolicy::SkipFailed => {
-                // 把这一章标 skipped（保留 error）
-                tx.execute(
-                    "UPDATE transformation_chapters SET status='skipped', error=?2, \
-                        result_content=NULL, tokens_in=NULL, tokens_out=NULL, completed_at=?3 \
-                     WHERE id=?1",
-                    rusqlite::params![tid, &error, &now],
-                )?;
-                // 不改 batch.status；继续 dispatch（在 commit 之后做）
-            }
+        {
+            let tx = db.conn.unchecked_transaction()?;
+            tx.execute(
+                "UPDATE transformation_chapters \
+                 SET status='failed', error=?2, completed_at=?3, result_content=NULL \
+                 WHERE id=?1",
+                rusqlite::params![tid, error, now],
+            )?;
+            tx.commit()?;
         }
-        tx.commit()?;
-
-        if matches!(batch.on_failure_policy, OnFailurePolicy::SkipFailed) {
-            // 派下一章
-            return self.advance_batch(&db, batch_id);
-        }
-        Ok(())
+        self.advance_batch(&db, batch_id)
     }
 
     /// 派下一章（若有）；完成判据。
@@ -513,30 +480,23 @@ impl BatchScheduler {
         self.maybe_finalize_batch(db, batch_id)
     }
 
-    /// §5.6.1 完成判据：
-    /// - completed 当且仅当 批次内不存在 pending/running/failed 且至少一行 done
-    /// - terminated 当且仅当 批次内不存在 pending/running/failed 且全无 done
+    /// §3.3 / §5.2 收尾判据:批次内不存在 pending/running 任务 → batch → Stopped。
+    /// Failed/Done/Skipped/Cancelled 都不阻塞收尾。
+    /// COALESCE(ended_at, ?1) 保留已有 ended_at(如 Task 7 手动停止写入的)。
     fn maybe_finalize_batch(&self, db: &Db, batch_id: i64) -> Result<()> {
-        let active_count: i64 = db.conn.query_row(
+        let active: i64 = db.conn.query_row(
             "SELECT COUNT(*) FROM transformation_chapters \
-             WHERE batch_id = ?1 AND status IN ('pending','running','failed')",
+             WHERE batch_id = ?1 AND status IN ('pending','running')",
             rusqlite::params![batch_id],
             |row| row.get(0),
         )?;
-        if active_count > 0 {
-            return Ok(());  // 还有 pending/running/failed，不动
+        if active > 0 {
+            return Ok(());
         }
-        let done_count: i64 = db.conn.query_row(
-            "SELECT COUNT(*) FROM transformation_chapters \
-             WHERE batch_id = ?1 AND status = 'done'",
-            rusqlite::params![batch_id],
-            |row| row.get(0),
-        )?;
         let now = Utc::now().to_rfc3339();
-        let new_status = if done_count > 0 { "completed" } else { "terminated" };
         db.conn.execute(
-            "UPDATE batches SET status=?1, ended_at=?2 WHERE id=?3",
-            rusqlite::params![new_status, now, batch_id],
+            "UPDATE batches SET status='stopped', ended_at = COALESCE(ended_at, ?1) WHERE id = ?2",
+            rusqlite::params![now, batch_id],
         )?;
         Ok(())
     }

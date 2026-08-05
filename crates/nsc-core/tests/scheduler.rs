@@ -10,7 +10,7 @@ use nsc_core::db::Db;
 use nsc_core::error::Error;
 use nsc_core::models::{
     BatchStatus, NewBatch, NewChapter, NewDataAsset, NewModelConfig, NewTransformationChapter,
-    NewTransformationNovel, NewUpload, OnFailurePolicy, ResumeAction, TransformMode, TransformStatus,
+    NewTransformationNovel, NewUpload, OnFailurePolicy, TransformMode, TransformStatus,
 };
 use nsc_core::transformer::{BatchScheduler, JobQueue, WorkflowCreate};
 
@@ -193,9 +193,12 @@ fn seed_batch_world(path: &std::path::Path, policy: OnFailurePolicy) -> (Db, i64
 }
 
 #[test]
-fn pause_and_review_does_not_advance() {
+fn failure_marks_failed_and_advances_no_policy_branch() {
+    // Task 4 后 on_chapter_failed 不再按 policy 分流:失败一律 Failed + advance_batch。
+    // c1 失败后 batch 仍 Running(noop notifier 不会触发 on_chapter_done),
+    // t2 由 advance_batch 派发进入 JobQueue 但尚未完成 → status 还是 Pending/Running。
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("pause.db");
+    let path = dir.path().join("fail.db");
     let (db, tn_id, cids) = seed_batch_world(&path, OnFailurePolicy::PauseAndReview);
     let (queue, scheduler) = build_pair(path.clone());
 
@@ -210,25 +213,26 @@ fn pause_and_review_does_not_advance() {
     ).unwrap().query_map(rusqlite::params![batch.id], |r| r.get(0))
     .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
 
-    // 模拟 c1 失败
+    // 模拟 c1 失败:worker 先 mark_failed,scheduler 回调 on_chapter_failed。
     db.transformation_chapters().mark_failed(tids[0], "fake error".into()).unwrap();
     scheduler.on_chapter_failed(tids[0], "fake error".into()).unwrap();
 
-    let b = db.batches().get(batch.id).unwrap().unwrap();
-    assert_eq!(b.status, BatchStatus::Paused);
-    let t2_status = db.transformation_chapters().get(tids[1]).unwrap().unwrap().status;
-    assert_eq!(t2_status, TransformStatus::Pending);
+    let t1 = db.transformation_chapters().get(tids[0]).unwrap().unwrap();
+    assert_eq!(t1.status, TransformStatus::Failed);
+    assert_eq!(t1.error.as_deref(), Some("fake error"));
+    assert!(t1.result_content.is_none(), "失败时 result_content 必须清空");
 
-    // resume(retry c1) → batch 转 Running
-    let _ = scheduler.resume(batch.id, ResumeAction::Retry(tids[0])).unwrap();
     let b = db.batches().get(batch.id).unwrap().unwrap();
-    assert_eq!(b.status, BatchStatus::Running);
+    // 单一行为:不为 Paused/Terminated/Stopped,只有 advance_batch 派下一章
+    // (no notifier → batch 不会 finalize)。
+    assert!(matches!(b.status, BatchStatus::Running), "got {:?}", b.status);
 
     let _ = queue;
 }
 
 #[test]
-fn terminate_cancels_remaining() {
+fn failure_does_not_cancel_remaining_tc() {
+    // 旧 Terminate 分支:同 batch pending → cancelled。新行为:tc1 Failed, tc2 仍 pending。
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("term.db");
     let (db, tn_id, cids) = seed_batch_world(&path, OnFailurePolicy::Terminate);
@@ -247,17 +251,25 @@ fn terminate_cancels_remaining() {
     db.transformation_chapters().mark_failed(tids[0], "boom".into()).unwrap();
     scheduler.on_chapter_failed(tids[0], "boom".into()).unwrap();
 
-    let b = db.batches().get(batch.id).unwrap().unwrap();
-    assert_eq!(b.status, BatchStatus::Terminated);
+    let t1 = db.transformation_chapters().get(tids[0]).unwrap().unwrap();
+    assert_eq!(t1.status, TransformStatus::Failed);
     let t2_status = db.transformation_chapters().get(tids[1]).unwrap().unwrap().status;
-    assert_eq!(t2_status, TransformStatus::Cancelled);
+    // 旧行为是 Cancelled,新行为:advance_batch 派下一章,tc2 已不在 Pending。
+    // 但 worker 没回调(noop notifier),tc2 状态还是 pending/running。
+    assert!(
+        matches!(t2_status, TransformStatus::Pending | TransformStatus::Running),
+        "got {t2_status:?}"
+    );
+
+    let b = db.batches().get(batch.id).unwrap().unwrap();
+    assert_ne!(b.status, BatchStatus::Terminated);
 
     let _ = queue;
 }
 
 #[test]
-fn skip_failed_marks_skipped_and_keeps_running() {
-    // skip_failed 不依赖 worker —— 直接构造 batch + 手动调 on_chapter_failed。
+fn failure_marks_failed_not_skipped() {
+    // 旧 SkipFailed 分支:tc 标 Skipped + 继续。新行为:tc 标 Failed + 继续。
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("skip.db");
     let (db, tn_id, cids) = seed_batch_world(&path, OnFailurePolicy::SkipFailed);
@@ -273,20 +285,15 @@ fn skip_failed_marks_skipped_and_keeps_running() {
     ).unwrap().query_map(rusqlite::params![batch.id], |r| r.get(0))
     .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
 
-    // c1 失败 → 应标 skipped,batch 仍 Running
     db.transformation_chapters().mark_failed(tids[0], "boom".into()).unwrap();
     scheduler.on_chapter_failed(tids[0], "boom".into()).unwrap();
 
     let t1 = db.transformation_chapters().get(tids[0]).unwrap().unwrap();
-    assert_eq!(t1.status, TransformStatus::Skipped);
-    assert_eq!(t1.error.as_deref(), Some("boom"));
+    assert_eq!(t1.status, TransformStatus::Failed);
+    assert_ne!(t1.status, TransformStatus::Skipped);
 
     let b = db.batches().get(batch.id).unwrap().unwrap();
-    // SkipFailed 后会 advance_batch 派下一章；此时 c2 还没准备好，
-    // 这里只验证 batch 状态（应该 Running 或 Completed 取决于派发结果）。
-    // 关键断言:c1 skipped,batch 不为 Paused/Terminated。
-    assert!(matches!(b.status, BatchStatus::Running | BatchStatus::Completed),
-            "expected Running or Completed, got {:?}", b.status);
+    assert!(matches!(b.status, BatchStatus::Running), "got {:?}", b.status);
 
     let _ = queue;
 }
@@ -461,4 +468,75 @@ fn create_workflow_prompt_kind_mode_mismatch_rejected() {
     let db = Db::open(&path).unwrap();
     let n: i64 = db.conn.query_row("SELECT COUNT(*) FROM batches", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 0);
+}
+
+/// 端到端:首章失败 → 标 Failed,后续章节仍 dispatch 并完成,batch 自然收尾为 Stopped。
+/// 用 noop notifier + 手动驱动 scheduler 回调(避免 notify 锁重入死锁)。
+#[test]
+fn failed_chapter_marks_failed_and_next_chapter_runs_then_workflow_stops() {
+    let (_dir, path, _db, tn_id, _da, cids) = seed_with_chapters(2);
+    let (_queue, sched) = build_pair(path.clone());
+
+    let batch = sched.create_workflow(WorkflowCreate {
+        transformation_novel_id: tn_id,
+        label: None,
+        chapter_ids: vec![cids[0], cids[1]],
+        prompt_id: 1,
+        model_config_id: 1,
+        mode: TransformMode::Compress,
+        ctx_prev_original: 0,
+        ctx_prev_transformed: 0,
+        ctx_next_original: 0,
+    }).unwrap();
+    assert_eq!(batch.status, BatchStatus::Running);
+
+    let db = Db::open(&path).unwrap();
+    let tids: Vec<i64> = db.conn.prepare(
+        "SELECT id FROM transformation_chapters WHERE batch_id=?1 ORDER BY id ASC"
+    ).unwrap().query_map(rusqlite::params![batch.id], |r| r.get(0))
+    .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+    drop(db);
+
+    // 等 worker 完成 c1(EchoProvider 同步返回 done)再覆盖。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let db = Db::open(&path).unwrap();
+        let s = db.transformation_chapters().get(tids[0]).unwrap().unwrap().status;
+        drop(db);
+        if matches!(s, TransformStatus::Done) { break; }
+        if std::time::Instant::now() > deadline {
+            panic!("c1 5s 内未被 worker 标记 Done,当前 {s:?}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    // 模拟 worker:tc1 mark_failed,scheduler 回调 on_chapter_failed → 派 tc2。
+    let db = Db::open(&path).unwrap();
+    db.transformation_chapters().mark_failed(tids[0], "boom".into()).unwrap();
+    drop(db);
+    sched.on_chapter_failed(tids[0], "boom".into()).unwrap();
+
+    // 等 worker 跑完 c2,然后调 on_chapter_done 收尾。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let db = Db::open(&path).unwrap();
+        let s = db.transformation_chapters().get(tids[1]).unwrap().unwrap().status;
+        drop(db);
+        if matches!(s, TransformStatus::Done) { break; }
+        if std::time::Instant::now() > deadline {
+            panic!("c2 5s 内未被 worker 标记 Done,当前 {s:?}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    sched.on_chapter_done(tids[1]).unwrap();
+
+    let db = Db::open(&path).unwrap();
+    let statuses: Vec<TransformStatus> = db.transformation_chapters()
+        .list_by_batch(batch.id).unwrap()
+        .iter().map(|t| t.status).collect();
+    assert!(statuses.contains(&TransformStatus::Failed), "first chapter must be Failed; got {statuses:?}");
+    assert!(statuses.contains(&TransformStatus::Done), "second chapter must be Done; got {statuses:?}");
+    assert_eq!(statuses.len(), 2);
+    let final_status = db.batches().get(batch.id).unwrap().unwrap().status;
+    assert_eq!(final_status, BatchStatus::Stopped);
 }
