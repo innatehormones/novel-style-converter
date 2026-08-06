@@ -48,8 +48,7 @@ export interface DataAssetSummary {
   upload_id: number;
   title: string;
   parsed_at: string;
-  /// COUNT(transformation_novels.id) WHERE data_asset_id = da.id。
-  /// 前端按钮禁用按这个走:>0 表示有工作区引用,不允许随便删。
+  source_filename: string;
   tn_count: number;
 }
 
@@ -72,8 +71,7 @@ export interface DataAssetChapter {
   id: number;
   idx: number;
   title: string;
-  byte_start: number;
-  byte_end: number;
+  body: string;
   word_count: number;
 }
 
@@ -82,15 +80,13 @@ export interface CommitDataAssetInput {
   title: string;
   chapters: Array<{
     title: string;
-    byte_start: number;
-    byte_end: number;
+    content: string;
   }>;
 }
 
 export interface ChapterSegment {
   title: string;
-  byte_start: number;
-  byte_end: number;
+  content: string;
   word_count: number;
 }
 
@@ -117,8 +113,7 @@ export interface Chapter {
   data_asset_id: number;
   idx: number;
   title: string;
-  byte_start: number;
-  byte_end: number;
+  body: string;
   word_count: number;
 }
 
@@ -128,8 +123,7 @@ export interface Chapter {
  */
 export type ChapterInput = {
   title: string;
-  byte_start: number;
-  byte_end: number;
+  content: string;
 };
 
 /**
@@ -351,3 +345,18 @@ export interface Prompt {
  * 没有 `#[serde(rename_all)]` 在这层 DTO 上,所以前端按字段名原样发。
  */
 export type PromptInput = Omit<Prompt, 'id' | 'is_builtin'> & { id: number };
+
+
+/** 上传删除前的确认信息。删 upload 不联动删 data_asset，仅提示以供用户另行去处理。 */
+export interface UploadDeletePreviewItem {
+  id: number;
+  title: string;
+  chapters_count: number;
+  tn_count: number;
+}
+export interface UploadDeletePreview {
+  upload_id: number;
+  filename: string;
+  source_filename: string;
+  derived_data_assets: UploadDeletePreviewItem[];
+}

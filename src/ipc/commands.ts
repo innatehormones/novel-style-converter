@@ -1,4 +1,4 @@
-// 前端调用规则:
+﻿// 前端调用规则:
 // - 命令参数名(payload / id / chapterId / uploadId 等)由 Tauri 自动 camelCase 化,
 //   invoke 外层传参对象用 camelCase 字段名。
 // - 内层 DTO 由后端显式 `#[serde(rename_all="snake_case")]` 接收,前端必须按
@@ -76,9 +76,6 @@ export function listDataAssetChapters(dataAssetId: number): Promise<DataAssetCha
   return invoke<DataAssetChapter[]>('list_data_asset_chapters', { dataAssetId });
 }
 
-export function getDataAssetContent(dataAssetId: number): Promise<string> {
-  return invoke<string>('get_data_asset_content', { dataAssetId });
-}
 
 export function commitDataAsset(
   uploadId: number,
@@ -87,9 +84,9 @@ export function commitDataAsset(
   return invoke<number>('commit_data_asset', { uploadId, ...payload });
 }
 
-/** Upload id → data_asset id(若有)。旧路由重定向用。 */
-export function findDataAssetByUpload(uploadId: number): Promise<number | null> {
-  return invoke<number | null>('find_data_asset_by_upload', { uploadId });
+/** Upload id → 该 upload 派生的全部 data_asset id(按 id DESC)。可能为空。 */
+export function findDataAssetByUpload(uploadId: number): Promise<number[]> {
+  return invoke<number[]>('find_data_asset_by_upload', { uploadId });
 }
 
 /** 删 data_asset。locked 时拒绝;unlocked 时通过 FK CASCADE 自动清 chapters 等。 */
@@ -103,16 +100,8 @@ export function listDataAssets(): Promise<DataAssetRow[]> {
 }
 
 // ─── Chapters ──────────────────────────────────────────────────────────────
-export function listChapterSegments(
-  uploadId: number,
-  markers: number[] | null,
-  suppressed: number[] | null,
-): Promise<ChapterSegment[]> {
-  return invoke<ChapterSegment[]>('list_chapter_segments', {
-    uploadId,
-    markers,
-    suppressed,
-  });
+export function listChapterSegments(uploadId: number): Promise<ChapterSegment[]> {
+  return invoke<ChapterSegment[]>('list_chapter_segments', { uploadId });
 }
 
 /** 从 chapters 表读已提交章节段(byte_start/byte_end)。老数据(NULL 范围)被过滤。 */
@@ -219,4 +208,10 @@ export function deletePrompt(id: number): Promise<void> {
 
 export function countPromptUsage(promptId: number): Promise<number> {
   return invoke<number>('count_transformation_chapters_by_prompt', { promptId });
+}
+
+
+// upload deletion preview: list derived data_assets without cascading.
+export function previewUploadDeletion(uploadId: number): Promise<UploadDeletePreview> {
+  return invoke<UploadDeletePreview>("preview_upload_deletion", { uploadId });
 }

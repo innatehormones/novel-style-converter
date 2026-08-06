@@ -1,9 +1,6 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import type {
-  ChapterSegment,
-  ChapterInput,
-} from '../ipc/types';
+import type { ChapterSegment, ChapterInput } from '../ipc/types';
 import {
   commitDataAsset as ipcCommitDataAsset,
   getUploadText as ipcGetUploadText,
@@ -12,29 +9,19 @@ import {
   listCommittedSegments as ipcListCommittedSegments,
 } from '../ipc/commands';
 
-/// source: 进入页面时锁定的初始章节列表。
-///   - committed: 从 chapters 表读,代表用户上次 commit 的成果。
-///   - fresh: splitter 首次跑,代表用户还未 commit。
 type SourceKind = 'committed' | 'fresh';
 
-/// 把字符串切成 {byte_start, text} 行。byte_start 用 UTF-8 字节偏移,
-/// 后续 marker 用的也是字节偏移,确保 byte_start 对齐 chapter.byte_start。
-function computeLines(text: string): { byte_start: number; text: string }[] {
-  const textLines = text.split('\n');
-  const bytes = new TextEncoder().encode(text);
-  const nlPos: number[] = [];
-  let i = bytes.indexOf(0x0a);
-  while (i >= 0) {
-    nlPos.push(i);
-    i = bytes.indexOf(0x0a, i + 1);
-  }
-  const out: { byte_start: number; text: string }[] = [];
-  let byteStart = 0;
-  for (let li = 0; li < textLines.length; li++) {
-    out.push({ byte_start: byteStart, text: textLines[li] });
-    if (li < nlPos.length) byteStart = nlPos[li] + 1;
-  }
-  return out;
+interface RawLine { line: number; text: string; }
+
+function computeLines(text: string): RawLine[] {
+  return text.split('\n').map((t, i) => ({ line: i, text: t }));
+}
+
+/// 用 content 作为稳定 key:title 是可编辑的(applyTitleOverrides 会改),
+/// content 是 splitter 输出的原始内容,不会被编辑(章节正文不会改)。
+/// 这样 suppressed / titleOverrides / segLineMap 在 title 编辑后仍能查到。
+function segmentKey(seg: ChapterSegment): string {
+  return seg.content;
 }
 
 export const useChaptersStore = defineStore('chapters', () => {
@@ -42,19 +29,16 @@ export const useChaptersStore = defineStore('chapters', () => {
   const rawText = ref<string>('');
   const filename = ref<string>('');
 
-  /// rawLines: 用于 parse.vue 右栏行号视图。byte_start 对齐 chapter.byte_start。
-  const rawLines = computed(() => computeLines(rawText.value));
+  const rawLines = computed<RawLine[]>(() => computeLines(rawText.value));
 
   const source = ref<ChapterSegment[]>([]);
+  /// segmentKey -> 该段在原文里的起始行号。每次 applyWorking 重算。
+  const segLineMap = ref<Map<string, number>>(new Map());
   const sourceKind = ref<SourceKind | null>(null);
-  const markers = ref<number[]>([]);
-  const suppressed = ref<number[]>([]);
-  const titleOverrides = ref<Record<number, string>>({});
+  const markers = ref<string[]>([]);
+  const suppressed = ref<string[]>([]);
+  const titleOverrides = ref<Record<string, string>>({});
 
-  /// workingChapters: 当前 UI 实际渲染的章节列表。
-  ///   - 没有 edits 时 = source(可能已含 titleOverrides 叠加)
-  ///   - 有 markers/suppressed 时走 splitter(markers, suppressed)
-  ///   - titleOverrides 永远最后应用(本地立即生效,不需 splitter)
   const workingChapters = ref<ChapterSegment[]>([]);
 
   const loading = ref(false);
@@ -67,38 +51,78 @@ export const useChaptersStore = defineStore('chapters', () => {
 
   const committed = computed(() => sourceKind.value === 'committed');
 
-  /// edits(markers/suppressed/titleOverrides)与 source 是否存在差异。
   const dirty = computed(() => {
     if (markers.value.length > 0 || suppressed.value.length > 0) return true;
-    for (const byteStartStr in titleOverrides.value) {
-      const byteStart = Number(byteStartStr);
-      const seg = source.value.find((s) => s.byte_start === byteStart);
-      if (!seg || titleOverrides.value[byteStart] !== seg.title) return true;
+    for (const k in titleOverrides.value) {
+      const seg = source.value.find((s) => segmentKey(s) === k);
+      if (!seg || titleOverrides.value[k] !== seg.title) return true;
     }
     return false;
   });
 
-  /// 拿当前 edits(markers/suppressed)走 splitter,或退回 source。
   async function applyWorking(token: number) {
     if (uploadId.value === null) return;
     const id = uploadId.value;
-    let segs: ChapterSegment[];
-    if (markers.value.length > 0 || suppressed.value.length > 0) {
-      segs = await ipcListChapterSegments(id, markers.value, suppressed.value);
-    } else {
-      segs = source.value;
-    }
+    // splitter 后端跑全文;markers/suppressed 都是前端 UI 状态,不传给后端。
+    let segs: ChapterSegment[] = source.value.length > 0
+      ? source.value
+      : await ipcListChapterSegments(id);
     if (token !== requestToken) return;
+
+    // 计算每段在原文里的起始行号,给"点击章节跳到右侧原文"用。
+    segLineMap.value = computeLineMap(rawText.value, segs);
+
+    // suppressed = "并入上一章":把该段 content/word_count 追加到上一段末尾,丢弃该段。
+    if (suppressed.value.length > 0) {
+      const supSet = new Set(suppressed.value);
+      segs = mergeSuppressed(segs, supSet);
+    }
     workingChapters.value = applyTitleOverrides(segs);
+  }
+
+  /// 从前向后 indexOf,避免同一 content 误匹配到后面的副本。
+  /// map 里记录的是"标题行号"——idx 是 content 第一个字符的位置,
+  /// 往前找最近的换行,该换行之前的换行数就是标题所在行。
+  /// (idx 是新行起点,idx 之前的换行 = 标题行的尾换行。)
+  function computeLineMap(text: string, segs: ChapterSegment[]): Map<string, number> {
+    const map = new Map<string, number>();
+    if (!text) return map;
+    let cursor = 0;
+    for (const s of segs) {
+      const idx = text.indexOf(s.content, cursor);
+      if (idx < 0) continue;
+      const lastNl = text.lastIndexOf('\n', idx - 1);
+      const line = lastNl < 0 ? 0 : text.slice(0, lastNl).split('\n').length - 1;
+      map.set(segmentKey(s), line);
+      cursor = idx + s.content.length;
+    }
+    return map;
+  }
+
+  /// "并入上一章":把 supSet 命中的段 content/word_count 追加到前一段,丢弃本段。
+  /// 第一章被 suppress 时直接丢弃(没有"上一章"可并)。
+  function mergeSuppressed(segs: ChapterSegment[], supSet: Set<string>): ChapterSegment[] {
+    const out: ChapterSegment[] = [];
+    for (const s of segs) {
+      if (!supSet.has(segmentKey(s))) { out.push(s); continue; }
+      if (out.length === 0) continue;
+      const prev = out[out.length - 1];
+      out[out.length - 1] = {
+        title: prev.title,
+        content: prev.content + s.content,
+        word_count: prev.word_count + s.word_count,
+      };
+    }
+    return out;
   }
 
   function applyTitleOverrides(segs: ChapterSegment[]): ChapterSegment[] {
     if (!segs) return [];
     const overrides = titleOverrides.value;
     return segs.map((s) => {
-      const t = overrides[s.byte_start];
+      const t = overrides[segmentKey(s)];
       const title = t !== undefined && t !== s.title ? t : s.title;
-      return { ...s, title };
+      return { title, content: s.content, word_count: s.word_count };
     });
   }
 
@@ -116,7 +140,6 @@ export const useChaptersStore = defineStore('chapters', () => {
 
   async function load(id: number) {
     uploadId.value = id;
-    /// 用户可见数据同步清空,避免切小说时仍渲染上一个小说的内容。
     workingChapters.value = [];
     source.value = [];
     sourceKind.value = null;
@@ -131,10 +154,10 @@ export const useChaptersStore = defineStore('chapters', () => {
       clearTimeout(debounceHandle);
       debounceHandle = null;
     }
-    ++requestToken;
-    const token = requestToken;
     loading.value = true;
     error.value = null;
+    ++requestToken;
+    const token = requestToken;
     try {
       const [text, committedSegs, meta] = await Promise.all([
         ipcGetUploadText(id),
@@ -164,42 +187,42 @@ export const useChaptersStore = defineStore('chapters', () => {
     }
   }
 
-  function addMarker(pos: number) {
-    if (markers.value.includes(pos)) return;
-    if (suppressed.value.includes(pos)) {
-      suppressed.value = suppressed.value.filter((p) => p !== pos);
+  function addMarker(key: string) {
+    if (markers.value.includes(key)) return;
+    if (suppressed.value.includes(key)) {
+      suppressed.value = suppressed.value.filter((p) => p !== key);
     }
-    markers.value = [...markers.value, pos].sort((a, b) => a - b);
+    markers.value = [...markers.value, key].sort();
     scheduleRecompute();
   }
 
-  function removeMarker(pos: number) {
-    if (!markers.value.includes(pos)) return;
-    markers.value = markers.value.filter((m) => m !== pos);
+  function removeMarker(key: string) {
+    if (!markers.value.includes(key)) return;
+    markers.value = markers.value.filter((m) => m !== key);
     scheduleRecompute();
   }
 
-  /// 并入上一章:在 suppressed 加 workingChapters[idx].byte_start。
   function removeChapter(idx: number) {
     const seg = workingChapters.value[idx];
     if (!seg || idx === 0) return;
-    if (!suppressed.value.includes(seg.byte_start)) {
-      suppressed.value = [...suppressed.value, seg.byte_start].sort((a, b) => a - b);
+    const k = segmentKey(seg);
+    if (!suppressed.value.includes(k)) {
+      suppressed.value = [...suppressed.value, k].sort();
       scheduleRecompute();
     }
   }
 
-  /// 标题编辑:本地立即更新 workingChapters;同时记录 override。
   function updateTitle(idx: number, title: string) {
     const seg = workingChapters.value[idx];
     if (!seg) return;
     seg.title = title;
-    const original = source.value.find((s) => s.byte_start === seg.byte_start)?.title;
+    const k = segmentKey(seg);
+    const original = source.value.find((s) => segmentKey(s) === k)?.title;
     const next = { ...titleOverrides.value };
     if (original === undefined || original === title) {
-      delete next[seg.byte_start];
+      delete next[k];
     } else {
-      next[seg.byte_start] = title;
+      next[k] = title;
     }
     titleOverrides.value = next;
   }
@@ -211,7 +234,29 @@ export const useChaptersStore = defineStore('chapters', () => {
     scheduleRecompute();
   }
 
-  /// "重新切分"按钮:丢弃 committed 数据,回 splitter 首次结果。
+  /// 离开 parse 页时调用:清掉 rawText/source/workingChapters 等大对象,避免 pinia store
+  /// 持有旧小说数据驻内存(load 覆盖赋值会 GC,但显式 unload 更明确,也避免 watch 防抖悬挂)。
+  function unload() {
+    if (debounceHandle !== null) {
+      clearTimeout(debounceHandle);
+      debounceHandle = null;
+    }
+    uploadId.value = null;
+    rawText.value = '';
+    filename.value = '';
+    source.value = [];
+    sourceKind.value = null;
+    markers.value = [];
+    suppressed.value = [];
+    titleOverrides.value = {};
+    workingChapters.value = [];
+    segLineMap.value = new Map();
+    searchQuery.value = '';
+    currentHitIndex.value = 0;
+    error.value = null;
+    loading.value = false;
+  }
+
   async function reSplit() {
     if (uploadId.value === null || sourceKind.value !== 'committed') return;
     const id = uploadId.value;
@@ -225,6 +270,11 @@ export const useChaptersStore = defineStore('chapters', () => {
     } catch (e: unknown) {
       if (token === requestToken) error.value = e instanceof Error ? e.message : String(e);
     }
+  }
+
+  /// 拿到一段章节在原文里的起始行号(用于点击章节跳转到右侧原文)。
+  function startLineOf(seg: ChapterSegment): number {
+    return segLineMap.value.get(segmentKey(seg)) ?? -1;
   }
 
   function setSearchQuery(q: string) {
@@ -244,14 +294,11 @@ export const useChaptersStore = defineStore('chapters', () => {
     currentHitIndex.value = (safe - 1 + total) % total;
   }
 
-  /// 把当前 workingChapters 落库到新 data_asset,返回新 data_asset_id。
-  /// commit 后 source 同步成 workingChapters,edits 清空,sourceKind 升级 committed。
   async function commit(title: string): Promise<number> {
-    if (uploadId.value === null) throw new Error('未加载 upload');
+    if (uploadId.value === null) throw new Error('no upload loaded');
     const segs: ChapterInput[] = workingChapters.value.map((s) => ({
       title: s.title,
-      byte_start: s.byte_start,
-      byte_end: s.byte_end,
+      content: s.content,
     }));
     try {
       const newDataAssetId = await ipcCommitDataAsset(uploadId.value, { title, chapters: segs });
@@ -273,11 +320,14 @@ export const useChaptersStore = defineStore('chapters', () => {
     workingChapters,
     markers, suppressed, titleOverrides,
     source, sourceKind,
+    segLineMap,
     loading, error,
     searchQuery, currentHitIndex,
     committed, dirty,
     load,
     addMarker, removeMarker, removeChapter, updateTitle, reset, reSplit, commit,
     setSearchQuery, nextSearchHit, prevSearchHit,
+    startLineOf,
+    unload,
   };
 });

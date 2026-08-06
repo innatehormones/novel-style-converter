@@ -56,14 +56,8 @@ router.beforeEach(async (to) => {
   const oldMatch = to.path.match(/^\/library\/(\d+)\/(clean|chapters|preview)$/);
   if (oldMatch) {
     const uploadId = Number(oldMatch[1]);
-    const daId = await findDataAssetByUpload(uploadId);
-    return daId != null ? `/library/data/${daId}` : `/library/upload/${uploadId}`;
-  }
-  const parseMatch = to.path.match(/^\/library\/upload\/(\d+)\/parse$/);
-  if (parseMatch) {
-    const uploadId = Number(parseMatch[1]);
-    const daId = await findDataAssetByUpload(uploadId);
-    if (daId != null) return `/library/data/${daId}`;
+    const daIds = await findDataAssetByUpload(uploadId);
+    return daIds.length > 0 ? `/library/data/${daIds[0]}` : `/library/upload/${uploadId}`;
   }
 });
 

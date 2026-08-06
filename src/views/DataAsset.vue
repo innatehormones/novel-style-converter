@@ -44,9 +44,9 @@
         <RecycleScroller
           v-if="store.chapters.length > 0"
           class="scroller"
-          :items="store.chapters"
+          :items="chaptersWithIdx"
           :item-size="40"
-          key-field="byte_start"
+          :key-field="'idx'"
         >
           <template #default="{ item, index }">
             <div
@@ -72,6 +72,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+/// 给章节加 idx 当唯一 key; ChapterSegment 没有 id, content/title 可能重复
 import { useRoute, useRouter } from 'vue-router';
 import { RecycleScroller } from 'vue-virtual-scroller';
 import Button from '../components/ui/Button.vue';
@@ -92,6 +93,10 @@ const confirmOpen = ref(false);
 const confirmMessage = computed(() => `确认删除数据资产 "${store.title}"?解析出的章节将一并删除,删除后可重新解析。`);
 const alertOpen = ref(false);
 const alertMessage = ref('');
+
+const chaptersWithIdx = computed(() =>
+  store.chapters.map((s, idx) => ({ ...s, idx })),
+);
 
 onMounted(async () => {
   const raw = route.params.dataAssetId;

@@ -1,6 +1,11 @@
 <template>
   <section class="chapters">
     <PageHeader title="章节解析" subtitle="调整章节 marker,提交为数据资产">
+      <template #back>
+        <Button aria-label="返回" @click="onBack">
+          <IconArrowLeft :size="16" :stroke-width="1.5" />
+        </Button>
+      </template>
       <template #actions>
         <Button @click="onReset" :disabled="!store.dirty">重置 marker</Button>
         <Button
@@ -22,9 +27,9 @@
         <div class="pane-title">章节列表({{ store.workingChapters.length }})</div>
         <DynamicScroller
           class="scroller"
-          :items="store.workingChapters"
+          :items="chaptersWithIdx"
           :min-item-size="48"
-          key-field="byte_start"
+          :key-field="'idx'"
         >
           <template #default="{ item, active }">
             <DynamicScrollerItem
@@ -32,7 +37,7 @@
               :active="active"
               :size-dependencies="[item?.title ?? '']"
             >
-              <div v-if="segIdx(item) >= 0" class="seg-row" @click="onChapterClick(item.byte_start)">
+              <div v-if="segIdx(item) >= 0" class="seg-row" @click="onChapterClick(item)">
                 <span class="seg-idx">{{ segIdx(item) + 1 }}</span>
                 <input
                   class="seg-title"
@@ -73,22 +78,22 @@
         <RecycleScroller
           ref="textScrollerRef"
           class="scroller"
-          :items="lines"
+          :items="store.rawLines"
           :item-size="24"
-          key-field="byte_start"
+          :key-field="'line'"
         >
           <template #default="{ item, index }">
             <div
               class="line-row"
               :class="{
-                marked: markerSet.has(item.byte_start),
+                marked: markerSet.has(String(item.line)),
                 hit: hitLineIndicesSet.has(index),
                 'active-hit': index === currentHitLineIndex,
               }"
             >
               <MarkerButton
-                :title="markerSet.has(item.byte_start) ? '取消标记' : '在此拆分'"
-                @mark="onMarkLine(item.byte_start)"
+                :title="markerSet.has(String(item.line)) ? '取消标记' : '在此拆分'"
+                @mark="onMarkLine(String(item.line))"
               />
               <span class="line-no">{{ index + 1 }}</span>
               <span class="line-text" :title="item.text">{{ item.text }}</span>
@@ -144,8 +149,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import IconArrowLeft from '~icons/lucide/arrow-left';
 import { DynamicScroller, DynamicScrollerItem, RecycleScroller } from 'vue-virtual-scroller';
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
 import Button from '../components/ui/Button.vue';
@@ -180,14 +186,19 @@ const resplitConfirmOpen = ref(false);
 const alertOpen = ref(false);
 const alertMessage = ref('');
 
-const lines = computed(() => store.rawLines);
-const markerSet = computed(() => new Set(store.markers));
+
+/// 章节列表按数组下标加 idx, 给 DynamicScroller 当唯一 key。
+/// (ChapterSegment 本身没有 id;title+content 可能撞。)
+const chaptersWithIdx = computed(() =>
+  store.workingChapters.map((s, idx) => ({ ...s, idx })),
+);
+const markerSet = computed(() => new Set(store.markers.map((m) => String(m))));
 
 const searchQueryRef = computed({
   get: () => store.searchQuery,
   set: (v: string) => store.setSearchQuery(v),
 });
-const search = useChapterSearch(searchQueryRef as unknown as import('vue').Ref<string>, lines);
+const search = useChapterSearch(searchQueryRef as unknown as import('vue').Ref<string>, store.rawLines);
 const { hitLineIndices, hitCount, currentHitLineIndex, next, prev } = search;
 const hitLineIndicesSet = computed(() => new Set(hitLineIndices.value));
 
@@ -205,21 +216,43 @@ function scrollToActiveHit() {
   });
 }
 
-onMounted(() => {
-  void store.load(Number(route.params.uploadId));
+// 路由 uploadId 变化时重新拉数据;immediate:true 让首次挂载也跑。
+// 用 watch 而非 onMounted:同组件复用(路由 param 变)onMounted 不会再触发。
+watch(
+  () => Number(route.params.uploadId),
+  (id) => {
+    if (Number.isFinite(id) && id > 0) {
+      void store.load(id);
+    }
+  },
+  { immediate: true },
+);
+
+/// 离开 parse 页时清空 store:释放 rawText 等大对象内存,避免 watch 防抖悬挂。
+onUnmounted(() => {
+  store.unload();
 });
 
-function onMarkLine(byteStart: number) {
-  if (markerSet.value.has(byteStart)) {
-    store.removeMarker(byteStart);
+function onBack() {
+  void router.push('/uploads');
+}
+
+function onMarkLine(lineKey: string) {
+  if (markerSet.value.has(lineKey)) {
+    store.removeMarker(lineKey);
   } else {
-    store.addMarker(byteStart);
+    store.addMarker(lineKey);
   }
 }
 
-function onChapterClick(byteStart: number) {
-  const idx = lines.value.findIndex((l) => l.byte_start >= byteStart);
-  if (idx >= 0) textScrollerRef.value?.scrollToItem(idx);
+/// 点击章节行 → 跳转到右侧原文对应位置。
+/// Button 和 input 上的 @click.stop 已拦住冒泡,这里只处理"点空白处"。
+function onChapterClick(item: ChapterSegment) {
+  const line = store.startLineOf(item);
+  if (line < 0) return;
+  void nextTick(() => {
+    textScrollerRef.value?.scrollToItem(line);
+  });
 }
 
 function onTitleEdit(idx: number, value: string) {
@@ -249,7 +282,8 @@ function displayTitle(t: unknown): string {
 
 function segIdx(item: ChapterSegment | null | undefined): number {
   if (!item) return -1;
-  return store.workingChapters.findIndex((s) => s.byte_start === item.byte_start);
+  // chaptersWithIdx 里 item.idx 是数组下标
+  return (item as { idx?: number }).idx ?? -1;
 }
 
 function onSearchInput(value: string) {

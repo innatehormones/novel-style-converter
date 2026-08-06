@@ -22,9 +22,13 @@
         <template #cell-size="{ row }">{{ formatSize(row.byte_size) }}</template>
         <template #cell-words="{ row }">{{ formatWordCount(row.word_count) }}</template>
         <template #cell-uploaded="{ row }">{{ formatTime(row.uploaded_at) }}</template>
+        <template #cell-assets="{ row }">
+          <Tag v-if="daCount(row.id) > 0" kind="success">{{ daCount(row.id) }} 个</Tag>
+          <span v-else class="muted">—</span>
+        </template>
         <template #cell-actions="{ row }">
           <Button size="small" @click="goUpload(row.id)">查看</Button>
-          <Button v-if="!hasDataAsset(row.id)" size="small" @click="goParse(row.id)">解析章节</Button>
+          <Button size="small" @click="goParse(row.id)">解析章节</Button>
           <Button size="small" kind="danger" @click="onDeleteUpload(row.id, row.filename)">删除</Button>
         </template>
       </Table>
@@ -158,6 +162,18 @@ import { formatSize, formatTime, formatWordCount } from '../utils/format';
 const route = useRoute();
 const router = useRouter();
 const store = useLibraryStore();
+/// 按 upload_id 统计已生成的数据资产数量,O(N) 一次算好供表格行查。
+const daCountByUpload = computed(() => {
+  const m = new Map<number, number>();
+  for (const d of store.dataAssets) {
+    m.set(d.upload_id, (m.get(d.upload_id) ?? 0) + 1);
+  }
+  return m;
+});
+function daCount(uploadId: number): number {
+  return daCountByUpload.value.get(uploadId) ?? 0;
+}
+
 type Page = 'uploads' | 'data-assets' | 'transformations';
 const page = computed<Page>(() => (route.meta.libraryPage as Page | undefined) ?? 'uploads');
 const pageTitle = computed(() => ({
@@ -199,6 +215,7 @@ const uploadColumns = [
   { key: 'size', title: '大小', width: '100px' },
   { key: 'words', title: '字数', width: '100px' },
   { key: 'uploaded', title: '上传时间', width: '180px' },
+  { key: 'assets', title: '数据资产', width: '100px' },
   { key: 'actions', title: '操作', width: '260px', type: 'actions' as const },
 ];
 
@@ -225,15 +242,6 @@ onMounted(() => store.load());
 /// 用户在 DataAsset.vue 删除后再切到 /data-assets,得 reload 才能拿到新数据。
 watch(() => route.path, () => store.load());
 
-/// 上传列表每行都要查"是否已有 data_asset",data_assets 数量是 O(N),
-/// 若每次都 .some() 则渲染总复杂度 O(M*N)。用 Set 一次性算好,O(1) 查。
-const uploadIdsWithDataAsset = computed(
-  () => new Set(store.dataAssets.map((d) => d.upload_id)),
-);
-function hasDataAsset(uploadId: number): boolean {
-  return uploadIdsWithDataAsset.value.has(uploadId);
-}
-
 function openCreateTn(dataAssetId: number) {
   tnDialogDataAssetId.value = dataAssetId;
   tnDialogOpen.value = true;
@@ -252,7 +260,21 @@ async function onUpload(input: { filePath: string; filename: string }) {
 
 async function onDeleteUpload(id: number, filename: string) {
   deleteUploadId.value = id;
-  deleteUploadMessage.value = `确认删除文件 "${filename}"?`;
+  try {
+    const preview = await ipcPreviewUploadDeletion(id);
+    const list = preview.derived_data_assets;
+    if (list.length === 0) {
+      deleteUploadMessage.value = 'Confirm delete upload "' + filename + '"?';
+    } else {
+      const lines = ['This upload produced the following data assets (will become orphans, delete them from the DataAssets tab if needed):'];
+      for (const item of list) {
+        lines.push('  - #' + item.id + ' ' + item.title + ' (' + item.chapters_count + ' chapters, ' + item.tn_count + ' workflows)');
+      }
+      deleteUploadMessage.value = lines.join('\n');
+    }
+  } catch (e: unknown) {
+    deleteUploadMessage.value = 'Confirm delete upload "' + filename + '"?';
+  }
   deleteUploadConfirmOpen.value = true;
 }
 

@@ -7,10 +7,9 @@
         </Button>
       </template>
       <template #actions>
-        <Button :loading="saving" :disabled="!dirty || hasDataAsset" :title="hasDataAsset ? '原文已有关联数据资产,无法修改。请先在数据资产页删除。' : ''" @click="save">保存</Button>
+        <Button :loading="saving" :disabled="!dirty" @click="save">保存</Button>
         <Button
-          :disabled="uploadId == null || dirty || hasDataAsset"
-          :title="hasDataAsset ? '数据资产已存在,请先在数据资产页删除再清洗(清洗会改变原文字节数,但 chapters.byte_range 不会自动重算)' : ''"
+          :disabled="uploadId == null || dirty"
           @click="openCleaning"
         >清洗</Button>
         <Button kind="primary" :disabled="uploadId == null || dirty" @click="goParse">转为数据资产</Button>
@@ -20,7 +19,6 @@
     <div v-if="uploadId != null" class="meta-strip">
       <div class="tags">
         <Tag>实体文件</Tag>
-        <Tag v-if="hasDataAsset" kind="success">已解析</Tag>
       </div>
       <span class="meta-text" :title="metaTooltip">
         {{ mbSize }} MB · {{ lineCount }} 行 · {{ charCount }} 字
@@ -31,20 +29,12 @@
         v-model="rawText"
         class="raw"
         spellcheck="false"
-        :readonly="hasDataAsset"
       />
     </div>
     <CleaningDialog
       v-model:open="cleaningOpen"
       :source-text="rawText"
       @confirm="onCleaningConfirm"
-    />
-
-    <ConfirmDialog
-      v-model:open="resplitConfirmOpen"
-      title="重新解析"
-      message="清洗会破坏现有章节范围,需要重新解析。是否继续?"
-      @confirm="doOpenCleaning"
     />
 
     <AlertDialog
@@ -64,7 +54,7 @@ import PageHeader from '../components/ui/PageHeader.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import IconArrowLeft from '~icons/lucide/arrow-left';
-import { getUpload, getUploadText, updateUploadText, findDataAssetByUpload } from '../ipc/commands';
+import { getUpload, getUploadText, updateUploadText } from '../ipc/commands';
 import CleaningDialog from '../components/CleaningDialog.vue';
 
 const route = useRoute();
@@ -78,8 +68,6 @@ const savedText = ref('');
 const saving = ref(false);
 const error = ref<string | null>(null);
 const cleaningOpen = ref(false);
-const hasDataAsset = ref(false);
-const resplitConfirmOpen = ref(false);
 const alertOpen = ref(false);
 const alertTitle = ref('提示');
 const alertMessage = ref('');
@@ -92,17 +80,15 @@ onMounted(async () => {
   }
   uploadId.value = id;
   try {
-    const [meta, text, existingDaId] = await Promise.all([
+    const [meta, text] = await Promise.all([
       getUpload(id),
       getUploadText(id),
-      findDataAssetByUpload(id),
     ]);
     filename.value = meta?.filename ?? '';
     sha256.value = meta?.sha256 ?? '';
     byteSize.value = meta?.byte_size ?? 0;
     rawText.value = text;
     savedText.value = text;
-    hasDataAsset.value = existingDaId != null;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e);
   }
@@ -144,21 +130,7 @@ async function openCleaning() {
     alertOpen.value = true;
     return;
   }
-  try {
-    const existing = await findDataAssetByUpload(uploadId.value);
-    if (existing != null) {
-      resplitConfirmOpen.value = true;
-      return;
-    }
-  } catch (e: unknown) {
-    alertMessage.value = e instanceof Error ? e.message : String(e);
-    alertOpen.value = true;
-    return;
-  }
-  cleaningOpen.value = true;
-}
-
-function doOpenCleaning() {
+  // 新设计:清洗只改 uploads.original_text,不影响已有 chapters.body,无需二次确认。
   cleaningOpen.value = true;
 }
 

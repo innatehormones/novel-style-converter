@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useWorkflowsStore } from '../stores/workflows';
-import { getChapter as ipcGetChapter, getDataAssetContent as ipcGetDataAssetContent } from '../ipc/commands';
+import { getChapter as ipcGetChapter } from '../ipc/commands';
 import type {
   SourceChapterRow, WorkflowSummary, WorkflowChapterRow, ChapterWorkflowResultRow,
   CreateWorkflowInput, Chapter,
@@ -88,11 +88,7 @@ async function openChapterPanel(chapterId: number) {
   try {
     const ch = await ipcGetChapter(chapterId);
     sourceChapterDetail.value = ch;
-    const fullText = await ipcGetDataAssetContent(ch.data_asset_id);
-    const bytes = new TextEncoder().encode(fullText);
-    const start = Math.max(0, Math.min(ch.byte_start, bytes.length));
-    const end = Math.max(start, Math.min(ch.byte_end, bytes.length));
-    sourceChapterText.value = new TextDecoder().decode(bytes.subarray(start, end));
+    sourceChapterText.value = ch.body;
   } catch (e: unknown) {
     console.error(e);
   } finally {

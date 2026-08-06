@@ -1,7 +1,7 @@
 import { computed, ref, watch, type Ref } from 'vue';
 
 export interface SearchableLine {
-  byte_start: number;
+  line: number;
   text: string;
 }
 

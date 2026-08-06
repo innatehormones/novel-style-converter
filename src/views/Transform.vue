@@ -105,7 +105,6 @@ async function loadFromRoute() {
     store.chapterId = null;
     store.chapter = null;
     store.allChapters = [];
-    store.originalText = '';
     store.transformations = [];
     store.selectedTransformationId = null;
     store.error = `无效的 chapter ID: ${String(route.params.chapterId)}`;
