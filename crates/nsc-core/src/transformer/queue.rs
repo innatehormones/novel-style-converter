@@ -239,34 +239,14 @@ async fn run_job(
 /// 同步读所有 job 上下文:从 uploads.original_text 切片 chapter / 邻章正文。
 /// 通过 tid 反查 transformation_novel_id(避免 caller 多传字段)。
 fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
-    let tid = job.transformation_id;
     let cid = job.chapter.id;
     let idx = job.chapter.idx;
     let data_asset_id = job.chapter.data_asset_id;
 
-    let tx_chapter = db.transformation_chapters().get(tid)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "transformation_chapter missing".to_string())?;
-    let tn_id = tx_chapter.transformation_novel_id;
-
-    let transformation_novel = db.transformation_novels().get(tn_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "transformation_novel missing".to_string())?;
-
-    // 先反查 data_asset 拿 upload_id,再读 upload.original_text 作为切片坐标系。
-    let data_asset = db.data_assets().get(data_asset_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("data_asset {data_asset_id} 不存在"))?;
-    let upload = db.uploads().get(data_asset.upload_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("upload {} 不存在", data_asset.upload_id))?;
-    let original = &upload.original_text;
-
     let chapter = db.chapters().get(cid)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "chapter missing".to_string())?;
-    let chapter_content = slice_chapter(original, &chapter)
-        .ok_or_else(|| format!("chapter {} 切片失败(超出原文长度)", chapter.id))?;
+    let chapter_content = chapter.body.clone();
 
     let prev_chapters = db
         .chapters()
@@ -279,24 +259,12 @@ fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
 
     let prev_orig: Vec<(String, String)> = prev_chapters
         .into_iter()
-        .map(|c| {
-            let body = slice_chapter(original, &c).ok_or_else(|| {
-                format!("邻章 {} 切片失败:byte_start={} byte_end={} text_len={}",
-                    c.id, c.byte_start, c.byte_end, original.len())
-            })?;
-            Ok::<_, String>((c.title, body))
-        })
-        .collect::<StdResult<Vec<_>, String>>()?;
+        .map(|c| (c.title, c.body.clone()))
+        .collect();
     let next_orig: Vec<(String, String)> = next_chapters
         .into_iter()
-        .map(|c| {
-            let body = slice_chapter(original, &c).ok_or_else(|| {
-                format!("邻章 {} 切片失败:byte_start={} byte_end={} text_len={}",
-                    c.id, c.byte_start, c.byte_end, original.len())
-            })?;
-            Ok::<_, String>((c.title, body))
-        })
-        .collect::<StdResult<Vec<_>, String>>()?;
+        .map(|c| (c.title, c.body.clone()))
+        .collect();
 
     let prev_tx: Vec<TransformationChapter> = {
         let mut out = Vec::new();
@@ -307,7 +275,7 @@ fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
             let list = db.transformation_chapters().list_by_chapter(ch.id)
                 .map_err(|e| e.to_string())?;
             if let Some(t) = list.into_iter().find(|t| {
-                t.transformation_novel_id == tn_id
+                t.transformation_novel_id == job.transformation_id
                     && t.prompt_id == job.prompt.id
                     && t.model_config_id == job.model_config.id
                     && matches!(t.status, TransformStatus::Done)
@@ -318,27 +286,16 @@ fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
         out
     };
 
+    let _ = idx;
     Ok(Prep {
-        transformation_novel,
+        transformation_novel: db.transformation_novels().get(job.transformation_id).map_err(|e| e.to_string())?
+            .ok_or_else(|| "tn missing".to_string())?,
         chapter,
         chapter_content,
         prev_orig,
         prev_tx,
         next_orig,
     })
-}
-
-/// 从 upload.original_text 切片出 chapter 内容。byte 范围非法或越界返回 None。
-fn slice_chapter(text: &str, c: &crate::models::Chapter) -> Option<String> {
-    let s = c.byte_start.max(0) as usize;
-    let e = (c.byte_end.max(0) as usize).min(text.len());
-    if s >= e || e > text.len() {
-        return None;
-    }
-    if !text.is_char_boundary(s) || !text.is_char_boundary(e) {
-        return None;
-    }
-    Some(text[s..e].to_string())
 }
 
 fn apply_result(

@@ -4,11 +4,6 @@ use rusqlite::{params, OptionalExtension, Row};
 use crate::error::Result;
 use crate::models::{DataAsset, NewDataAsset};
 
-/// State 2 列表视图:data_asset + 来源 upload 文件名 + 章节总字数 + 引用此
-/// data_asset 的 transformation_novel 计数。前端 Library.vue 表格用。
-/// `tn_count` 走 `LEFT JOIN transformation_novels GROUP BY da.id` 实时统计,
-/// 不读 `data_assets.locked_at`(该列已被废弃 —— 早先误用来表达"是否被引用",
-/// 但 TN 删除时不会主动清,数据会留下历史值,跟真实引用状态脱节)。
 pub struct DataAssetWithUpload {
     pub id: i64,
     pub upload_id: i64,
@@ -16,29 +11,40 @@ pub struct DataAssetWithUpload {
     pub parsed_at: DateTime<Utc>,
     pub filename: String,
     pub byte_size: i64,
-    /// SUM(chapters.word_count) WHERE data_asset_id = da.id。0 表示尚无章节。
     pub word_count: i64,
-    /// COUNT(transformation_novels.id) WHERE data_asset_id = da.id。
-    /// 0 表示尚无工作区引用此 data_asset。前端按钮禁用按这个走。
     pub tn_count: i64,
 }
 
 pub struct DataAssetRepo<'a> { pub(crate) conn: &'a rusqlite::Connection }
 
+fn from_row(row: &Row) -> rusqlite::Result<DataAsset> {
+    let parsed_at_s: String = row.get(3)?;
+    let parsed_at = DateTime::parse_from_rfc3339(&parsed_at_s)
+        .map(|d| d.with_timezone(&Utc))
+        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e)))?;
+    Ok(DataAsset {
+        id: row.get(0)?,
+        upload_id: row.get(1)?,
+        title: row.get(2)?,
+        parsed_at,
+        source_filename: row.get(4)?,
+    })
+}
+
 impl<'a> DataAssetRepo<'a> {
     pub fn insert(&self, d: &NewDataAsset) -> Result<i64> {
         let now = Utc::now().to_rfc3339();
         self.conn.execute(
-            "INSERT INTO data_assets (upload_id, title, parsed_at) VALUES (?1, ?2, ?3)",
-            params![d.upload_id, d.title, now],
+            "INSERT INTO data_assets (upload_id, title, parsed_at, source_filename) VALUES (?1, ?2, ?3, ?4)",
+            params![d.upload_id, d.title, now, d.source_filename],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
 
     pub fn get(&self, id: i64) -> Result<Option<DataAsset>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, upload_id, title, parsed_at \
-             FROM data_assets WHERE id = ?1")?;
+            "SELECT id, upload_id, title, parsed_at, source_filename              FROM data_assets WHERE id = ?1",
+        )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
             Ok(Some(from_row(row)?))
@@ -47,41 +53,27 @@ impl<'a> DataAssetRepo<'a> {
 
     pub fn list(&self) -> Result<Vec<DataAsset>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, upload_id, title, parsed_at \
-             FROM data_assets ORDER BY id DESC")?;
-        let rows = stmt.query_map([], |row| from_row(row))?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+            "SELECT id, upload_id, title, parsed_at, source_filename              FROM data_assets ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map([], from_row)?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
-    pub fn find_by_upload(&self, upload_id: i64) -> Result<Option<DataAsset>> {
+    pub fn find_by_upload(&self, upload_id: i64) -> Result<Vec<DataAsset>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, upload_id, title, parsed_at \
-             FROM data_assets WHERE upload_id = ?1")?;
-        let mut rows = stmt.query(params![upload_id])?;
-        if let Some(row) = rows.next()? {
-            Ok(Some(from_row(row)?))
-        } else { Ok(None) }
+            "SELECT id, upload_id, title, parsed_at, source_filename              FROM data_assets WHERE upload_id = ?1 ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map(params![upload_id], from_row)?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
     pub fn list_with_upload(&self) -> Result<Vec<DataAssetWithUpload>> {
-        // 聚合章节总字数 + 工作区引用计数。LEFT JOIN + COALESCE 处理空集合(0)。
-        // 一次性 GROUP BY 避免 N+1。
         let mut stmt = self.conn.prepare(
-            "SELECT da.id, da.upload_id, da.title, da.parsed_at, \
-                    u.filename, u.byte_size, \
-                    COALESCE(SUM(c.word_count), 0) AS word_count, \
-                    COALESCE(tn.cnt, 0) AS tn_count \
-             FROM data_assets da \
-             JOIN uploads u ON u.id = da.upload_id \
-             LEFT JOIN chapters c ON c.data_asset_id = da.id \
-             LEFT JOIN (SELECT data_asset_id, COUNT(*) AS cnt \
-                        FROM transformation_novels GROUP BY data_asset_id) tn \
-                   ON tn.data_asset_id = da.id \
-             GROUP BY da.id \
-             ORDER BY da.id DESC")?;
+            "SELECT da.id, da.upload_id, da.title, da.parsed_at,                     COALESCE(u.filename, da.source_filename) AS filename,                     COALESCE(u.byte_size, 0) AS byte_size,                     COALESCE(SUM(c.word_count), 0) AS word_count,                     COALESCE(tn.cnt, 0) AS tn_count              FROM data_assets da              LEFT JOIN uploads u ON u.id = da.upload_id              LEFT JOIN chapters c ON c.data_asset_id = da.id              LEFT JOIN (SELECT data_asset_id, COUNT(*) AS cnt                         FROM transformation_novels GROUP BY data_asset_id) tn                    ON tn.data_asset_id = da.id              GROUP BY da.id              ORDER BY da.id DESC",
+        )?;
         let rows = stmt.query_map([], |row| {
-            let parsed_at: String = row.get(3)?;
-            let parsed_at = DateTime::parse_from_rfc3339(&parsed_at)
+            let parsed_at_s: String = row.get(3)?;
+            let parsed_at = DateTime::parse_from_rfc3339(&parsed_at_s)
                 .map(|d| d.with_timezone(&Utc))
                 .map_err(|e| rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e)))?;
             Ok(DataAssetWithUpload {
@@ -95,7 +87,7 @@ impl<'a> DataAssetRepo<'a> {
                 tn_count: row.get(7)?,
             })
         })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
     pub fn delete(&self, id: i64) -> Result<()> {
@@ -110,14 +102,4 @@ impl<'a> DataAssetRepo<'a> {
         self.conn.execute("DELETE FROM data_assets WHERE id = ?1", params![id])?;
         Ok(())
     }
-}
-
-fn from_row(row: &Row) -> rusqlite::Result<DataAsset> {
-    let parsed_at = DateTime::parse_from_rfc3339(row.get::<_, String>(3)?.as_str())
-        .map(|d| d.with_timezone(&Utc))
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e)))?;
-    Ok(DataAsset {
-        id: row.get(0)?, upload_id: row.get(1)?, title: row.get(2)?,
-        parsed_at,
-    })
 }

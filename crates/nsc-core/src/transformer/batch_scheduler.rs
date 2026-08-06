@@ -1,4 +1,4 @@
-//! 批号调度器:按 frontier 串行派发,跨工作流不共享结果。
+﻿//! 批号调度器:按 frontier 串行派发,跨工作流不共享结果。
 //!
 //! 单例;持 `db_path`(不在 Db 上 Sync);由 lib.rs 在 JobQueue::set_notifier 时注册。
 //!
@@ -394,8 +394,7 @@ impl BatchScheduler {
                 data_asset_id: chapter.data_asset_id,
                 idx: chapter.idx,
                 title: chapter.title.clone(),
-                byte_start: chapter.byte_start,
-                byte_end: chapter.byte_end,
+                body: chapter.body.clone(),
                 word_count: chapter.word_count,
             },
             prompt: prompt.clone(),
@@ -766,3 +765,4 @@ fn mode_str(m: TransformMode) -> &'static str {
         TransformMode::Style => "style",
     }
 }
+

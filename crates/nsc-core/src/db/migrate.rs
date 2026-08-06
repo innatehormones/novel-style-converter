@@ -13,4 +13,5 @@ pub const SCHEMAS: &[(&str, &str)] = &[
     ("0012_batches_tn_cascade", include_str!("../../../../migrations/0012_batches_tn_cascade.sql")),
     ("0013_workflow_result_chapters_cascade", include_str!("../../../../migrations/0013_workflow_result_chapters_cascade.sql")),
     ("0014_builtin_prompt_double_braces", include_str!("../../../../migrations/0014_builtin_prompt_double_braces.sql")),
+    ("v15", include_str!("../../../../migrations/0015_chapter_body.sql")),
 ];

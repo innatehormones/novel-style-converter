@@ -9,8 +9,6 @@ use nsc_core::db::Db;
 use nsc_core::models::Upload;
 use nsc_core::upload;
 
-/// Upload listing IPC DTO. Only carries upload self-fields; data_asset
-/// related info belongs to DataAssetSummary (Task 7).
 #[derive(Debug, Serialize)]
 pub struct UploadSummary {
     pub id: i64,
@@ -19,9 +17,22 @@ pub struct UploadSummary {
     pub byte_size: i64,
     pub uploaded_at: String,
     pub file_path: String,
-    /// 字数(zh-aware,汉字 + 字母 + 数字)。upload_file() 时由 nsc_core::text::word_count 一次算好,
-    /// list 列表无需重扫原文。
     pub word_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DataAssetRef {
+    pub id: i64,
+    pub title: String,
+    pub chapters_count: i64,
+    pub tn_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UploadDeletePreview {
+    pub id: i64,
+    pub filename: String,
+    pub derived_data_assets: Vec<DataAssetRef>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,12 +58,10 @@ fn to_summary(u: &Upload) -> UploadSummary {
     }
 }
 
-/// Read `upload.original_text`. Empty field is a data integrity error
-/// (new uploads always populate it; if it's empty, something wiped it).
 pub fn read_upload_original_text(u: &Upload) -> Result<String, String> {
     if u.original_text.is_empty() {
         return Err(format!(
-            "upload {} ({}) 的 original_text 为空,文件路径 {}。请重新上传该文件。",
+            "upload {} ({}) 的 original_text 为空，文件路径 {}。请重新上传该文件。",
             u.id, u.filename, u.file_path
         ));
     }
@@ -66,9 +75,6 @@ pub fn list_uploads(db: State<'_, Arc<Mutex<Db>>>) -> Result<Vec<UploadSummary>,
     Ok(ups.iter().map(to_summary).collect())
 }
 
-/// Register a new upload from a user-chosen file path. Delegates to
-/// `nsc_core::upload::upload_file` for all business logic (decode, hash,
-/// dedup, atomic write, DB insert with rollback).
 #[tauri::command]
 pub fn upload_file(
     db: State<'_, Arc<Mutex<Db>>>,
@@ -82,17 +88,44 @@ pub fn upload_file(
     Ok(to_summary(&u))
 }
 
-/// 删除 upload。data_asset 也通过 FK CASCADE 一起清掉,业务层不需要拦。
-/// 删 upload。如果有关联 data_asset,FK CASCADE 会把它一起带走(数据资产页看不到了),
-/// 所以必须让用户先去数据资产页删。计划文档 2026-07-31-upload-refactor.md 明确这条 guard。
+/// 删 upload 前预览：列出该 upload 派生的所有 data_asset（含 title/章节数/TN 数）。
+/// 前端弹窗用此信息提示用户"这些 data_asset 会变孤儿，需要去 data_asset 页手动删"。
+/// 注意：data_asset 不再被 CASCADE 删除（migration 0015 已断 FK）。
+#[tauri::command]
+pub fn preview_upload_deletion(
+    db: State<'_, Arc<Mutex<Db>>>,
+    upload_id: i64,
+) -> Result<UploadDeletePreview, String> {
+    let db = db.lock().map_err(|e| e.to_string())?;
+    let u = db.uploads().get(upload_id).map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("upload {upload_id} 不存在"))?;
+    let derived: Vec<DataAssetRef> = {
+        let das = db.data_assets().find_by_upload(upload_id).map_err(|e| e.to_string())?;
+        das.into_iter().map(|d| {
+            let chapters_count = db.chapters().list_by_data_asset(d.id).map(|v| v.len() as i64).unwrap_or(0);
+            let tn_count = db.transformation_novels().list_by_data_asset(d.id).map(|v| v.len() as i64).unwrap_or(0);
+            DataAssetRef {
+                id: d.id,
+                title: d.title,
+                chapters_count,
+                tn_count,
+            }
+        }).collect()
+    };
+    Ok(UploadDeletePreview {
+        id: u.id,
+        filename: u.filename.clone(),
+        derived_data_assets: derived,
+    })
+}
+
+/// 直接删除 upload + 文件。FK 已断，data_asset 不会被带走。
+/// 前端在弹窗预览后用户确认后调用此命令。
 #[tauri::command]
 pub fn delete_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String> {
     let db = db.lock().map_err(|e| e.to_string())?;
     let u = db.uploads().get(id).map_err(|e| e.to_string())?
         .ok_or_else(|| format!("upload {id} 不存在"))?;
-    if db.data_assets().find_by_upload(id).map_err(|e| e.to_string())?.is_some() {
-        return Err("该 upload 有关联的数据资产,请先在数据资产页删除".into());
-    }
     let _ = std::fs::remove_file(&u.file_path);
     db.uploads().delete(id).map_err(|e| e.to_string())
 }
@@ -112,19 +145,15 @@ pub fn get_upload_text(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<Respons
         let u = db.uploads().get(id).map_err(|e| e.to_string())?
             .ok_or_else(|| format!("upload {id} 不存在"))?;
         if u.original_text.is_empty() {
-            return Err(format!(
-                "upload {} 的 original_text 为空。请重新上传该文件。",
-                u.id
-            ));
+            return Err(format!("upload {} 的 original_text 为空。请重新上传该文件。", u.id));
         }
         u.original_text.clone()
     };
     Ok(Response::new(text.into_bytes()))
 }
 
-/// 修改 upload.original_text。改完会让已存在的 chapter 切片坐标系失效,
-/// 所以如果该 upload 已有 data_asset,拒绝(让用户先在数据资产页删除)。
-/// 计划文档 2026-07-31-upload-refactor.md 明确这条 guard。
+/// 改 upload.original_text（清洗/手动编辑）。同步刷 word_count。
+/// 注意：不影响已存在的 data_asset（它们有独立 source_filename 副本 + chapter.body）。
 #[tauri::command]
 pub fn update_upload_text(
     db: State<'_, Arc<Mutex<Db>>>,
@@ -134,9 +163,6 @@ pub fn update_upload_text(
     let db = db.lock().map_err(|e| e.to_string())?;
     if db.uploads().get(id).map_err(|e| e.to_string())?.is_none() {
         return Err(format!("upload {id} 不存在"));
-    }
-    if db.data_assets().find_by_upload(id).map_err(|e| e.to_string())?.is_some() {
-        return Err("该 upload 已有 data_asset,无法修改原文。请先在数据资产页删除后再修改。".into());
     }
     db.uploads().set_original_text(id, &text).map_err(|e| e.to_string())
 }

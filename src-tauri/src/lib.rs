@@ -42,11 +42,7 @@ pub fn run() {
     {
         let sched = scheduler.clone();
         let notify: Notifier = Arc::new(move |tid, success, error, content| {
-            // enqueue 事件(success=false, error=None)不是状态变更 —— 只是入队计数脉冲;
-            // 不归 scheduler 管。原实现把它当失败处理会触发 race:实 tid 时写入 empty error。
-            if !success && error.is_none() {
-                return;
-            }
+            if !success && error.is_none() { return; }
             let res = if success {
                 sched.on_chapter_done(tid, content)
             } else {
@@ -72,6 +68,7 @@ pub fn run() {
             commands::models::test_model,
             commands::uploads::list_uploads,
             commands::uploads::upload_file,
+            commands::uploads::preview_upload_deletion,
             commands::uploads::delete_upload,
             commands::uploads::get_upload,
             commands::uploads::get_upload_text,
@@ -84,7 +81,6 @@ pub fn run() {
             commands::chapters::parse_chapters,
             commands::cleaning::preview_cleaning,
             commands::data_assets::list_data_asset_chapters,
-            commands::data_assets::get_data_asset_content,
             commands::data_assets::commit_data_asset,
             commands::data_assets::list_data_assets,
             commands::data_assets::find_data_asset_by_upload,
