@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use nsc_core::ai::{AiProvider, OpenAiProvider};
 use nsc_core::db::Db;
+use nsc_core::recorder::{spawn_writer, AiCallRecorder, ChannelRecorder};
 use nsc_core::transformer::{BatchScheduler, JobQueue, Notifier};
 
 mod commands;
@@ -23,6 +24,16 @@ pub fn run() {
     nsc_core::startup_recovery::run(&db.lock().expect("recovery lock").conn)
         .expect("startup safe-recovery failed");
 
+    // ── AI 调用 recorder ────────────────────────────────────────────
+    // Channel 容量 4096;满时 drop new(不阻塞 hot path)。writer 任务按 db_path 重开
+    // DB 落库,worker 线程不持 DB 句柄,避免跨线程 Send/Sync 摩擦。
+    // handle 留着 —— app 退出时 tokio runtime 自然结束 writer(通道 drop → recv → break);
+    // 不主动 abort,让最后几行日志能落库。
+    let (recorder, rx) = ChannelRecorder::new(4096);
+    let _writer_handle = spawn_writer(path.clone(), recorder.clone(), rx);
+    let recorder: Arc<dyn AiCallRecorder> = Arc::new(recorder);
+
+
     let db_path_for_workers = path.clone();
     let job_queue = Arc::new(JobQueue::new(
         2,
@@ -36,6 +47,7 @@ pub fn run() {
                     }),
             )
         },
+        recorder.clone(),
     ));
     let scheduler = Arc::new(BatchScheduler::new(path.clone(), job_queue.clone()));
     {
@@ -59,6 +71,7 @@ pub fn run() {
         .manage(db)
         .manage(job_queue)
         .manage(scheduler)
+        .manage(recorder)
         .setup(|_app| Ok(()))
         .invoke_handler(tauri::generate_handler![
             commands::models::list_models,

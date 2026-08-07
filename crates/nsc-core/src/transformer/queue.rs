@@ -7,6 +7,7 @@ use crate::ai::AiProvider;
 use crate::db::Db;
 use crate::error::Result;
 use crate::models::{ModelConfig, TransformationNovel, TransformStatus};
+use crate::recorder::AiCallRecorder;
 use crate::transformer::{
     DefaultTransformer, JobInfo, JobSpec, JobStatus, QueueSnapshot,
     ProviderCache, TransformRequest, Transformer,
@@ -41,10 +42,18 @@ impl JobQueue {
     /// - `provider_factory`:每个 job 调一次,基于 `ModelConfig` 生成 owned
     ///   `Box<dyn AiProvider>`。**必须返回 owned**(不能返回 `&'a dyn AiProvider`),
     ///   否则 `Box<dyn Transformer>` 装不下。
+    /// - `recorder`:AI 调用日志 recorder —— 共享给所有 worker 的 `DefaultTransformer`;
+    ///   transformer 路径(transform_chapter 业务)每次 chat 调用都通过它记账。
+    ///   test_model 路径另在 commands 层 record,不走 JobQueue。
     ///
-    /// 两个工厂都要求 `Send + Sync + 'static`(被 `Arc<dyn Fn ...>` 包了一层)。
+    /// 三个工厂 + recorder 都要求 `Send + Sync + 'static`(recorder 也是 `Arc<dyn ...>`)。
     /// `workers < 1` 会 panic。
-    pub fn new<F, P>(workers: usize, db_factory: F, provider_factory: P) -> Self
+    pub fn new<F, P>(
+        workers: usize,
+        db_factory: F,
+        provider_factory: P,
+        recorder: Arc<dyn AiCallRecorder>,
+    ) -> Self
     where
         F: Fn() -> Result<Db> + Send + Sync + 'static,
         P: Fn(&ModelConfig) -> Box<dyn AiProvider> + Send + Sync + 'static,
@@ -56,6 +65,7 @@ impl JobQueue {
         let db_factory: DbFactory = Arc::new(db_factory);
         let provider_factory: ProviderFactory = Arc::new(provider_factory);
         let notify: NotifySlot = Arc::new(std::sync::Mutex::new(None));
+        let recorder: Arc<dyn AiCallRecorder> = recorder;
         // 屏障同步 worker 与主线程:`JobQueue::new` 返回前确保每个 worker
         // 都已进入 recv 循环,避免 `q.enqueue()` 在 worker 还没 ready 时就 send,
         // 导致 rx 被 drop → SendError。失败路径(runtime 构建失败 / db_factory
@@ -70,6 +80,7 @@ impl JobQueue {
             let rx = rx.clone();
             let notify = notify.clone();
             let ready = ready.clone();
+            let recorder = recorder.clone();
             // 每个 worker 内部独立的 provider cache —— 见 provider_cache.rs。
             std::thread::spawn(move || {
                 // worker-local cache; 生命周期与 worker 线程一致。
@@ -103,7 +114,7 @@ impl JobQueue {
                         // cache miss 时通过 provider_factory 重建一次,后续 job 直接命中。
                         let cached = cache.get_or_create(&job.model_config)
                             .expect("provider cache get_or_create");
-                        db = run_job(shared.clone(), db, cached.provider, cached.sem, job, notify.clone()).await;
+                        db = run_job(shared.clone(), db, cached.provider, cached.sem, job, notify.clone(), recorder.clone()).await;
                     }
                 });
             });
@@ -182,6 +193,7 @@ async fn run_job(
     sem: Arc<tokio::sync::Semaphore>,
     job: JobSpec,
     notify: NotifySlot,
+    recorder: Arc<dyn AiCallRecorder>,
 ) -> Db {
     let tid = job.transformation_id;
     let chapter_title = job.chapter.title.clone();
@@ -201,6 +213,7 @@ async fn run_job(
     let _ = db.transformation_chapters().mark_running(tid);
 
     let req = TransformRequest {
+        transformation_id: tid,
         chapter: prep.chapter,
         chapter_content: prep.chapter_content,
         novel_context: crate::transformer::TransformationNovelContext {
@@ -215,7 +228,7 @@ async fn run_job(
     // per-model 并发限流:同一 model 的多个 job 共享一个 semaphore,
     // 超过 `model_config.concurrency` 时本 job 在 await 处排队,permit drop 时自动释放。
     let _permit = sem.acquire().await.expect("semaphore closed");
-    let tx: Box<dyn Transformer> = Box::new(DefaultTransformer { ai: ai.clone() });
+    let tx: Box<dyn Transformer> = Box::new(DefaultTransformer { ai: ai.clone(), recorder: recorder.clone() });
     let ai_result = tx.transform(req).await;
 
     let final_state: Final = apply_result(&db, tid, chapter_title, chapter_idx, ai_result);

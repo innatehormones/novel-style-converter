@@ -3,7 +3,8 @@ use std::time::Instant;
 
 use nsc_core::ai::{AiProvider, ChatMessage, ChatRequest, OpenAiProvider, Role};
 use nsc_core::db::Db;
-use nsc_core::models::{ModelConfig, NewModelConfig};
+use nsc_core::models::{AiCallBusiness, AiCallStatus, ModelConfig, NewModelConfig};
+use nsc_core::recorder::{AiCallEvent, AiCallRecorder};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -111,8 +112,14 @@ pub struct TestModelReport {
 /// 实际发起一次 `chat` 调用(payload 的模型 + 用户消息 "ping")验证连通性。
 /// **不抛错**:失败时把错误字符串塞进 `TestModelReport.error`,UI 可正常展示失败详情。
 /// 成功时填 latency / tokens / content_preview。
+///
+/// **AI 调用日志**:不管成功失败,都通过 `recorder` 记一行 `AiCallEvent`,业务 `TestModel`。
+/// recorder 在 hot path 不阻塞(channel 满 → drop new);记不上不影响 test_model 业务结果。
 #[tauri::command]
-pub async fn test_model(payload: ModelConfigDto) -> Result<TestModelReport, String> {
+pub async fn test_model(
+    payload: ModelConfigDto,
+    recorder: State<'_, Arc<dyn AiCallRecorder>>,
+) -> Result<TestModelReport, String> {
     let started = Instant::now();
     let report = match OpenAiProvider::new(payload.base_url.clone(), payload.api_key.clone()) {
         Err(e) => TestModelReport {
@@ -156,5 +163,46 @@ pub async fn test_model(payload: ModelConfigDto) -> Result<TestModelReport, Stri
             },
         },
     };
+    // Recorder 记账 —— 成功 / 失败两条路径分别 record。
+    let latency_ms = started.elapsed().as_millis() as i64;
+    let system_full = String::new(); // test_model 没 system message
+    let user_full = "ping".to_string();
+    let estimated_tokens_in = (user_full.chars().count() / 2) as i32;
+    let (status, response_full, actual_in, actual_out, error_msg) = match &report {
+        r if r.error.is_none() => (
+            AiCallStatus::Success,
+            r.content_preview.clone().unwrap_or_default(),
+            r.tokens_in,
+            r.tokens_out,
+            None,
+        ),
+        r => (
+            AiCallStatus::Failed,
+            String::new(),
+            None,
+            None,
+            r.error.clone(),
+        ),
+    };
+    recorder.record(AiCallEvent {
+        business: AiCallBusiness::TestModel,
+        context_type: None,
+        context_id: None,
+        model_config_id: Some(payload.id),
+        model_name: report.model.clone(),
+        base_url: report.base_url.clone(),
+        temperature: payload.temperature,
+        max_tokens: payload.max_tokens,
+        system_full,
+        user_full,
+        estimated_tokens_in: Some(estimated_tokens_in),
+        actual_tokens_in: actual_in,
+        actual_tokens_out: actual_out,
+        status,
+        response_full,
+        latency_ms,
+        error: error_msg,
+    });
+
     Ok(report)
 }
