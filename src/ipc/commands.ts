@@ -15,7 +15,7 @@ import type {
   TransformationNovelSummary, TransformationChapterRow,
   CreateTransformationNovelInput, UpdateTransformationNovelInput,
   EnqueuePayload, EnqueueAllPayload, QueueSnapshot,
-  Prompt, PromptInput,
+  Prompt, PromptInput, TestModelReport,
   CreateWorkflowInput, WorkflowSummary, WorkflowChapterRow,
   SourceChapterRow, ChapterWorkflowResultRow,
 } from './types';
@@ -23,6 +23,10 @@ import type {
 // ─── Models ────────────────────────────────────────────────────────────────
 export function listModels(): Promise<ModelConfig[]> {
   return invoke<ModelConfig[]>('list_models');
+}
+
+export function listModelsIncludingArchived(): Promise<ModelConfig[]> {
+  return invoke<ModelConfig[]>('list_models_including_archived');
 }
 
 export function upsertModel(payload: ModelConfigInput): Promise<number> {
@@ -33,8 +37,12 @@ export function deleteModel(id: number): Promise<void> {
   return invoke<void>('delete_model', { id });
 }
 
-export function testModel(payload: ModelConfigInput): Promise<string> {
-  return invoke<string>('test_model', { payload });
+export function restoreModel(id: number): Promise<void> {
+  return invoke<void>('restore_model', { id });
+}
+
+export function testModel(payload: ModelConfigInput): Promise<TestModelReport> {
+  return invoke<TestModelReport>('test_model', { payload });
 }
 
 // ─── Uploads ───────────────────────────────────────────────────────────────

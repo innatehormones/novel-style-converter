@@ -10,7 +10,9 @@
 /**
  * 后端 `model_configs` 行的前端镜像。
  * - `api_key` 明文存 SQLite,前端拿到也要原样回传(不要脱敏 —— 提交时仍需要真实值)
- * - `concurrency` 当前未使用,保留给后续 per-model 限流;前端不要读它做行为判断
+ * - `concurrency` 是 per-model 并发上限:worker 端按 `model_config_id` 共享信号量。
+ *   有效范围 [1,16];超过物理 worker 数(默认 2)不会触发额外阻塞,但下限 1 防止 0 死锁。
+ * - `archived = 1` 表示软删(API key 已被清空);仍保留在 list 响应里供 UI 展示历史 model。
  * - 字段全部 snake_case 来自后端 serde(后端**不**做 rename)
  */
 export interface ModelConfig {
@@ -22,13 +24,31 @@ export interface ModelConfig {
   max_tokens: number | null;
   temperature: number | null;
   concurrency: number;
+  archived: number;
 }
 
 /**
  * `upsert_model` / `test_model` 入参:`id === 0` 表示新建,否则按 id 更新。
  * 这是后端 snake_case DTO(内层字段原样发,不要 inline 改名)。
  */
-export type ModelConfigInput = Omit<ModelConfig, 'id'> & { id: number };
+export type ModelConfigInput = Omit<ModelConfig, 'id' | 'archived'> & { id: number };
+
+/**
+ * `test_model` 结构化返回：
+ * - 成功：`content_preview` 填响应前 200 字符，`tokens_in/out` 来自 provider usage。
+ * - 失败：`error` 填完整字符串（provider 创建失败 / 非 2xx / 空 choices / 缺 usage 都会写）；
+ *   `content_preview` 与 tokens 全为 null。
+ * - 任意路径都会填 `latency_ms`（创建 provider 失败也计超时）。
+ */
+export interface TestModelReport {
+  model: string;
+  base_url: string;
+  latency_ms: number;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  content_preview: string | null;
+  error: string | null;
+}
 
 /// State 1: 原始上传文件元数据。不含章节结构(章节在 data_assets)。
 export interface UploadSummary {

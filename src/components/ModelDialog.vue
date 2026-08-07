@@ -28,14 +28,28 @@
       <label>并发数</label>
       <NumberInput v-model="form.concurrency" :min="1" :max="16" />
     </div>
+    <div class="row hint-row">
+      <span class="concurrency-hint">per-model 信号量大小，worker 端按此限流。物理 worker 数默认为 2。</span>
+    </div>
     <div class="row actions">
       <Button :loading="store.testing" @click="onTest">测试连接</Button>
-      <Tag v-if="testResult" kind="success" style="margin-left: 8px">
-        成功:{{ testResult }}
-      </Tag>
-      <Tag v-if="testError" kind="danger" style="margin-left: 8px">
-        失败:{{ testError }}
-      </Tag>
+      <Button size="small" @click="onClearReport" v-if="testReport">清空结果</Button>
+    </div>
+    <div v-if="testReport" class="report" :class="{ ok: !testReport.error, fail: !!testReport.error }">
+      <div class="report-head">
+        <Tag :kind="testReport.error ? 'danger' : 'success'">
+          {{ testReport.error ? '失败' : '成功' }}
+        </Tag>
+        <span class="metric"><strong>{{ testReport.latency_ms }}</strong> ms</span>
+        <span class="metric" v-if="testReport.tokens_in != null">
+          tokens in <strong>{{ testReport.tokens_in }}</strong>
+        </span>
+        <span class="metric" v-if="testReport.tokens_out != null">
+          tokens out <strong>{{ testReport.tokens_out }}</strong>
+        </span>
+      </div>
+      <pre v-if="testReport.content_preview" class="preview">{{ testReport.content_preview }}</pre>
+      <pre v-if="testReport.error" class="error-text">{{ testReport.error }}</pre>
     </div>
     <template #footer>
       <Button @click="open = false">取消</Button>
@@ -54,7 +68,7 @@ import Input from './ui/Input.vue';
 import NumberInput from './ui/NumberInput.vue';
 import Tag from './ui/Tag.vue';
 import { useModelsStore } from '../stores/models';
-import type { ModelConfigInput } from '../ipc/types';
+import type { ModelConfigInput, TestModelReport } from '../ipc/types';
 
 const open = defineModel<boolean>('open', { required: true });
 const emit = defineEmits<{ submit: [ModelConfigInput] }>();
@@ -65,8 +79,7 @@ const editing = computed(() => (props.initial?.id ?? 0) > 0);
 const form = reactive<ModelConfigInput>(blank());
 const maxTokensRef = ref<number | null>(null);
 const temperatureRef = ref<number | null>(null);
-const testResult = ref<string | null>(null);
-const testError = ref<string | null>(null);
+const testReport = ref<TestModelReport | null>(null);
 
 function blank(): ModelConfigInput {
   return {
@@ -86,15 +99,13 @@ function applyInitial(value: ModelConfigInput | null) {
     Object.assign(form, blank());
     maxTokensRef.value = null;
     temperatureRef.value = null;
-    testResult.value = null;
-    testError.value = null;
+    testReport.value = null;
     return;
   }
   Object.assign(form, value);
   maxTokensRef.value = value.max_tokens ?? null;
   temperatureRef.value = value.temperature ?? null;
-  testResult.value = null;
-  testError.value = null;
+  testReport.value = null;
 }
 
 watch(() => props.initial, applyInitial, { immediate: true });
@@ -111,18 +122,29 @@ const canSubmit = computed(
 );
 
 async function onTest() {
-  testResult.value = null;
-  testError.value = null;
+  testReport.value = null;
   try {
-    const content = await store.test({
+    testReport.value = await store.test({
       ...form,
       max_tokens: maxTokensRef.value,
       temperature: temperatureRef.value,
     });
-    testResult.value = content.slice(0, 60);
   } catch (e) {
-    testError.value = e instanceof Error ? e.message : String(e);
+    // 后端几乎不会到这里（report.error 已承载）；只防 IPC 通道异常。
+    testReport.value = {
+      model: form.model,
+      base_url: form.base_url,
+      latency_ms: 0,
+      tokens_in: null,
+      tokens_out: null,
+      content_preview: null,
+      error: e instanceof Error ? e.message : String(e),
+    };
   }
+}
+
+function onClearReport() {
+  testReport.value = null;
 }
 
 function onSubmit() {
@@ -152,4 +174,63 @@ function onSubmit() {
 .row.actions {
   margin-top: 16px;
 }
+.hint-row {
+  margin-top: -8px;
+  margin-bottom: 12px;
+}
+.concurrency-hint {
+  margin-left: 112px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.report {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-pin);
+  border: 1px solid var(--border-soft);
+  background: var(--color-sheet);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.report.ok {
+  border-color: var(--success-border, var(--border-soft));
+  background: var(--success-bg, var(--color-sheet));
+}
+.report.fail {
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+}
+.report-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.metric {
+  color: var(--text-secondary);
+}
+.metric strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  margin: 0 2px;
+}
+.preview {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+  max-height: 160px;
+  overflow: auto;
+}
+.error-text {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--danger);
+  max-height: 200px;
+  overflow: auto;
+}
 </style>
+
