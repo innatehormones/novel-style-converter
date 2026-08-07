@@ -6,6 +6,7 @@ import DataAsset from '../views/DataAsset.vue';
 import ParseWizard from '../views/parse.vue';
 import Transform from '../views/Transform.vue';
 import Prompts from '../views/Prompts.vue';
+import AiCalls from '../views/AiCalls.vue';
 import { findDataAssetByUpload } from '../ipc/commands';
 
 const router = createRouter({
@@ -43,6 +44,7 @@ const router = createRouter({
       props: true,
     },
     { path: '/prompts', component: Prompts },
+    { path: '/ai-calls', component: AiCalls },
     { path: '/models', component: Models },
   ],
 });

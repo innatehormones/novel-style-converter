@@ -369,6 +369,45 @@ export interface Prompt {
  */
 export type PromptInput = Omit<Prompt, 'id' | 'is_builtin' | 'archived'> & { id: number };
 
+/// ai_call_logs 表前端镜像,详见 migrations/0018_ai_call_logs.sql。
+/// - business = transform_chapter | test_model(看两条 AI调用 路径)
+/// - preview 字段是前 10KB,完整内容看 transformation_chapters.result_content / 调用方上下文
+/// - estimated_tokens_in 用 chars/2 启发式(zh-aware 粗估),UI 标注粗估
+export type AiCallBusiness = "transform_chapter" | "test_model";
+export type AiCallStatus = "success" | "failed";
+
+export interface AiCallLog {
+  id: number;
+  created_at: string;
+  business: AiCallBusiness;
+  context_type: string | null;
+  context_id: number | null;
+  model_config_id: number | null;
+  model_name: string;
+  base_url: string;
+  temperature: number | null;
+  max_tokens: number | null;
+  system_preview: string | null;
+  user_preview: string | null;
+  system_size: number;
+  user_size: number;
+  estimated_tokens_in: number | null;
+  actual_tokens_in: number | null;
+  actual_tokens_out: number | null;
+  status: AiCallStatus;
+  response_preview: string | null;
+  response_size: number;
+  latency_ms: number;
+  error: string | null;
+}
+
+/** list_ai_call_logs 入参 —— 后端 snake_case DTO,字段保持 Rust 原名。 */
+export type AiCallLogFilter = {
+  business?: AiCallBusiness | null;
+  model_config_id?: number | null;
+  status?: AiCallStatus | null;
+  limit?: number | null;
+};
 
 /** 上传删除前的确认信息。删 upload 不联动删 data_asset，仅提示以供用户另行去处理。 */
 export interface UploadDeletePreviewItem {

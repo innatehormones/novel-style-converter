@@ -34,6 +34,7 @@ import IconDatabase from '~icons/lucide/database';
 import IconRepeat from '~icons/lucide/repeat';
 import IconFileText from '~icons/lucide/file-text';
 import IconBox from '~icons/lucide/box';
+import IconActivity from '~icons/lucide/activity';
 import IconSun from '~icons/lucide/sun';
 import IconMoon from '~icons/lucide/moon';
 import { useThemeStore } from '../stores/theme';
@@ -46,6 +47,7 @@ const topItems: Item[] = [
   { to: '/transformations', label: '转换', icon: markRaw(IconRepeat) },
   { to: '/prompts', label: '提示词', icon: markRaw(IconFileText) },
   { to: '/models', label: '模型', icon: markRaw(IconBox) },
+  { to: '/ai-calls', label: 'AI 调用', icon: markRaw(IconActivity) },
 ];
 
 const route = useRoute();

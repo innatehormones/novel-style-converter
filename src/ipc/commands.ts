@@ -19,6 +19,7 @@ import type {
   CreateWorkflowInput, WorkflowSummary, WorkflowChapterRow,
   SourceChapterRow, ChapterWorkflowResultRow,
   UploadDeletePreview,
+  AiCallLog, AiCallLogFilter,
 } from './types';
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -227,6 +228,26 @@ export function countPromptUsage(promptId: number): Promise<number> {
   return invoke<number>('count_prompt_usage', { promptId });
 }
 
+
+// ─── AI calls ───────────────────────────────────────────────────────────────
+export function listAiCallLogs(filter: AiCallLogFilter): Promise<AiCallLog[]> {
+  return invoke<AiCallLog[]>('list_ai_call_logs', { filter });
+}
+
+export function getAiCallLog(id: number): Promise<AiCallLog | null> {
+  return invoke<AiCallLog | null>('get_ai_call_log', { id });
+}
+
+export function clearAiCallLogs(): Promise<number> {
+  return invoke<number>('clear_ai_call_logs');
+}
+
+export function listAiCallLogsByContext(
+  contextType: string,
+  contextId: number,
+): Promise<AiCallLog[]> {
+  return invoke<AiCallLog[]>('list_ai_call_logs_by_context', { contextType, contextId });
+}
 
 // upload deletion preview: list derived data_assets without cascading.
 export function previewUploadDeletion(uploadId: number): Promise<UploadDeletePreview> {
