@@ -21,7 +21,7 @@
       />
     </div>
     <div v-if="missingChapterContent" class="warn">
-      该 prompt 未引用 <code>{{ chapterContentPlaceholder }}</code>,LLM 将无法看到章节正文
+      该 prompt 未引用 <code>{{ CHAPTER_CONTENT_PLACEHOLDER }}</code>,LLM 将无法看到章节正文
     </div>
     <div v-if="error" class="error">{{ error }}</div>
     <template #footer>
@@ -50,6 +50,10 @@ const open = defineModel<boolean>('open', { required: true });
 const emit = defineEmits<{ saved: [] }>();
 
 const store = usePromptsStore();
+
+/// 章节正文占位符 —— 后端 prompts::render 在填模板时按此 key 注入章节切片。
+/// 提示框用同 key 检测模板是否实际引用章节正文(没有 → LLM 看不到内容,直接 fail-fast)。
+const CHAPTER_CONTENT_PLACEHOLDER = '{{chapter_content}}';
 const nameRef = ref('');
 const kindRef = ref<'compress' | 'style'>('compress');
 const templateRef = ref('');
@@ -71,13 +75,15 @@ const canSubmit = computed(
   () =>
     nameRef.value.trim() !== '' &&
     templateRef.value.trim() !== '' &&
+    templateRef.value.includes(CHAPTER_CONTENT_PLACEHOLDER) &&
     !submitting.value,
 );
 
+/// 模板未含 {{chapter_content}} 时给用户的二次提示。canSubmit 已经把这条件放在硬校验里,
+/// 这里只是 UI 提示文案 —— 即使关掉警告,提交按钮也会被禁,避免把"没引用章节正文"的 prompt 漏到后端。
 const missingChapterContent = computed(
-  () => !templateRef.value.includes(chapterContentPlaceholder),
+  () => !templateRef.value.includes(CHAPTER_CONTENT_PLACEHOLDER),
 );
-const chapterContentPlaceholder = '{{chapter_content}}';
 
 function blank() {
   nameRef.value = '';

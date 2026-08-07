@@ -18,6 +18,7 @@ import type {
   Prompt, PromptInput, TestModelReport,
   CreateWorkflowInput, WorkflowSummary, WorkflowChapterRow,
   SourceChapterRow, ChapterWorkflowResultRow,
+  UploadDeletePreview,
 } from './types';
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -202,6 +203,10 @@ export function listPrompts(): Promise<Prompt[]> {
   return invoke<Prompt[]>('list_prompts');
 }
 
+export function listPromptsIncludingArchived(): Promise<Prompt[]> {
+  return invoke<Prompt[]>('list_prompts_including_archived');
+}
+
 export function getPrompt(id: number): Promise<Prompt> {
   return invoke<Prompt>('get_prompt', { id });
 }
@@ -214,8 +219,12 @@ export function deletePrompt(id: number): Promise<void> {
   return invoke<void>('delete_prompt', { id });
 }
 
+export function restorePrompt(id: number): Promise<void> {
+  return invoke<void>('restore_prompt', { id });
+}
+
 export function countPromptUsage(promptId: number): Promise<number> {
-  return invoke<number>('count_transformation_chapters_by_prompt', { promptId });
+  return invoke<number>('count_prompt_usage', { promptId });
 }
 
 

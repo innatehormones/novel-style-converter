@@ -46,7 +46,7 @@ import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
 import Input from './ui/Input.vue';
 import { listModels, listPrompts } from '../ipc/commands';
-import type { ModelConfig, Prompt, TransformMode } from '../ipc/types';
+import type { ModelConfig, Prompt } from '../ipc/types';
 
 const props = defineProps<{ dataAssetId: number }>();
 const open = defineModel<boolean>('open', { required: true });
@@ -56,14 +56,14 @@ const emit = defineEmits<{
     title: string;
     default_model_config_id: number | null;
     default_prompt_id: number | null;
-    default_mode: TransformMode | null;
+    default_mode: 'compress' | 'style' | null;
   }];
 }>();
 
 const title = ref('');
 const defaultModelConfigId = ref<number | null>(null);
 const defaultPromptId = ref<number | null>(null);
-const defaultMode = ref<TransformMode | null>(null);
+const defaultMode = ref<'compress' | 'style' | null>(null);
 const submitting = ref(false);
 const error = ref<string | null>(null);
 
@@ -95,7 +95,7 @@ watch(open, async (v) => {
 
 function onDefaultModeChange(e: Event) {
   const raw = (e.target as HTMLSelectElement).value;
-  defaultMode.value = raw === '' ? null : (raw as TransformMode);
+  defaultMode.value = raw === '' ? null : (raw as 'compress' | 'style');
 }
 
 async function onSubmit() {

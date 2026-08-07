@@ -6,10 +6,26 @@
       </template>
     </PageHeader>
 
+    <div class="toolbar">
+      <label class="toggle">
+        <input
+          type="checkbox"
+          :checked="store.includeArchived"
+          @change="onToggleArchived(($event.target as HTMLInputElement).checked)"
+        />
+        <span>显示已归档</span>
+      </label>
+    </div>
+
     <div v-if="store.error" class="alert">{{ store.error }}</div>
 
     <div v-if="!store.loading && store.prompts.length === 0" class="empty">
-      还没有提示词,点击右上"新建 prompt"创建一条。
+      <p class="empty-title">
+        {{ store.includeArchived ? '没有任何提示词(包括归档)' : '还没有提示词' }}
+      </p>
+      <p v-if="!store.includeArchived" class="empty-hint">
+        点击右上"新建 prompt"创建一条;内置 prompt 可用"复制"派生用户版后再编辑。
+      </p>
     </div>
     <Table
       v-else
@@ -17,26 +33,29 @@
       :data="store.prompts"
       :row-key="(row: Prompt) => row.id"
     >
-      <template #cell-name="{ row }">{{ row.name }}</template>
+      <template #cell-name="{ row }">
+        <span :class="{ archived: row.archived === 1 }">{{ row.name }}</span>
+        <Tag v-if="row.archived === 1" kind="info" class="archived-tag">已归档</Tag>
+      </template>
       <template #cell-kind="{ row }">
-        <span class="kind-tag" :class="`kind-${row.kind}`">
+        <Tag :kind="row.kind === 'compress' ? 'info' : 'success'">
           {{ row.kind === 'compress' ? '压缩' : '文风' }}
-        </span>
+        </Tag>
       </template>
       <template #cell-builtin="{ row }">
         <Tag v-if="row.is_builtin" kind="info">内置</Tag>
         <span v-else class="muted">用户</span>
       </template>
       <template #cell-actions="{ row }">
-        <Button v-if="row.is_builtin" size="small" @click="openView(row)">查看</Button>
-        <Button v-else size="small" @click="openEdit(row)">编辑</Button>
-        <Button size="small" @click="openCopy(row)">复制</Button>
-        <Button
-          size="small"
-          kind="danger"
-          :disabled="row.is_builtin"
-          @click="requestDelete(row)"
-        >删除</Button>
+        <template v-if="row.archived === 1">
+          <Button size="small" @click="onRestore(row.id)">恢复</Button>
+        </template>
+        <template v-else>
+          <Button v-if="row.is_builtin" size="small" @click="openView(row)">查看</Button>
+          <Button v-else size="small" @click="openEdit(row)">编辑</Button>
+          <Button size="small" @click="openCopy(row)">复制</Button>
+          <Button size="small" kind="danger" @click="onDelete(row)">删除</Button>
+        </template>
       </template>
     </Table>
 
@@ -53,22 +72,14 @@
       :initial="viewTarget"
     />
 
-    <Dialog
-      v-model:open="confirmOpen"
+    <ConfirmDialog
+      v-model:open="deleteConfirmOpen"
       title="删除提示词"
-      :width="420"
-    >
-      <div v-if="pendingDelete">
-        <p>确认删除提示词"<strong>{{ pendingDelete.name }}</strong>"?</p>
-        <p v-if="pendingDelete.usage > 0" class="warn">
-          该 prompt 当前被 {{ pendingDelete.usage }} 个转换结果引用,删除后这些结果仍保留历史引用,但新建转换时无法再选用。
-        </p>
-      </div>
-      <template #footer>
-        <Button @click="confirmOpen = false">取消</Button>
-        <Button kind="danger" @click="confirmDelete">确认删除</Button>
-      </template>
-    </Dialog>
+      :message="deleteConfirmMessage"
+      kind="danger"
+      confirm-text="删除"
+      @confirm="doDelete"
+    />
 
     <AlertDialog
       v-model:open="alertOpen"
@@ -83,7 +94,7 @@ import { onMounted, ref } from 'vue';
 import Button from '../components/ui/Button.vue';
 import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
-import Dialog from '../components/ui/Dialog.vue';
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
 import PromptEditDialog from '../components/PromptEditDialog.vue';
@@ -109,13 +120,11 @@ const dialogInitial = ref<Prompt | undefined>(undefined);
 const viewOpen = ref(false);
 const viewTarget = ref<Prompt | null>(null);
 
-interface PendingDelete {
-  id: number;
-  name: string;
-  usage: number;
-}
-const confirmOpen = ref(false);
-const pendingDelete = ref<PendingDelete | null>(null);
+/// 删除确认 —— 用 ConfirmDialog(与 Models 一致)代替原内嵌 Dialog,
+/// 提前查引用计数,文案直接拼到 message,避免自定义 footer。
+const deleteConfirmOpen = ref(false);
+const deleteTarget = ref<Prompt | null>(null);
+const deleteConfirmMessage = ref('');
 const alertOpen = ref(false);
 const alertMessage = ref('');
 
@@ -147,36 +156,63 @@ function openCopy(row: Prompt) {
 function onSaved() {
 }
 
-let deleteRequestId = 0;
-
-async function requestDelete(row: Prompt) {
-  const requestId = ++deleteRequestId;
+async function onDelete(row: Prompt) {
   let usage = 0;
   try {
     usage = await store.countUsage(row.id);
   } catch {
     usage = 0;
   }
-  if (requestId !== deleteRequestId) return;
-  pendingDelete.value = { id: row.id, name: row.name, usage };
-  confirmOpen.value = true;
+  deleteTarget.value = row;
+  deleteConfirmMessage.value = usage > 0
+    ? `确认删除提示词"${row.name}"?该 prompt 当前被 ${usage} 个转换结果引用,删除(归档)后这些结果仍保留历史引用,但新建转换时无法再选用。`
+    : `确认删除提示词"${row.name}"?删除为软删(归档),可在此页勾选"显示已归档"后恢复。`;
+  deleteConfirmOpen.value = true;
 }
 
-async function confirmDelete() {
-  const pending = pendingDelete.value;
-  if (!pending) return;
-  confirmOpen.value = false;
-  pendingDelete.value = null;
+async function doDelete() {
+  const target = deleteTarget.value;
+  if (!target) return;
   try {
-    await store.remove(pending.id);
+    await store.remove(target.id);
+  } catch (e: unknown) {
+    alertMessage.value = e instanceof Error ? e.message : String(e);
+    alertOpen.value = true;
+  } finally {
+    deleteTarget.value = null;
+  }
+}
+
+async function onRestore(id: number) {
+  try {
+    await store.restore(id);
   } catch (e: unknown) {
     alertMessage.value = e instanceof Error ? e.message : String(e);
     alertOpen.value = true;
   }
 }
+
+async function onToggleArchived(v: boolean) {
+  await store.setIncludeArchived(v);
+}
 </script>
 
 <style scoped>
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
 .alert {
   padding: 12px 16px;
   background: var(--bg-hover);
@@ -186,36 +222,31 @@ async function confirmDelete() {
 }
 .empty {
   text-align: center;
-  padding: 56px 0;
+  padding: 48px 24px;
   color: var(--text-secondary);
   border: 1px dashed var(--border-color);
   border-radius: var(--radius-pin);
   background: var(--color-sheet);
 }
-.kind-tag {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: var(--radius-pin);
-  font-size: 12px;
-}
-.kind-compress {
-  background: var(--color-paper-mist);
+.empty-title {
+  font-size: 16px;
   color: var(--text-primary);
+  margin: 0 0 8px;
 }
-.kind-style {
-  background: var(--color-cinnabar-light);
-  color: var(--color-cinnabar-deep);
+.empty-hint {
+  font-size: 13px;
+  margin: 0;
+  line-height: 1.6;
 }
 .muted {
   color: var(--text-secondary);
   font-size: 13px;
 }
-.warn {
-  margin-top: 12px;
-  padding: 8px 12px;
-  background: #fff8e1;
-  color: #8a6d3b;
-  border-radius: var(--radius-pin);
-  font-size: 12px;
+.archived {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.archived-tag {
+  margin-left: 6px;
 }
 </style>

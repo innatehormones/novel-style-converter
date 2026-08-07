@@ -159,7 +159,7 @@ export interface TransformationNovelSummary {
   chapters_count: number;
   default_model_config_id: number | null;
   default_prompt_id: number | null;
-  default_mode: TransformMode | null;
+  default_mode: 'compress' | 'style' | null;
 }
 
 /**
@@ -172,7 +172,7 @@ export interface CreateTransformationNovelInput {
   title: string;
   default_model_config_id?: number | null;
   default_prompt_id?: number | null;
-  default_mode?: TransformMode | null;
+  default_mode?: 'compress' | 'style' | null;
 }
 
 /**
@@ -184,11 +184,8 @@ export interface UpdateTransformationNovelInput {
   title: string;
   default_model_config_id?: number | null;
   default_prompt_id?: number | null;
-  default_mode?: TransformMode | null;
+  default_mode?: 'compress' | 'style' | null;
 }
-
-/** 转换模式:`compress` = 内容压缩,`style` = 文风转换。prompt.kind 必须与此对齐。 */
-export type TransformMode = 'compress' | 'style';
 
 // === Workflow 工作流 ===
 /** 后端 `BatchStatus` 收敛到两态:`running` / `stopped`(spec §3.3)。Stopped 后只能 retry 空槽。 */
@@ -274,7 +271,7 @@ export interface TransformationChapterRow {
   chapter_id: number;
   chapter_idx: number;
   chapter_title: string;
-  mode: TransformMode;
+  mode: 'compress' | 'style';
   prompt_id: number;
   model_config_id: number;
   status: TransformStatus;
@@ -349,7 +346,9 @@ export interface CleaningPreview {
  * 后端 `prompts` 表行的前端镜像(取自 `nsc_core::models::Prompt`)。
  * `kind` 来自后端 `PromptKind` 枚举(`#[serde(rename_all = "snake_case")]`)
  * —— 前端拿到 / 发回 `"compress"` / `"style"`。
- * `is_builtin` 为 true 的行在 UI 上不可编辑、不可删除,可"复制"成用户版。
+ * - `is_builtin` 为 true 的行在 UI 上不可编辑 / 不可删除,可"复制"成用户版。
+ * - `archived = 1` 表示软删 —— 行仍保留供 `transformation_chapters.prompt_id` 反查历史 prompt 名称 / 模板。
+ *   默认 list 不返回,需走 `list_prompts_including_archived`。
  */
 export interface Prompt {
   id: number;
@@ -357,14 +356,18 @@ export interface Prompt {
   kind: 'compress' | 'style';
   template: string;
   is_builtin: boolean;
+  /** 0 = 正常,1 = 已归档(软删)。后端 INTEGER 列,前端用 number 收。 */
+  archived: number;
 }
 
 /**
  * `upsert_prompt` 入参。`id === 0` 表示新建(走 insert);>0 表示更新(走 update)。
  * 字段保持 snake_case-by-default —— `kind` / `name` / `template` 都是单词,
  * 没有 `#[serde(rename_all)]` 在这层 DTO 上,所以前端按字段名原样发。
+ * - 排除 `is_builtin` —— 后端不通过此 DTO 改 builtin 标记。
+ * - 排除 `archived` —— 软删走 `delete_prompt` / `restore_prompt` 专用命令。
  */
-export type PromptInput = Omit<Prompt, 'id' | 'is_builtin'> & { id: number };
+export type PromptInput = Omit<Prompt, 'id' | 'is_builtin' | 'archived'> & { id: number };
 
 
 /** 上传删除前的确认信息。删 upload 不联动删 data_asset，仅提示以供用户另行去处理。 */
