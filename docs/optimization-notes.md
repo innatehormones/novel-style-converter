@@ -152,3 +152,65 @@ This section records the currently agreed upload boundary and is the baseline fo
 ## Test status
 
 cargo test -p nsc-core runs an ignored placeholder per file. Old tests referenced byte-coordinate assertions and now-deprecated API shapes. They are flagged for rewrite against migrations/0015_chapter_body.sql and the new repo methods.
+
+## Prompts (提示词) refactor — completed
+
+### Scope
+- `crates/nsc-core/src/prompts/{mod,render,builtin}.rs` —— 渲染逻辑去 Result、system/user 分离、单次扫描替换
+- `crates/nsc-core/src/models/{prompt,transformation}.rs` —— `TransformMode` enum 删除,统一用 `PromptKind`;Prompt 加 `archived` 字段
+- `crates/nsc-core/src/db/repo/prompt.rs` —— 软删 (archive/restore)、`PromptUpdate` DTO 收紧 update 字段、builtin 行不可改
+- `crates/nsc-core/src/db/repo/workflow_result.rs` —— 新增 `get_content_by_batch_and_chapter`,给 `prev_transformed` 拿真内容
+- `crates/nsc-core/src/transformer/{transformer,queue,batch_scheduler}.rs` —— `prev_transformed` 真接 `workflow_result_chapters.content`;不再依赖已删除的 `tc.result_content`
+- 新 migration `migrations/0017_prompt_archive.sql` —— 加 `archived` 列 + 索引
+- 前端 `src/ipc/{types,commands}.ts` `src/stores/prompts.ts` `src/views/Prompts.vue` `src/components/PromptEditDialog.vue` —— 软删 UI、显示已归档开关、删除改用 ConfirmDialog
+- `src-tauri/src/commands/prompts.rs` + `src-tauri/src/lib.rs` —— 新增 `list_prompts_including_archived` / `restore_prompt` / `count_prompt_usage` 命令
+
+### Design intent
+
+#### 1. enum 合并 (`TransformMode` → `PromptKind`)
+- 历史原因: `transformation_chapters.mode` / `transformation_novels.default_mode` / `batches.overrides.mode` 三个字段语义完全一致 (compress/style),但代码里两个 enum (TransformMode / PromptKind) 各写一遍
+- 改: 删 `TransformMode`,三处字段类型全用 `PromptKind`;serde 行为不变 (`"compress"` / `"style"`)
+- 连带清理: `From<PromptKind> for TransformMode` impl 删;ts 类型 `TransformMode` 也删,内联 `'compress' | 'style'` 字面量
+
+#### 2. prompt 渲染重构
+- 旧: `render() -> Result<String>`、返回单串、内嵌 `--- system ---` 提示符让模型猜、7 次 `String::replace` 串行替换占位符
+- 新:
+  - `RenderedPrompt { system: Option<String>, user: String }` —— system / user 物理分离,后端构造 `Vec<ChatMessage>` 时直接拿
+  - 模板里独占一行的 `---` 切分 system/user 段(典型 OpenAI 习惯,作者自己写时也无歧义)
+  - 单次扫描 `fill_template` —— O(n) 一次,不再 7 次 replace
+  - `join_chapter_pairs` / `join_transformations` 删 `header` 形参(只在前面加一行说明文本,直接拼)
+
+#### 3. builtin prompt 强化
+- 旧: `seed_default_model_from_env` 类似的沉默兜底 —— 模型缺失时静默注入默认,排查链被掐断
+- 新: 不再 silent fallback;builtin 行是 user 可见的"出厂模板",可"复制"派生用户版再改;update builtin 行直接 `Err("内置 prompt 不可编辑 — 请先复制为用户 prompt")`(fail-fast)
+- builtin 行的 `is_builtin` 字段不可被 `PromptUpdate` 改,杜绝误操作
+
+#### 4. soft delete + `PromptUpdate` 收紧
+- `migrations/0017_prompt_archive.sql` 加 `archived INTEGER NOT NULL DEFAULT 0` + 索引
+- `PromptUpdate<'a>` 只接受 `id` / `name` / `kind` / `template` 四个字段 —— 从 DTO 层杜绝 is_builtin / archived 误改
+- `list_prompts()` 默认隐藏归档;新增 `list_prompts_including_archived()` 给 UI 切"显示已归档"开关
+- `delete_prompt(id)` 改 `archive_prompt(id)` 语义(后端实现 `UPDATE ... SET archived=1`)
+- `restore_prompt(id)` 解除归档
+- `transformation_chapters.prompt_id` 历史引用 —— 行保留可反查 prompt name / kind / template;UI 列已归档行加徽标 + 删除线 + 恢复按钮
+
+#### 5. `prev_transformed` 修复
+- 旧: `prev_transformed` 收集用 `tc.result_content`,但 `tc` 表 (`transformation_chapters`) 不存历史结果内容,实际拿不到,前端显示空白
+- 新: `workflow_result_chapters.content` 是真内容源;`repo::workflow_result::get_content_by_batch_and_chapter(batch_id, chapter_id) -> Result<Option<String>>`
+- 队列 `Prep.prev_tx: Vec<(String, String)>` —— (chapter_title, content) 列表,带 title 给模型对齐参考
+
+#### 6. `PromptEditDialog` 校验强化
+- `canSubmit` 多一条: template 必须含 `{{chapter_content}}` —— 按钮直接禁用,避免漏提交没引用章节正文的 prompt
+- 占位符常量 `CHAPTER_CONTENT_PLACEHOLDER` 提到 script 顶部,模板与提示共用同一份
+- `missingChapterContent` warning 仍保留(给用户看"为什么不能保存"),但硬校验已在前
+
+#### 7. UI 一致性
+- "显示已归档" 开关、archived 徽标 + 删除线、恢复按钮 —— 与 Models.vue 同模式
+- 删除确认改用 `ConfirmDialog` 组件 —— 替代原内嵌 `Dialog` + 自定义 footer
+- `kind` 列用 `Tag` 组件,替代裸 `<span class="kind-tag">` —— 与 Models.vue 的 kind 列保持一致
+- `countPromptUsage` IPC 名改 `count_prompt_usage`(短名),与命令含义对齐
+
+### What's NOT done (TODO)
+
+- builtin prompt 列表当前是 hard-coded 在 `prompts/builtin.rs`;未来若需"用户提交 builtin"可走标准 insert + is_builtin=1 通道,目前未实现
+- 恢复 prompt 时不做内容校验 —— 万一 builtin 模板已升级,恢复后会与新 builtin 不一致,需要用户自己处理
+
