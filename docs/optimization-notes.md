@@ -270,3 +270,52 @@ cargo test -p nsc-core runs an ignored placeholder per file. Old tests reference
 - 全文检索(在 system / user_preview 上 LIKE):不做 —— preview 是限长片段,搜不到是预期
 - 体积监控 / 看板:每次 list 看 `共 N / 限 limit` 即可,没做"快满了"提醒
 - detail 页"查看完整 prompt/response 链接":transform 路径要跳 `transformation_chapters.result_content` 详情(未来再做)
+
+## AI call logs — Phase 2 (recorder 接入)
+
+### Scope
+- `transformer/transformer.rs` —— `DefaultTransformer` 加 `recorder` 字段,`transform()` 内部包 `Instant` + 拼装 `AiCallEvent` + `recorder.record(event)`
+- `transformer/queue.rs` —— `JobQueue::new` 加 `recorder: Arc<dyn AiCallRecorder>` 参数,clone 给每个 worker,worker 传给 `DefaultTransformer::new`
+- `transformer/transformer.rs` —— `TransformRequest` 加 `transformation_id: i64` 字段(recorder 记 context_id 用)
+- `src-tauri/lib.rs` —— 启动建 `ChannelRecorder(4096)` + `spawn_writer(path, recorder, rx)` + `.manage(recorder)` 作为 Tauri state + 传 JobQueue 第四参数
+- `src-tauri/commands/models.rs` —— `test_model` 加 `recorder: State<<'_, Arc<dyn AiCallRecorder>>` 参数 + 拼 event + record
+- 0 新测试(transformer 集成测试需要 mock provider + mock recorder,价值不大;recorder / repo 单测已覆盖)
+
+### Design intent
+
+#### 1. recorder 接入位置
+- **transformer 路径**:`DefaultTransformer::transform` 包住 `ai.chat()` 调用,instrumentation 与业务同处一个函数,延迟/响应/错误都能精确记录。prep 失败路径(上下文准备出错)不 record —— 那时根本没发起 chat,记录没意义。
+- **test_model 路径**:commands 层直接 wrap。test_model 不走 JobQueue,只调一次 provider.chat,自带 `Instant`。两条路径互不耦合。
+- **prep 失败路径不 record**:跑不到 AI 调用就报错(DB / 文件),记了反而误导。这是显式选择。
+
+#### 2. latency 测量
+- 包在 `ai.chat()` 调用周围,含网络往返 + provider 内部序列化 + tokio 调度。
+- **不**算上 prep / db write —— 那不在 AI 调用边界。
+- test_model 也类似:包住 OpenAiProvider::new + chat(),含 provider 构造开销。
+
+#### 3. estimated_tokens_in
+- 在 transformer: `(system.chars + user.chars) / 2`(zh-aware 粗估)
+- 在 test_model: `user.chars / 2`(test_model 只发 "ping",无 system)
+- UI 列名"粗估",与实际值并列展示,让用户自己判断偏差
+
+#### 4. 失败路径也 record
+- success / failed 都 record —— 看板才能算"成功率 / 平均延迟"
+- failed 行带 `error` 字段(完整 provider error 字符串),UI 用红色 Tag + tooltip
+- **不**因 record 失败影响业务:recorder.record 不阻塞,channel 满 → drop new
+
+#### 5. 启动 lifecycle
+- `ChannelRecorder::new(4096)` 创建 channel + recorder,后台 writer 任务从通道拿 event 落库
+- channel 容量 4096 远超 worker 并发上限(默认 2 worker + 1 test_model),饱和概率极低
+- `JoinHandle` 留着不用:app 退出 → tokio runtime 自然结束 → channel drop → writer recv 返回 None → loop break,最后几行日志能落完
+- **不**主动 `abort()`,避免截断最后几行
+
+#### 6. context_id 语义
+- transformer 路径:`context_type=transformation_chapter` + `context_id=tid`
+- `transformation_chapters` 行可能后续被删,但日志行不受影响 —— 反查"哪个 tc 行调过 AI"仍能查到(用 `list_ai_call_logs_by_context`)
+- test_model 路径:无 context_type / context_id(单次连通性测试,无业务对象)
+
+### What is NOT done
+
+- **transformer 集成单测**:需要 mock `AiProvider` + mock `AiCallRecorder`(`mockall` / 手写 test double),投入产出比低。当前依赖 recorder 单测 + repo 单测 + 手动 dev 验证。
+- **detail 页"看完整 prompt / response"链接**:transform 路径的全文在 `transformation_chapters.result_content`(已 commit 的章节),目前详情页只展示 preview。跳转逻辑后续单独做。
+- **自动清旧 / 体积监控**:用户没要,手动 clear 按钮已够。
