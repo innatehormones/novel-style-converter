@@ -15,4 +15,5 @@ pub const SCHEMAS: &[(&str, &str)] = &[
     ("0014_builtin_prompt_double_braces", include_str!("../../../../migrations/0014_builtin_prompt_double_braces.sql")),
     ("v15", include_str!("../../../../migrations/0015_chapter_body.sql")),
     ("v16", include_str!("../../../../migrations/0016_model_archive.sql")),
+    ("v17", include_str!("../../../../migrations/0017_prompt_archive.sql")),
 ];

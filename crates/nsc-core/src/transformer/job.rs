@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::models::{Chapter, ModelConfig, Prompt, TransformMode};
+use crate::models::{Chapter, ModelConfig, Prompt, PromptKind};
 
 #[derive(Debug, Clone)]
 pub struct JobSpec {
     pub transformation_id: i64,
-    pub mode: TransformMode,
+    pub mode: PromptKind,
     pub chapter: Chapter,
     pub prompt: Prompt,
     pub model_config: ModelConfig,

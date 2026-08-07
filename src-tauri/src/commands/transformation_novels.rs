@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use nsc_core::db::Db;
-use nsc_core::models::{NewTransformationNovel, TransformMode, TransformationNovel};
+use nsc_core::models::{NewTransformationNovel, PromptKind, TransformationNovel};
 
 /// 列表返回的 tn 摘要。`default_*` 三字段为 None 表示用户未设定默认配置,
 /// 新建时就用 `None`(兼容旧 tn);前端 TnDialog 用这三字段做表单回显。
@@ -17,7 +17,7 @@ pub struct TransformationNovelSummary {
     pub chapters_count: i64,
     pub default_model_config_id: Option<i64>,
     pub default_prompt_id: Option<i64>,
-    pub default_mode: Option<TransformMode>,
+    pub default_mode: Option<PromptKind>,
 }
 
 /// 创建 transformation_novel 的入参。inner DTO 字段保持 snake_case
@@ -34,7 +34,7 @@ pub struct CreateTransformationNovelPayload {
     pub default_prompt_id: Option<i64>,
     /// `null` 与字段缺省等价,都映射为 `None`。
     #[serde(default)]
-    pub default_mode: Option<TransformMode>,
+    pub default_mode: Option<PromptKind>,
 }
 
 /// 更新 transformation_novel 的入参。注意三个默认字段来自 payload 而非沿用 `cur`,
@@ -49,7 +49,7 @@ pub struct UpdateTransformationNovelPayload {
     #[serde(default)]
     pub default_prompt_id: Option<i64>,
     #[serde(default)]
-    pub default_mode: Option<TransformMode>,
+    pub default_mode: Option<PromptKind>,
 }
 
 fn to_summary(db: &Db, n: &TransformationNovel) -> TransformationNovelSummary {
@@ -158,13 +158,13 @@ pub fn delete_transformation_novel(
 mod tests {
     //! T4 阶段:验证 `CreateTransformationNovelPayload` / `UpdateTransformationNovelPayload`
     //! 的 serde 形状 —— inner DTO 必须保持 snake_case,三个默认字段允许缺省,
-    //! 且 `default_mode` 字符串 ("compress" | "style") 能反序列化为 `TransformMode`。
+    //! 且 `default_mode` 字符串 ("compress" | "style") 能反序列化为 `PromptKind`。
     //!
     //! 这里只覆盖反序列化形状;命令本身的 DB 写入逻辑由
     //! `crates/nsc-core/tests/db_tn_default_columns.rs` 的端到端 roundtrip
     //! 间接覆盖(已验证 NewTransformationNovel 三字段持久化路径)。
     use super::{CreateTransformationNovelPayload, UpdateTransformationNovelPayload};
-    use nsc_core::models::TransformMode;
+    use nsc_core::models::PromptKind;
     use serde_json::json;
 
     #[test]
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(p.title, "  斗破_热血版  "); // trim 在命令里做,payload 原样透传
         assert_eq!(p.default_model_config_id, Some(7));
         assert_eq!(p.default_prompt_id, Some(3));
-        assert_eq!(p.default_mode, Some(TransformMode::Style));
+        assert_eq!(p.default_mode, Some(PromptKind::Style));
     }
 
     #[test]
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(p.title, "new title");
         assert_eq!(p.default_model_config_id, Some(11));
         assert_eq!(p.default_prompt_id, None); // null -> None
-        assert_eq!(p.default_mode, Some(TransformMode::Compress));
+        assert_eq!(p.default_mode, Some(PromptKind::Compress));
     }
 
     #[test]
@@ -257,7 +257,7 @@ mod tests {
             let r: Result<CreateTransformationNovelPayload, _> = serde_json::from_value(raw);
             assert!(
                 r.is_err(),
-                "default_mode={bad:?} must fail to deserialize as TransformMode snake_case"
+                "default_mode={bad:?} must fail to deserialize as PromptKind snake_case"
             );
         }
     }
@@ -274,7 +274,7 @@ mod tests {
             chapters_count: 5,
             default_model_config_id: Some(7),
             default_prompt_id: None,
-            default_mode: Some(TransformMode::Style),
+            default_mode: Some(PromptKind::Style),
         };
         let v: serde_json::Value = serde_json::to_value(&s).expect("serialize");
         assert_eq!(v["default_model_config_id"], serde_json::json!(7));

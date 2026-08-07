@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use nsc_core::db::Db;
-use nsc_core::models::{NewTransformationChapter, TransformMode, TransformStatus};
+use nsc_core::models::{NewTransformationChapter, PromptKind, TransformStatus};
 use nsc_core::transformer::{JobQueue, JobSpec, QueueSnapshot};
 
 #[derive(Debug, Serialize)]
@@ -14,7 +14,7 @@ pub struct TransformationChapterRow {
     pub chapter_id: i64,
     pub chapter_idx: i32,
     pub chapter_title: String,
-    pub mode: TransformMode,
+    pub mode: PromptKind,
     pub prompt_id: i64,
     pub model_config_id: i64,
     pub status: TransformStatus,
@@ -179,7 +179,7 @@ pub fn enqueue_transformation_chapters(
                     tn.data_asset_id
                 ));
             }
-            let mode = TransformMode::from(prompt.kind);
+            let mode = prompt.kind;
             let id = db
                 .transformation_chapters()
                 .insert(&NewTransformationChapter {

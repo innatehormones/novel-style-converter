@@ -140,7 +140,7 @@ pub fn parse_chapters(
     data_asset_id: i64,
     segments: Vec<ChapterInput>,
 ) -> Result<usize, String> {
-    let new_chapters: Vec<NewChapter> = segments.into_iter().enumerate().map(|(i, s)| {
+    let new_chapters: Vec<NewChapter> = segments.into_iter().map(|s| {
         let wc = nsc_core::text::word_count(&s.content);
         NewChapter {
             data_asset_id,

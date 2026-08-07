@@ -19,7 +19,7 @@ use crate::db::Db;
 use crate::error::{Error, Result};
 use crate::models::{
     Batch, BatchStatus, Chapter, ModelConfig, NewBatch, OnFailurePolicy, Prompt,
-    ResumeAction, TransformMode, TransformationNovel,
+    PromptKind, ResumeAction, TransformationNovel,
 };
 use crate::transformer::{JobQueue, JobSpec};
 
@@ -34,7 +34,7 @@ pub struct BatchScheduler {
 pub struct BatchOverrides {
     pub prompt_id: Option<i64>,
     pub model_config_id: Option<i64>,
-    pub mode: Option<TransformMode>,
+    pub mode: Option<PromptKind>,
     pub ctx_prev_original: Option<i32>,
     pub ctx_prev_transformed: Option<i32>,
     pub ctx_next_original: Option<i32>,
@@ -48,7 +48,7 @@ pub struct WorkflowCreate {
     pub chapter_ids: Vec<i64>,
     pub prompt_id: i64,
     pub model_config_id: i64,
-    pub mode: TransformMode,
+    pub mode: PromptKind,
     pub ctx_prev_original: i32,
     pub ctx_prev_transformed: i32,
     pub ctx_next_original: i32,
@@ -181,7 +181,7 @@ impl BatchScheduler {
             .ok_or_else(|| Error::NotFound(format!("prompt {} 不存在", spec.prompt_id)))?;
         let model = db.model_configs().get(spec.model_config_id)?
             .ok_or_else(|| Error::NotFound(format!("model_config {} 不存在", spec.model_config_id)))?;
-        if TransformMode::from(prompt.kind) != spec.mode {
+        if PromptKind::from(prompt.kind) != spec.mode {
             return Err(Error::Validation("prompt kind 与 mode 不一致".into()));
         }
 
@@ -759,10 +759,10 @@ fn policy_str(p: OnFailurePolicy) -> &'static str {
     }
 }
 
-fn mode_str(m: TransformMode) -> &'static str {
+fn mode_str(m: PromptKind) -> &'static str {
     match m {
-        TransformMode::Compress => "compress",
-        TransformMode::Style => "style",
+        PromptKind::Compress => "compress",
+        PromptKind::Style => "style",
     }
 }
 

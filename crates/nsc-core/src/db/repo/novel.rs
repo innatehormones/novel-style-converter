@@ -121,8 +121,8 @@ impl<'a> TransformationNovelRepo<'a> {
     pub fn insert(&self, n: &NewTransformationNovel) -> Result<i64> {
         let now = Utc::now().to_rfc3339();
         let mode_str = n.default_mode.map(|m| match m {
-            crate::models::TransformMode::Compress => "compress",
-            crate::models::TransformMode::Style => "style",
+            crate::models::PromptKind::Compress => "compress",
+            crate::models::PromptKind::Style => "style",
         });
         self.conn.execute(
             "INSERT INTO transformation_novels \
@@ -158,8 +158,8 @@ impl<'a> TransformationNovelRepo<'a> {
 
     pub fn update(&self, n: &TransformationNovel) -> Result<()> {
         let mode_str = n.default_mode.map(|m| match m {
-            crate::models::TransformMode::Compress => "compress",
-            crate::models::TransformMode::Style => "style",
+            crate::models::PromptKind::Compress => "compress",
+            crate::models::PromptKind::Style => "style",
         });
         self.conn.execute(
             "UPDATE transformation_novels \
@@ -196,8 +196,8 @@ fn novel_from_row(row: &Row) -> rusqlite::Result<TransformationNovel> {
             3, rusqlite::types::Type::Text, Box::new(e)))?;
     let mode_s: Option<String> = row.get(6)?;
     let default_mode = mode_s.map(|s| match s.as_str() {
-        "compress" => Ok(crate::models::TransformMode::Compress),
-        "style" => Ok(crate::models::TransformMode::Style),
+        "compress" => Ok(crate::models::PromptKind::Compress),
+        "style" => Ok(crate::models::PromptKind::Style),
         other => Err(rusqlite::Error::FromSqlConversionFailure(
             6, rusqlite::types::Type::Text,
             format!("unknown default_mode: {other}").into())),

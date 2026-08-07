@@ -5,7 +5,7 @@ use tauri::State;
 
 use nsc_core::db::Db;
 use nsc_core::error::Error;
-use nsc_core::models::{Batch, BatchStatus, TransformMode, TransformStatus};
+use nsc_core::models::{Batch, BatchStatus, PromptKind, TransformStatus};
 use nsc_core::transformer::{BatchScheduler, WorkflowCreate};
 
 const CONTENT_PREVIEW_CHARS: usize = 80;
@@ -27,8 +27,8 @@ pub struct CreateWorkflowPayload {
 impl CreateWorkflowPayload {
     fn into_core(self) -> Result<WorkflowCreate, Error> {
         let mode = match self.mode.as_str() {
-            "compress" => TransformMode::Compress,
-            "style" => TransformMode::Style,
+            "compress" => PromptKind::Compress,
+            "style" => PromptKind::Style,
             other => return Err(Error::Validation(format!("未知 mode: {other}"))),
         };
         Ok(WorkflowCreate {

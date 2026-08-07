@@ -3,7 +3,7 @@ use rusqlite::{params, Connection, Row};
 
 use crate::error::Result;
 use crate::models::{
-    NewTransformationChapter, TransformationChapter, TransformMode, TransformStatus,
+    NewTransformationChapter, PromptKind, TransformationChapter, TransformStatus,
 };
 
 pub struct TransformationChapterRepo<'a> { pub(crate) conn: &'a Connection }
@@ -11,8 +11,8 @@ pub struct TransformationChapterRepo<'a> { pub(crate) conn: &'a Connection }
 impl<'a> TransformationChapterRepo<'a> {
     pub fn insert(&self, t: &NewTransformationChapter) -> Result<i64> {
         let mode = match t.mode {
-            TransformMode::Compress => "compress",
-            TransformMode::Style => "style",
+            PromptKind::Compress => "compress",
+            PromptKind::Style => "style",
         };
         self.conn.execute(
             "INSERT INTO transformation_chapters \
@@ -184,8 +184,8 @@ fn from_row(row: &Row) -> rusqlite::Result<TransformationChapter> {
         transformation_novel_id: row.get(1)?,
         chapter_id: row.get(2)?,
         mode: match mode_s.as_str() {
-            "compress" => TransformMode::Compress,
-            _ => TransformMode::Style,
+            "compress" => PromptKind::Compress,
+            _ => PromptKind::Style,
         },
         prompt_id: row.get(4)?,
         model_config_id: row.get(5)?,

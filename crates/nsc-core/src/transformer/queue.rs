@@ -6,7 +6,7 @@ use tokio::sync::{mpsc, Mutex};
 use crate::ai::AiProvider;
 use crate::db::Db;
 use crate::error::Result;
-use crate::models::{ModelConfig, TransformationChapter, TransformationNovel, TransformStatus};
+use crate::models::{ModelConfig, TransformationNovel, TransformStatus};
 use crate::transformer::{
     DefaultTransformer, JobInfo, JobSpec, JobStatus, QueueSnapshot,
     ProviderCache, TransformRequest, Transformer,
@@ -153,7 +153,9 @@ struct Prep {
     chapter: crate::models::Chapter,
     chapter_content: String,
     prev_orig: Vec<(String, String)>,
-    prev_tx: Vec<TransformationChapter>,
+    /// 邻章已转换正文 (title, content) 对 —— 真内容在 workflow_result_chapters,
+    /// 不再是 tc 行(§3.3)。
+    prev_tx: Vec<(String, String)>,
     next_orig: Vec<(String, String)>,
 }
 
@@ -277,7 +279,7 @@ fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
         .map(|c| (c.title, c.body.clone()))
         .collect();
 
-    let prev_tx: Vec<TransformationChapter> = {
+    let prev_tx: Vec<(String, String)> = {
         let mut out = Vec::new();
         let chs = db.chapters().prev_n(data_asset_id, idx, 32)
             .map_err(|e| e.to_string())?;
@@ -291,7 +293,16 @@ fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
                     && t.model_config_id == job.model_config.id
                     && matches!(t.status, TransformStatus::Done)
             }) {
-                out.push(t);
+                // 真内容在 workflow_result_chapters.content,不是 tc.result_content。
+                let content = match t.batch_id {
+                    Some(bid) => db.workflow_results()
+                        .get_content_by_batch_and_chapter(bid, ch.id)
+                        .map_err(|e| e.to_string())?,
+                    None => None,
+                };
+                if let Some(c) = content {
+                    out.push((ch.title.clone(), c));
+                }
             }
         }
         out

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use crate::ai::{AiProvider, ChatMessage, ChatRequest, Role};
 use crate::error::Result;
-use crate::models::{Chapter, ModelConfig, Prompt, TransformationChapter, TransformationNovel};
+use crate::models::{Chapter, ModelConfig, Prompt, TransformationNovel};
 use crate::prompts::{render, PromptContext};
 
 pub struct TransformRequest {
@@ -20,7 +20,9 @@ pub struct TransformationNovelContext {
     pub transformation_novel: TransformationNovel,
     /// 邻章原文片段 —— 同样由 `queue.rs` 取出,Vec 元素是 `(title, content)` 对。
     pub prev_original: Vec<(String, String)>,
-    pub prev_transformed: Vec<TransformationChapter>,
+    /// 邻章已转换正文 —— 元素是 (title, content) 对;queue.rs 负责 join
+    /// workflow_result_chapters 拿真内容。
+    pub prev_transformed: Vec<(String, String)>,
     pub next_original: Vec<(String, String)>,
 }
 
@@ -52,13 +54,17 @@ impl Transformer for DefaultTransformer {
             prev_original: &req.novel_context.prev_original,
             prev_transformed: &req.novel_context.prev_transformed,
             next_original: &req.novel_context.next_original,
+            kind: req.prompt.kind,
         };
-        let user_content = render(&req.prompt.template, &ctx)?;
+        let rendered = render(&req.prompt.template, &ctx);
+        let mut messages = Vec::with_capacity(if rendered.system.is_some() { 2 } else { 1 });
+        if let Some(sys) = rendered.system {
+            messages.push(ChatMessage { role: Role::System, content: sys });
+        }
+        messages.push(ChatMessage { role: Role::User, content: rendered.user });
         let chat_req = ChatRequest {
             model: req.model_config.model.clone(),
-            messages: vec![ChatMessage {
-                role: Role::User, content: user_content,
-            }],
+            messages,
             temperature: req.model_config.temperature,
             max_tokens: req.model_config.max_tokens,
         };

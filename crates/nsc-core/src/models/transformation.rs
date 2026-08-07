@@ -5,19 +5,6 @@ use crate::models::PromptKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TransformMode { Compress, Style }
-
-impl From<PromptKind> for TransformMode {
-    fn from(k: PromptKind) -> Self {
-        match k {
-            PromptKind::Compress => TransformMode::Compress,
-            PromptKind::Style => TransformMode::Style,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum TransformStatus {
     Pending,
     Running,
@@ -37,7 +24,7 @@ pub struct TransformationChapter {
     pub id: i64,
     pub transformation_novel_id: i64,
     pub chapter_id: i64,
-    pub mode: TransformMode,
+    pub mode: PromptKind,
     pub prompt_id: i64,
     pub model_config_id: i64,
     pub ctx_prev_original: i32,
@@ -61,7 +48,7 @@ pub struct TransformationChapter {
 pub struct NewTransformationChapter {
     pub transformation_novel_id: i64,
     pub chapter_id: i64,
-    pub mode: TransformMode,
+    pub mode: PromptKind,
     pub prompt_id: i64,
     pub model_config_id: i64,
     pub ctx_prev_original: i32,
