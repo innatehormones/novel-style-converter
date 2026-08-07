@@ -7,6 +7,25 @@
 
 A single upload can produce many data assets, and the data assets survive the upload being deleted. The link data_assets.upload_id is informational only (no FK, no UNIQUE).
 
+## Module status (snapshot 2026-08)
+
+| 模块 | 状态 | 主要边界 / 关键 commit |
+|---|---|---|
+| Upload (上传) | ✅ 完成 | 解耦 upload / data_asset;chapter.body 自包含;删除 preview + 非 cascade。详细见 "Upload module (post-refactor)" |
+| Model (LLM 配置) | ✅ 完成 | 软删 + 密钥必抹 + per-model 并发 + ProviderCache;`seed_default_model_from_env` 静默兜底移除。详细见 "Model refactor — completed" |
+| Prompts (提示词) | ✅ 完成 | enum 合并 (`TransformMode` → `PromptKind`);render 去 Result;软删;`prev_transformed` 真接 `workflow_result_chapters.content` |
+| AI call logs (调用日志) | ✅ 完成 + 收尾 | 表 + recorder + UI 看板;dead chain (`list_ai_call_logs_by_context`) 全删;`let _ = PromptKind::Compress` 遮掩代码删;**启动 panic 修复** —— `spawn_writer` 改 `std::thread::spawn` + 内建 tokio runtime |
+| Workflows (转换 / batch) | ⏳ 计划已拍板,0 代码改动 | 见 "Workflows — 待重构" 章节;**实际页面操作未跑通**(用户自述) |
+
+**核心架构原则**(贯穿所有已重构模块):
+
+1. **不 silent 兜底**: env seed / 默认模型注入 / 兜底 provider 等"沉默补救"全部移除,改 fail-fast + UI 显式提示
+2. **不静默丢数据**: 用户删除 X 但 Y 引用 X → 要么 cascade,要么软删 + UI 提示,**绝不**静默成功
+3. **不遮掩问题**: `let _ = some_field` / `unwrap_or_else(... default ...)` / 注释里的 "暂时忽略" 都视为技术债,要么真用上,要么删
+4. **upload / data_asset 解耦**: 上传是原始材料(mutable),数据资产是加工产物(chapter.body 自包含);删除 upload 不 cascade,孤儿 da 仍可访问
+5. **跨模块引用靠软关系 + 反范式**: `data_assets.upload_id` / `ai_call_logs.model_config_id` / `ai_call_logs.context_*` 都是软引用(无 FK),被引用的对象被删不影响日志/数据可读
+6. **业务写入路径走 repo + IPC**: 命令层不再持有 inline SQL;4 处 workflows 内联 SQL 待搬到 typed repos(下一轮重构)
+
 ## Optimization log
 
 ### Upload refactor — completed
@@ -19,8 +38,7 @@ A single upload can produce many data assets, and the data assets survive the up
 - The obsolete warning that cleaning would destroy existing chapter ranges was removed because chapter content is now self-contained.
 - Parse-page state is isolated from the upload source after commit; leaving the page unloads large temporary text and chapter collections.
 
-This section records the currently agreed upload boundary and is the baseline for reviewing the next module.
-
+*(→ 详见 `## Upload module (post-refactor)`,含完整 UI / flow / design intent。本段记录 Upload 边界,作为 review 后续模块的基线)*
 ### Model (LLM 配置) refactor — completed
 
 - 删除 `seed_default_model_from_env` 静默兜底:应用启动不再自动从 `NSC_DEFAULT_MODEL_*` 环境变量种入默认模型。所有模型必须由用户在模型管理页显式新增;空表首启时 UI 显式提示"尚未配置任何模型"。
@@ -47,21 +65,70 @@ This section records the currently agreed upload boundary and is the baseline fo
   - `concurrency` 超过物理 worker 数(默认 2)不会触发额外阻塞(没有那么多 worker 同时跑)。模型管理可设的上限是 16,但实际生效 = `min(concurrency, 物理并发)`。
   - 软删 model 后,如果新建同名 model,新行 id 增长;老归档行不会被覆盖,可恢复。
   - 软删行参与 `transformation_chapters.model_config_id` 引用解析时,`api_key=''` 仍可能被 `OpenAiProvider::new` 成功构造 —— 但实际发请求时会被远端 401,error 会冒到 transformation_chapters.mark_failed 路径(这是 fail-fast 行为,符合用户"不要遮掩问题"的要求)。
+*(→ 详见 `## Model module (post-refactor)`,含 Data / UI / flow / design intent)*
+
+## Model module (post-refactor)
+
+### Data
+- `model_configs` 表: name / model / base_url / api_key / temperature / max_tokens / **concurrency** / **archived** (0=活动,1=软删)
+- `concurrency` 是 per-model 限流上限;worker 端按 `model_config_id` 建 `tokio::sync::Semaphore`
+- 软删行 `api_key=""` (用户明确要求"密钥不能随归档泄露");恢复时密钥不会自动回来
+
+### UI / flow
+
+#### 1. Models.vue `/models`(列表)
+- 列:name / model / base_url / temperature / max_tokens / **concurrency** / **状态** / 操作
+- 顶部开关:**显示已归档** —— 默认关,只列 `archived=0` 行;开关开含归档行
+- 活动行操作:**编辑** / **测试连接** / **删除**
+- 归档行操作:仅 **恢复**(无编辑,无删除;归档是终态;恢复后需用户自己重填 api_key)
+- 归档行视觉:整行删除线 + "已归档"徽标
+
+#### 2. 新增/编辑 model (ModelDialog.vue)
+- 字段: name / model (string, e.g. "gpt-4o-mini") / base_url / api_key / temperature / max_tokens / concurrency
+- `archived` 不可在 dialog 里改 —— 只能通过"删除"或"恢复"
+- 校验: name / model / base_url / api_key 必填;temperature / max_tokens / concurrency 数字
+- **测试连接** 按钮:调 `test_model` 调一次 `provider.chat("ping")`,返回结构化 `TestModelReport`,**失败不抛错** —— 错误进 `report.error`,`latency_ms` 仍填(连 provider 创建失败都计超时)
+- TestModelReport 字段完整展示:model / base_url / latency_ms / tokens_in / tokens_out / content_preview (前 200 字) / error
+
+#### 3. 删除 model
+- 弹 ConfirmDialog → 调 `delete_model(id)` → 后端 `UPDATE ... SET archived=1, api_key=""`
+- **不**做级联删除;**不**删任何 batches / transformation_chapters 引用 —— 后续 worker 启动时仍能 resolve 到该行(尽管发请求会 401,error 冒到 mark_failed)
+- 恢复:`restore_model(id)` → `UPDATE ... SET archived=0`;注意 `api_key` 仍为空,user 必须重新编辑保存
+
+#### 4. 空 Models 表(首启或全归档后)
+- 显式提示"尚未配置任何模型"。**不会**从 `NSC_DEFAULT_MODEL_*` 环境变量自动注入 —— 移除的 `seed_default_model_from_env` 静默兜底让"第一次跑应用就有 model" 看似贴心,实则排查链断在"为什么 worker 拿到的 model 不是我配的"上
+
+### Design intent
+- **`api_key` 一旦归档必抹**:用户原话"密钥不能随归档泄露"。即使行保留可恢复,密钥也不能保留
+- **`ModelConfigRepo::get(id)` 不按 archived 过滤**:`BatchScheduler` 在 resolve `tc.model_config_id` 时必须能拿到归档行 —— 不然 `mark_failed` 路径找不到 `model.name` 写错误信息;`tc` 行的引用解析会断
+- **`provider_factory` 重建是 cache miss 路径**:cache key 是 `model_config.id` 而不是 `(api_key, base_url)` —— 用户在 UI 改了 key 后,运行中的 worker 仍持有旧 provider 直到该 chapter 跑完;新建工作流才用新 key。显式 trade-off,避免运行中突然 401
+- **`concurrency` 字段真正生效**:旧版只是 metadata,没人用;新版 worker 端用 `tokio::sync::Semaphore` 真的限流,`min(concurrency, 物理并发)` 是实际生效值(物理 worker 默认 2,模型管理可设上限 16)
+- **空 Models 表显式提示**:**不**回退到"自动 seed 一个空壳 model 让 UI 不报错"那种 silent 兜底 —— 用户必须显式配置,空表就是空表
 
 ## Key data model
 
-- uploads: sha256, filename, byte_size, file_path, original_text, word_count
-- data_assets: upload_id (informational), title, parsed_at, source_filename
-- chapters: data_asset_id, idx, title, body TEXT, word_count
-- transformation_novels: data_asset_id (fan-out)
-- batches / transformation_chapters / workflow_results: scheduler + result set
-
+- `uploads` (migrations/0001,0007): sha256, filename, byte_size, file_path, original_text, word_count, uploaded_at
+- `data_assets` (migrations/0004): upload_id (informational, 无 FK 无 UNIQUE), title, parsed_at, source_filename
+- `chapters` (migrations/0005,0015): data_asset_id, idx, title, body TEXT (自包含正文), word_count
+- `transformation_novels` (migrations/0006,0008): data_asset_id (fan-out), title, default_model_config_id, default_prompt_id, default_mode
+- `batches` (migrations/0009,0012): transformation_novel_id, label, on_failure_policy, status (pending/running/stopped/paused/completed/terminated/cancelled), created_at/started_at/ended_at
+- `transformation_chapters` (migrations/0010): 一行 = 一次转换尝试;batch_id, chapter_id, mode, prompt_id, model_config_id, ctx_prev_*, status (pending/running/done/failed/skipped/cancelled), result_content (新设计中常 NULL), tokens_in/out, error
+- `workflow_results` (migrations/0011,0013): batch_id, created_at —— 一个 batch 一份 result set,持 chapter 级 content 真源
+- `workflow_result_chapters` (migrations/0013): workflow_result_id, chapter_id, content (文本真源), created_at, updated_at
+- `model_configs` (migrations/0001,0016): name, model, base_url, api_key, temperature, max_tokens, concurrency, archived (软删列), created_at/updated_at
+- `prompts` (migrations/0001,0014,0017): name, kind (compress/style), template, is_builtin, archived (软删列), created_at/updated_at
+- `ai_call_logs` (migrations/0018): 每次 LLM chat 落一行 —— business (transform_chapter/test_model), context_type/id (软引用), model_config_id (可空), model_name/base_url (反范式,断网可读), temperature/max_tokens, system_preview/user_preview/response_preview (各前 10KB), system_size/user_size/response_size (总字符数), estimated_tokens_in/actual_tokens_in/actual_tokens_out, status (success/failed), latency_ms, error, created_at
+- `schema_versions`: 单 PK `version` 列,记录已应用的 migration 编号(Db::open 时跳过已应用项)
 ## Delete semantics
 
-- Delete upload: preview_upload_deletion returns the list of derived data assets; the deletion is non-cascading. The UI shows the list and lets the user decide.
-- Delete data_asset: cascades chapters + transformation_novels via FK.
-- Delete transformation_novel: removes tn + its transformation_chapters only.
-- Delete chapter: only allowed when no transformation references it.
+- **Delete upload**: preview_upload_deletion returns the list of derived data assets; the deletion is non-cascading. The UI shows the list and lets the user decide.
+- **Delete data_asset**: cascades chapters + transformation_novels via FK.
+- **Delete transformation_novel**: removes tn + its transformation_chapters only (不删 batches 行 —— 见 workflows 待重构章节)。
+- **Delete chapter**: only allowed when no transformation references it (前端查 count_prompt_usage 等)。
+- **Delete model** (软删): `UPDATE model_configs SET archived = 1, api_key = ""` —— 行保留供历史 tc 引用解析,**密钥必抹**(用户明确要求)。`restore_model` 取消软删,但 api_key 不会自动恢复(已被抹掉)。
+- **Delete prompt** (软删): `UPDATE prompts SET archived = 1` —— builtin 行的 archive / restore / update 全部 fail-fast 拒绝。`restore_prompt` 取消软删,内容不校验。
+- **Clear ai_call_logs**: 直接 `DELETE FROM ai_call_logs`(不软删),UI 显式按钮触发 ConfirmDialog。表的 status 列没有"软删"语义,只区分 success/failed。
+- **Failure mode 统一**: 任何"用户删除 X 但 Y 引用 X"的场景,都要么 cascade 要么软删 + UI 提示,绝不静默丢数据。
 
 ## Upload module (post-refactor)
 
@@ -151,7 +218,18 @@ This section records the currently agreed upload boundary and is the baseline fo
 
 ## Test status
 
-cargo test -p nsc-core runs an ignored placeholder per file. Old tests referenced byte-coordinate assertions and now-deprecated API shapes. They are flagged for rewrite against migrations/0015_chapter_body.sql and the new repo methods.
+- `cargo test --workspace` 当前: nsc-core 18 unit tests + nsc-desktop 12 unit tests 全过,0 失败 0 警告
+- 覆盖范围:
+  - `recorder` 3 个(channel 满丢事件 / channel 收发 / noop)
+  - `db::repo::ai_call_log` 6 个(insert+roundtrip / filter / clear / truncate_preview 边界)
+  - `text::word_count` 6 个(中文 / 英文 / 混合 / 标点不计 / 空 / 前后空白)
+  - `commands::cleaning` 5 个(规则 id 解析 / 合并折叠 / 错误路径)
+  - `commands::transformation_novels` 8 个(snake_case DTO 反序列化 + 默认值边界)
+  - `upload` 1 个(sha256 空字符串 known value)
+  - `db::pool` 1 个(in-memory schema 跑通)
+- byte-range 时代的测试已全部移除;migrations/0003_chapter_byte_ranges.sql + migrations/0015_chapter_body.sql 的迁移后,任何基于字节偏移的断言都不存在了
+- `tests/` 目录下的 24 个 integration test 是 ignored placeholder,目前没实现(每个 crate 一个 `.rs` 占位);不在本次重构范围
+- vue-tsc 4 个 pre-existing 错(`chapters.ts:176/265`,`Library.vue:264`,`parse.vue:201`),与本次重构无关,不在重构范围
 
 ## Prompts (提示词) refactor — completed
 
@@ -349,3 +427,75 @@ cargo test -p nsc-core runs an ignored placeholder per file. Old tests reference
 - **trace 化 recorder 失败日志**:需要引入 tracing,见上节
 - **transformer 集成单测**:已有 todo,本次未触及
 - **detail 页"看完整 prompt/response"跳转**:已有 todo,本次未触及
+
+
+
+## AI call logs — 启动 panic 修复
+
+### Scope
+- `crates/nsc-core/src/recorder/mod.rs::spawn_writer` 改写:不再 `tokio::spawn(...)`,改为 `std::thread::spawn` + 内置 `tokio::runtime::Builder::new_current_thread()`
+- 返回类型 `tokio::task::JoinHandle<()>` → `std::thread::JoinHandle<()>`,调用方 `let _writer_handle = ...` 不变
+- `src-tauri/src/lib.rs` 与本文件 "AI call logs — Phase 2" 的 "启动 lifecycle" 段同步更新
+
+### Design intent
+
+#### 1. 根因
+- `src-tauri/lib.rs::run()` 是 builder 同步阶段,在 `tauri::Builder::default().run(...)` 之前
+- `recorder::spawn_writer(...)` 内部 `tokio::spawn(...)` —— 此时**还没有 Tauri 的 tokio reactor**
+- 直接 panic:`thread 'main' panicked at crates\nsc-core\src\recorder\mod.rs:126:5: there is no reactor running, must be called from the context of a Tokio 1.x runtime`
+- exit code 101,应用启动即挂
+
+#### 2. 修法 —— 跟 JobQueue worker 同一种解耦风格
+- `JobQueue` 的 worker 早就处理过类似问题:`std::thread::spawn` + 内置 `tokio::runtime::Builder::new_current_thread()`,完全不依赖调用方线程上下文
+- `spawn_writer` 直接套用:内部建一个 current_thread runtime,writer 跑在里面
+- 调用方线程是否有 reactor / 是否在 tokio runtime 里,都不影响 recorder 工作 —— recorder 自给自足
+- `src-tauri/lib.rs` 的 `let _writer_handle = ...` 保持不变;`let _` 模式丢弃 handle 的语义也保持(app 退出时 thread 自然结束)
+
+#### 3. 启示 —— 后台任务尽量别假设调用方有 tokio runtime
+- 任何模块对外提供的 `spawn_*` / `start_*` helper,如果用 `tokio::spawn` 直接起 task,**应该默认自带 runtime**,不要让调用方保证
+- 这个 panic 在第一次跑应用时立刻暴露;如果只在测试里 mock 就永远发现不了(测试 in-memory + 直接 `rt.block_on` 不会触发)
+- 同类问题可能潜伏在 `BatchScheduler` / `startup_recovery` 等其他 module,review 时关注
+
+
+
+## Workflows (转换 / batch) — 待重构
+
+**状态**: 计划已拍板,0 代码改动。**实际页面操作未跑通**(用户自述) —— 之前 panic + 启动问题修完后才能手动测。
+
+### 当前结构
+- `src-tauri/src/commands/workflows.rs` (12.5KB): 8 个 IPC 命令 + 4 处内联 SQL + 2 个手写 status parser + 4 个聚合结构体 + 1 个 CONTENT_PREVIEW_CHARS 常量
+- `crates/nsc-core/src/models/{batch,transformation}.rs`: 已有 `BatchStatus` / `TransformStatus` enum + 私有 `str_to_status` / `str_to_policy` helper(repo 内部用,不能改)
+- `crates/nsc-core/src/db/repo/{batch,workflow_result,novel}.rs`: 现有 `BatchRepo::get/list_by_tn/set_status` 等,但 4 处跨表 join 还在 commands/workflows.rs 里
+
+### Scope(下一步要做的)
+1. **`BatchStatus` / `TransformStatus` 加 `TryFrom<&str>`** —— 取代 commands/workflows.rs 里手写的 `parse_batch_status` / `parse_transform_status`(7+6 行 match)。serde `rename_all = "snake_case"` 已配置,可直接对接
+2. **4 个 IPC 聚合类型搬到 `models/workflow.rs`(新文件)**:`WorkflowSummary` / `WorkflowChapterRow` / `SourceChapterRow` / `ChapterWorkflowResultRow`。字段名是 IPC 契约,前端已经在用,保持完全兼容
+3. **4 处内联 SQL 搬到 typed repos**:
+   - `BatchRepo::summary_counts(batch_id)` → 取代 `to_summary` count 查询(transformation_chapters 聚合)
+   - `BatchRepo::list_chapters_with_results(batch_id)` → 取代 `list_workflow_chapters`(transformation_chapters + chapters + workflow_result_chapters 三表 join)
+   - `WorkflowResultRepo::list_for_chapter(tn_id, chapter_id)` → 取代 `list_chapter_workflow_results`(batches + workflow_results + workflow_result_chapters + transformation_chapters 四表 join)
+   - `TransformationNovelRepo::list_source_chapters(tn_id)` → 取代 `list_transformation_source_chapters`(chapters + 子查询 workflow_result_chapters count)
+4. **小 helper**:`fn lock_db(state: State<'_, Arc<Mutex<Db>>>) -> Result<Db, String>` + 在 BatchRepo 加 `get_required(id) -> Result<Batch, String>`(不存在 → `"batch X 不存在"`)
+5. **保留 IPC 签名稳定** —— 前端不动
+
+### 不动 / 保留的
+- `BatchScheduler` (`crates/nsc-core/src/transformer/batch_scheduler.rs`) 内的内联 SQL —— 那是事务性 multi-table atomic ops(创建 batch + 创建空 result set + 批量插 tc 行),repo 抽象不好套;留给后续单独评估
+- 前端 `stores/workflows.ts` / `views/TransformationNovelDetail.vue` 等 —— IPC 契约不变
+- `batches.on_failure_policy` 字段、3 种 policy 语义 —— 跟转换流程强耦合,workflows 重构范围之外
+
+### 待验证(用户那边测)
+- `create_workflow` 入口:`tn_id` / `chapter_ids[]` / `prompt_id` / `model_config_id` / `mode` / 三个 ctx 窗口数 —— 现有表单是否能完整提交
+- `stop_workflow` / `retry_workflow_chapters`:scheduler 接口 + repo 重写后,semantics 是否一致
+- `list_chapter_workflow_results`:4 表 join 搬到 `WorkflowResultRepo::list_for_chapter` 后,行序/字段是否一致
+- 失败路径:prompt_id 找不到 / model_config_id 已软删 / chapter_id 不在 tn 的 data_asset 范围 —— 各报什么错
+
+### Design intent(沿用全局原则)
+- **不**为求 repo 一致性而把 `BatchScheduler` 的事务 SQL 也拆出去 —— 那是 atomicity 边界,拆了反而引入新的并发问题
+- **不**为减少一个文件而把 4 个聚合类型塞进 `models/batch.rs` —— 它们跨 batch / transformation_chapters / workflow_result_chapters 三表,独立文件 `workflow.rs` 更清晰
+- IPC 字段名一字不改:前端 `WorkflowSummary` / `WorkflowChapterRow` 等已经引用 `tc_id` / `chapter_id` / `chapter_idx` 等 snake_case,改名 = 静默破坏
+- `TryFrom<&str>` 不引入 `serde_plain` 等额外 crate,手写 match 跟现有 `str_to_status` 几乎一致,避免依赖爆炸
+
+### Open questions(等用户测时反馈)
+- `WorkflowChapterRow.content_preview`: 来自 `wrc.content` 前 80 chars。如果某章特别长,要不要分页 / 折叠?
+- `list_workflow_chapters` 当前没分页 —— batch 内 chapter 数 = 全本 chapter 数(可能上千),要不要加 limit / offset?
+- `list_chapter_workflow_results` 返回历史所有 batch 对该 chapter 的结果,要不要按 status 过滤(只 done / 含 failed)?
