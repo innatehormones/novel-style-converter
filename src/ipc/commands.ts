@@ -1,4 +1,4 @@
-﻿// 前端调用规则:
+// 前端调用规则:
 // - 命令参数名(payload / id / chapterId / uploadId 等)由 Tauri 自动 camelCase 化,
 //   invoke 外层传参对象用 camelCase 字段名。
 // - 内层 DTO 由后端显式 `#[serde(rename_all="snake_case")]` 接收,前端必须按
@@ -240,13 +240,6 @@ export function getAiCallLog(id: number): Promise<AiCallLog | null> {
 
 export function clearAiCallLogs(): Promise<number> {
   return invoke<number>('clear_ai_call_logs');
-}
-
-export function listAiCallLogsByContext(
-  contextType: string,
-  contextId: number,
-): Promise<AiCallLog[]> {
-  return invoke<AiCallLog[]>('list_ai_call_logs_by_context', { contextType, contextId });
 }
 
 // upload deletion preview: list derived data_assets without cascading.

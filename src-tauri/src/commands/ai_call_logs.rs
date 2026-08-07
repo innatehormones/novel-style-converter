@@ -54,25 +54,11 @@ pub fn get_ai_call_log(
     db.ai_call_logs().get(id).map_err(|e| e.to_string())
 }
 
-/// 清空全部日志 —— UI 清空按钮专用,返回删除行数供 toast。
+/// 清空全部日志 —— UI 看板"清空"按钮专用,返回删除行数供 toast。
 #[tauri::command]
 pub fn clear_ai_call_logs(
     db: State<'_, Arc<Mutex<Db>>>,
 ) -> Result<usize, String> {
     let db = db.lock().map_err(|e| e.to_string())?;
     db.ai_call_logs().clear().map_err(|e| e.to_string())
-}
-
-/// 软引用反查:从 transformation_chapter 找历史 AI 调用
-/// —— transformation_chapter 删了也不影响日志可见。
-#[tauri::command]
-pub fn list_ai_call_logs_by_context(
-    db: State<'_, Arc<Mutex<Db>>>,
-    context_type: String,
-    context_id: i64,
-) -> Result<Vec<nsc_core::models::AiCallLog>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
-    db.ai_call_logs()
-        .list_by_context(&context_type, context_id)
-        .map_err(|e| e.to_string())
 }

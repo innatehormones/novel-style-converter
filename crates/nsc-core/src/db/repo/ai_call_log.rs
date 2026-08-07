@@ -158,22 +158,6 @@ impl<'a> AiCallLogRepo<'a> {
         Ok(n)
     }
 
-    /// 按 context 软引用反查 —— 从 transformation_chapter 找历史 AI 调用。
-    /// 软引用,无 FK,所以业务对象删了日志仍能查到。
-    pub fn list_by_context(&self, context_type: &str, context_id: i64) -> Result<Vec<AiCallLog>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, created_at, business, context_type, context_id,
-                    model_config_id, model_name, base_url,
-                    temperature, max_tokens,
-                    system_preview, user_preview, system_size, user_size,
-                    estimated_tokens_in, actual_tokens_in, actual_tokens_out,
-                    status, response_preview, response_size, latency_ms, error
-               FROM ai_call_logs WHERE context_type = ?1 AND context_id = ?2
-               ORDER BY created_at DESC, id DESC",
-        )?;
-        let rows = stmt.query_map(params![context_type, context_id], |row| from_row(row))?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
-    }
 }
 
 fn from_row(row: &Row) -> rusqlite::Result<AiCallLog> {

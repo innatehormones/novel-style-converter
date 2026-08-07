@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::ai::{AiProvider, ChatMessage, ChatRequest, Role};
 use crate::error::{Error, Result};
-use crate::models::{AiCallStatus, Chapter, ModelConfig, Prompt, PromptKind, TransformationNovel};
+use crate::models::{AiCallStatus, Chapter, ModelConfig, Prompt, TransformationNovel};
 use crate::prompts::{render, PromptContext};
 use crate::recorder::{AiCallEvent, AiCallRecorder};
 
@@ -130,10 +130,6 @@ impl Transformer for DefaultTransformer {
             latency_ms,
             error: error_msg,
         });
-
-        // PromptKind 用一下避免 unused 警告(transform 路径有 prompt 上下文)。
-        let _ = req.prompt.kind;
-        let _ = PromptKind::Compress;
 
         outcome
     }

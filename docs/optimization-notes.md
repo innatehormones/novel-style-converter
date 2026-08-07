@@ -264,8 +264,6 @@ cargo test -p nsc-core runs an ignored placeholder per file. Old tests reference
 
 ### What is NOT done
 
-- **Phase 2**: `DefaultTransformer::transform` + `commands::models::test_model` 没接 recorder ——
-  recorder 接口 + ChannelRecorder + spawn_writer 已就绪,但还没在 hot path 调 `record(event)`
 - 自动清旧(超过 N 天):用户没要,留按钮手动 clear
 - 全文检索(在 system / user_preview 上 LIKE):不做 —— preview 是限长片段,搜不到是预期
 - 体积监控 / 看板:每次 list 看 `共 N / 限 limit` 即可,没做"快满了"提醒
@@ -313,9 +311,41 @@ cargo test -p nsc-core runs an ignored placeholder per file. Old tests reference
 - transformer 路径:`context_type=transformation_chapter` + `context_id=tid`
 - `transformation_chapters` 行可能后续被删,但日志行不受影响 —— 反查"哪个 tc 行调过 AI"仍能查到(用 `list_ai_call_logs_by_context`)
 - test_model 路径:无 context_type / context_id(单次连通性测试,无业务对象)
-
+- `transformation_chapters` 行可能后续被删,但日志行不受影响 —— 当前未提供"按 tc id 反查 AI 调用"接口,如需可后续单独加
 ### What is NOT done
 
 - **transformer 集成单测**:需要 mock `AiProvider` + mock `AiCallRecorder`(`mockall` / 手写 test double),投入产出比低。当前依赖 recorder 单测 + repo 单测 + 手动 dev 验证。
 - **detail 页"看完整 prompt / response"链接**:transform 路径的全文在 `transformation_chapters.result_content`(已 commit 的章节),目前详情页只展示 preview。跳转逻辑后续单独做。
 - **自动清旧 / 体积监控**:用户没要,手动 clear 按钮已够。
+
+
+## AI call logs — 收尾
+
+### Scope
+- 删 `list_ai_call_logs_by_context` 整条 dead chain(后端 IPC + repo 方法 + lib.rs invoke_handler 注册 + 前端 wrapper):UI 没有任何调用入口,留着只会让"以为能用"的后来者 debug 半天才发现没接上
+- 删 `transformer/transformer.rs` 末尾的 `let _ = req.prompt.kind; let _ = PromptKind::Compress;` —— 上一轮 AI 为消 `unused` warning 留下的遮掩代码,跟 fail-fast 偏好冲突
+- 顺带从 `transformer.rs` 的 `use crate::models::{...}` 列表里去掉 `PromptKind`(同上,不再需要)
+
+### Design intent
+
+#### 1. dead chain 判定
+- "无引用"不是单点证据,要沿着 IPC 串正向走一遍:
+  - `src-tauri/src/lib.rs::generate_handler!` 里有 → 命令层有 → repo 有 → 前端 ipc/commands.ts 里有 → 前端代码里 `import` 后真有用
+- 上面任一环节断掉,就视为 dead,一刀删干净
+- 不要为了"未来可能要用"保留:真有需求时再写,也不费事 —— 而且下次写的时候背景可能完全变了,留着旧的半成品反而误导
+
+#### 2. `let _ = ...` 遮掩代码判定
+- 任何 `let _ = some_field;` + 配套注释("避免 unused 警告")出现时,先问:**这个字段真的没用吗?**
+- 如果真的没用:删 import + 字段传递链路 + 字段本身,让编译器告诉你哪里还在用(而不是 `let _` 假装在用)
+- 如果只是当前路径没用但别的路径要用:**让字段在当前路径上派真正的用场** —— 比如 transformer 里把 `prompt.kind` 透传到 recorder event,而不是 `let _ = req.prompt.kind` 后丢掉
+- 本次 `prompt.kind` 的情况属于"render 路径未来要用"(`PromptContext.kind` 在 render.rs 是占位),所以不强行做;只删 `let _`,让 transform 内部不再有 PromptKind 的 import,代码读起来清晰
+
+#### 3. 为什么不对 `recorder::eprintln!` 也"清理"
+- recorder 失败时 `eprintln!("[recorder] channel full, dropping event")` / `insert failed: ...` 直接打到 stderr
+- 想要消掉得引入 `tracing` / `log` crate,但项目当前没引入日志框架,引入属于大改造
+- 这次只删"明确的死代码",不动需要架构支撑的清理项 —— 后者单独立 todo
+
+### What's NOT done(本次范围之外)
+- **trace 化 recorder 失败日志**:需要引入 tracing,见上节
+- **transformer 集成单测**:已有 todo,本次未触及
+- **detail 页"看完整 prompt/response"跳转**:已有 todo,本次未触及
