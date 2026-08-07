@@ -214,3 +214,59 @@ cargo test -p nsc-core runs an ignored placeholder per file. Old tests reference
 - builtin prompt 列表当前是 hard-coded 在 `prompts/builtin.rs`;未来若需"用户提交 builtin"可走标准 insert + is_builtin=1 通道,目前未实现
 - 恢复 prompt 时不做内容校验 —— 万一 builtin 模板已升级,恢复后会与新 builtin 不一致,需要用户自己处理
 
+
+## AI call logs (AI 调用日志) refactor — completed
+
+### Scope
+- 新表 `migrations/0018_ai_call_logs.sql` —— 每次 LLM chat 调用落一行(成功 / 失败都记)
+- 后端:`models/ai_call_log.rs` + `db/repo/ai_call_log.rs` + `commands/ai_call_logs.rs` + 4 个 IPC 命令
+- 新模块 `recorder/mod.rs` —— `AiCallRecorder` trait + `NoopRecorder` + `ChannelRecorder` + 后台 writer,Phase 2 接入用
+- 前端:`src/views/AiCalls.vue` + `src/components/AiCallDetail.vue` + sidebar 一项 + router `/ai-calls`
+- 9 个新测试(6 repo + 3 recorder)
+
+### Design intent
+
+#### 1. preview 截断 + size 记录
+- prompt / response **不存全文** —— 一章 50KB+,1000 章就让 DB 爆炸
+- 只存前 10KB 预览 + 总字符数(`system_size` / `user_size` / `response_size`)
+- 完整内容由调用方自己保留:transform 路径在 `transformation_chapters.result_content`;test_model 路径内容由用户在 UI 看完即丢
+- `truncate_preview()` 是公开函数,在 repo 边界统一截断,recorder / 命令层都复用 —— 杜绝"哪边少截 1 字符"的隐性不一致
+
+#### 2. estimated_tokens_in 启发式
+- 用 `chars / 2` 粗估(zh-aware 经验值)
+- 引入 tiktoken / tokenizer 太重,启发式够排查用 —— UI 标注"粗估",让用户理解非精确
+- 实际值来自 provider `usage.prompt_tokens` / `completion_tokens`,缺 usage 时为 NULL
+
+#### 3. 业务归类
+- `business` enum 当前两个值:`transform_chapter` / `test_model`
+- `context_type` / `context_id` 软引用(无 FK)—— `transformation_chapter` 删了不影响日志可见
+- 未来加 `embedding` / `summarize` / `*_eval` 扩展 enum 即可,不破坏现有 schema
+
+#### 4. denormalized model 信息
+- `model_name` / `base_url` 直接存,不复用 `model_configs.name` ——
+  model_config 可能被 archive / 删,日志行要能看到"当时调的是哪个端点哪个 model"
+- `model_config_id` 可空 —— 历史日志 + 孤儿配置的两端兜底
+
+#### 5. recorder 抽象(Phase 2 接入用,Phase 1 已就位)
+- `AiCallRecorder` trait:`record(event)` 不阻塞,`pending()` 返回队列深度
+- `NoopRecorder`:单元测试 / `Db::open_in_memory` 场景
+- `ChannelRecorder`:mpsc channel + AtomicU64 计数,channel 满时 `try_send` 失败 → drop new
+- `spawn_writer` / `run_writer`:后台 task 按 `db_path` 重开 DB,逐条 `ai_call_logs.insert`
+- DB 在 hot path 不出现,跨线程 / Send/Sync 摩擦归零
+
+#### 6. UI 一致性
+- "AI 调用" 作为顶级 sidebar 项(`/ai-calls`),与"模型"同层
+- 表格列:时间 / 业务 / 模型 / 状态 / tokens(估→实 in / 实 out)/ 延迟 / 错误
+- 过滤:业务 / 状态 / model_config_id 三个下拉 + 输入;任一改触发 reload
+- 详情 Dialog:`AiCallDetail.vue` —— 7 段(基本信息 / 模型配置 / Tokens / system / user / response / 错误)分块展示
+- 清空用 `ConfirmDialog`(与 Models / Prompts 同模式),不弹浏览器原生 confirm
+- 失败行用红色 Tag + 错误列 tooltip 完整文本
+
+### What is NOT done
+
+- **Phase 2**: `DefaultTransformer::transform` + `commands::models::test_model` 没接 recorder ——
+  recorder 接口 + ChannelRecorder + spawn_writer 已就绪,但还没在 hot path 调 `record(event)`
+- 自动清旧(超过 N 天):用户没要,留按钮手动 clear
+- 全文检索(在 system / user_preview 上 LIKE):不做 —— preview 是限长片段,搜不到是预期
+- 体积监控 / 看板:每次 list 看 `共 N / 限 limit` 即可,没做"快满了"提醒
+- detail 页"查看完整 prompt/response 链接":transform 路径要跳 `transformation_chapters.result_content` 详情(未来再做)
