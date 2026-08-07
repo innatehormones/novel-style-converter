@@ -10,5 +10,6 @@ pub mod upload;
 pub mod prompts;
 pub mod cleaner;
 pub mod startup_recovery;
+pub mod recorder;
 
 pub use error::{Error, Result};

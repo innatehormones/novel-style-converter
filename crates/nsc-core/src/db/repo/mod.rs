@@ -5,6 +5,7 @@ pub mod prompt;
 pub mod model_config;
 pub mod data_asset;
 pub mod batch;
+pub mod ai_call_log;
 
 pub use novel::{TransformationNovelRepo, UploadRepo};
 pub use chapter::ChapterRepo;
@@ -13,6 +14,7 @@ pub use prompt::PromptRepo;
 pub use model_config::ModelConfigRepo;
 pub use data_asset::DataAssetRepo;
 pub use batch::{BatchRepo, BatchStatusCount};
+pub use ai_call_log::{truncate_preview, AiCallLogRepo, PREVIEW_BYTES};
 pub mod workflow_result;
 
 pub use workflow_result::WorkflowResultRepo;

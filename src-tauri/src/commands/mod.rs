@@ -7,3 +7,4 @@ pub mod transformation_novels;
 pub mod transformations;
 pub mod uploads;
 pub mod workflows;
+pub mod ai_call_logs;

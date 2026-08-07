@@ -5,8 +5,8 @@ use crate::error::Result;
 
 use super::migrate::SCHEMAS;
 use super::repo::{
-    BatchRepo, ChapterRepo, DataAssetRepo, ModelConfigRepo, PromptRepo, TransformationChapterRepo,
-    TransformationNovelRepo, UploadRepo, WorkflowResultRepo,
+    AiCallLogRepo, BatchRepo, ChapterRepo, DataAssetRepo, ModelConfigRepo, PromptRepo,
+    TransformationChapterRepo, TransformationNovelRepo, UploadRepo, WorkflowResultRepo,
 };
 
 /// SQLite 连接包装。`open` / `open_in_memory` 都会按 `migrations/` 顺序跑未应用的 schema 版本。
@@ -55,6 +55,12 @@ impl Db {
     pub fn batches(&self) -> BatchRepo<'_> { BatchRepo { conn: &self.conn } }
     pub fn workflow_results(&self) -> WorkflowResultRepo<'_> {
         WorkflowResultRepo { conn: &self.conn }
+    }
+
+    /// AI 调用日志 repo —— 每次 LLM chat 调用落一行,详见 migrations/0018_ai_call_logs.sql。
+    /// recorder (Phase 2) 通过背景 task 调 insert;UI 看板调 list / get / clear。
+    pub fn ai_call_logs(&self) -> AiCallLogRepo<'_> {
+        AiCallLogRepo { conn: &self.conn }
     }
 
     pub fn seed_builtin_prompts(&self) -> Result<()> {

@@ -109,6 +109,10 @@ pub fn run() {
             commands::workflows::list_workflow_chapters,
             commands::workflows::stop_workflow,
             commands::workflows::retry_workflow_chapters,
+            commands::ai_call_logs::list_ai_call_logs,
+            commands::ai_call_logs::get_ai_call_log,
+            commands::ai_call_logs::clear_ai_call_logs,
+            commands::ai_call_logs::list_ai_call_logs_by_context,
             commands::workflows::list_chapter_workflow_results,
         ])
         .run(tauri::generate_context!())
