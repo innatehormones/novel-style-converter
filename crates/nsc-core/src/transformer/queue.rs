@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::models::{ModelConfig, TransformationChapter, TransformationNovel, TransformStatus};
 use crate::transformer::{
     DefaultTransformer, JobInfo, JobSpec, JobStatus, QueueSnapshot,
-    TransformRequest, Transformer,
+    ProviderCache, TransformRequest, Transformer,
 };
 
 use super::job::SharedQueue;
@@ -62,6 +62,7 @@ impl JobQueue {
         // 返回 Err)也 wait,保证主线程不死锁。
         let ready = Arc::new(Barrier::new(workers + 1));
 
+        // 每个 worker 独立的 provider cache —— 避免 provider 句柄跨线程引用计数竞争。
         for _ in 0..workers {
             let shared = shared.clone();
             let db_factory = db_factory.clone();
@@ -69,7 +70,10 @@ impl JobQueue {
             let rx = rx.clone();
             let notify = notify.clone();
             let ready = ready.clone();
+            // 每个 worker 内部独立的 provider cache —— 见 provider_cache.rs。
             std::thread::spawn(move || {
+                // worker-local cache; 生命周期与 worker 线程一致。
+                let cache = ProviderCache::new(provider_factory.clone());
                 let rt = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -95,8 +99,11 @@ impl JobQueue {
                             guard.recv().await
                         };
                         let Some(job) = job else { break };
-                        let ai: Box<dyn AiProvider> = (provider_factory)(&job.model_config);
-                        db = run_job(shared.clone(), db, ai, job, notify.clone()).await;
+                        // 按 model_config.id 取缓存的 provider + per-model semaphore。
+                        // cache miss 时通过 provider_factory 重建一次,后续 job 直接命中。
+                        let cached = cache.get_or_create(&job.model_config)
+                            .expect("provider cache get_or_create");
+                        db = run_job(shared.clone(), db, cached.provider, cached.sem, job, notify.clone()).await;
                     }
                 });
             });
@@ -169,7 +176,8 @@ enum DbWrite {
 async fn run_job(
     shared: super::job::Shared,
     db: Db,
-    ai: Box<dyn AiProvider>,
+    ai: Arc<dyn AiProvider>,
+    sem: Arc<tokio::sync::Semaphore>,
     job: JobSpec,
     notify: NotifySlot,
 ) -> Db {
@@ -202,7 +210,10 @@ async fn run_job(
         prompt: job.prompt.clone(),
         model_config: job.model_config.clone(),
     };
-    let tx: Box<dyn Transformer> = Box::new(DefaultTransformer { ai });
+    // per-model 并发限流:同一 model 的多个 job 共享一个 semaphore,
+    // 超过 `model_config.concurrency` 时本 job 在 await 处排队,permit drop 时自动释放。
+    let _permit = sem.acquire().await.expect("semaphore closed");
+    let tx: Box<dyn Transformer> = Box::new(DefaultTransformer { ai: ai.clone() });
     let ai_result = tx.transform(req).await;
 
     let final_state: Final = apply_result(&db, tid, chapter_title, chapter_idx, ai_result);

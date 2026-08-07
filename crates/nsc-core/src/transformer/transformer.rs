@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 
 use crate::ai::{AiProvider, ChatMessage, ChatRequest, Role};
@@ -7,7 +9,7 @@ use crate::prompts::{render, PromptContext};
 
 pub struct TransformRequest {
     pub chapter: Chapter,
-    /// 章节正文切片(由 queue.rs 从 uploads.original_text[byte_start..byte_end] 取出)。
+    /// 章节正文切片(由 `queue.rs` 从 `chapters.body` 取出)。
     pub chapter_content: String,
     pub novel_context: TransformationNovelContext,
     pub prompt: Prompt,
@@ -16,7 +18,7 @@ pub struct TransformRequest {
 
 pub struct TransformationNovelContext {
     pub transformation_novel: TransformationNovel,
-    /// 邻章正文片段 —— 同样由 queue.rs 切片后传入;Vec 元素是 (title, content) 对。
+    /// 邻章原文片段 —— 同样由 `queue.rs` 取出,Vec 元素是 `(title, content)` 对。
     pub prev_original: Vec<(String, String)>,
     pub prev_transformed: Vec<TransformationChapter>,
     pub next_original: Vec<(String, String)>,
@@ -36,8 +38,9 @@ pub trait Transformer: Send + Sync {
 }
 
 /// `Transformer` 的默认实现:渲染 prompt → 调 `AiProvider::chat` → 透传结果。
-/// **owns** `Box<dyn AiProvider>`(不借用),这样能装进 `Box<dyn Transformer>`。
-pub struct DefaultTransformer { pub ai: Box<dyn AiProvider> }
+/// **owns** `Arc<dyn AiProvider>`,这样能装进 `Box<dyn Transformer>` 且与 worker 内部
+/// `ProviderCache` 共享 provider 句柄(避免每次 job 重建 reqwest 客户端)。
+pub struct DefaultTransformer { pub ai: Arc<dyn AiProvider> }
 
 #[async_trait]
 impl Transformer for DefaultTransformer {

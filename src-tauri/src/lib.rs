@@ -20,7 +20,6 @@ pub fn run() {
         let _ = std::fs::create_dir_all(parent);
     }
     let db = Arc::new(Mutex::new(Db::open(&path).expect("failed to open db")));
-    db.lock().expect("seed lock").seed_default_model_from_env().expect("seed default model from env");
     nsc_core::startup_recovery::run(&db.lock().expect("recovery lock").conn)
         .expect("startup safe-recovery failed");
 
@@ -63,8 +62,10 @@ pub fn run() {
         .setup(|_app| Ok(()))
         .invoke_handler(tauri::generate_handler![
             commands::models::list_models,
+            commands::models::list_models_including_archived,
             commands::models::upsert_model,
             commands::models::delete_model,
+            commands::models::restore_model,
             commands::models::test_model,
             commands::uploads::list_uploads,
             commands::uploads::upload_file,

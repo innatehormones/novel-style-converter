@@ -2,7 +2,6 @@ use std::path::Path;
 use rusqlite::{Connection, OpenFlags};
 
 use crate::error::Result;
-use crate::models::default_from_env;
 
 use super::migrate::SCHEMAS;
 use super::repo::{
@@ -62,12 +61,7 @@ impl Db {
         self.prompts().seed_builtin_if_empty()
     }
 
-    /// 从环境变量读兜底模型并写入空表。表非空则跳过,任一 env 缺失则跳过(不报错)。
-    pub fn seed_default_model_from_env(&self) -> Result<Option<i64>> {
-        let Some(seed) = default_from_env() else { return Ok(None) };
-        self.model_configs().seed_default_if_empty(&seed)
-    }
-
+    
     /// 返回已应用的 schema 版本列表(按 version 升序)。供迁移测试和
     /// 升级诊断用;生产代码不需要直接关心。
     /// 排序按 `LENGTH(version), version`,让 "v10" 排在 "v9" 之后

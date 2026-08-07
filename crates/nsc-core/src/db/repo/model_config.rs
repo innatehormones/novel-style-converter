@@ -19,19 +19,27 @@ impl<'a> ModelConfigRepo<'a> {
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn list(&self) -> Result<Vec<ModelConfig>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, base_url, api_key, model, max_tokens, temperature, concurrency \
-             FROM model_configs ORDER BY id DESC"
-        )?;
+    /// 默认列表:仅返回 `archived = 0` 的活动行(UI 主表格)。
+    /// `include_archived = true` 时同时返回归档行(用于“显示已归档”切换)。
+    pub fn list(&self, include_archived: bool) -> Result<Vec<ModelConfig>> {
+        let sql = if include_archived {
+            "SELECT id, name, base_url, api_key, model, max_tokens, temperature, concurrency, archived \
+             FROM model_configs ORDER BY archived ASC, id DESC"
+        } else {
+            "SELECT id, name, base_url, api_key, model, max_tokens, temperature, concurrency, archived \
+             FROM model_configs WHERE archived = 0 ORDER BY id DESC"
+        };
+        let mut stmt = self.conn.prepare(sql)?;
         let rows = stmt.query_map([], |row| from_row(row))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
+    /// 按 id 查单行 —— **不**过滤 archived。`BatchScheduler` / `transformation_chapters`
+    /// 读 path 必须能拿到归档行,否则历史 tc 引用解析会断。
     pub fn get(&self, id: i64) -> Result<Option<ModelConfig>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, base_url, api_key, model, max_tokens, temperature, concurrency \
-             FROM model_configs WHERE id = ?1"
+            "SELECT id, name, base_url, api_key, model, max_tokens, temperature, concurrency, archived \
+             FROM model_configs WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
@@ -40,6 +48,7 @@ impl<'a> ModelConfigRepo<'a> {
     }
 
     pub fn update(&self, m: &ModelConfig) -> Result<()> {
+        // update 不动 archived(软删只能通过 archive()/restore())。
         self.conn.execute(
             "UPDATE model_configs SET \
              name=?2, base_url=?3, api_key=?4, model=?5, \
@@ -53,17 +62,25 @@ impl<'a> ModelConfigRepo<'a> {
         Ok(())
     }
 
-    pub fn delete(&self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM model_configs WHERE id = ?1", params![id])?;
+    /// 软删:`archived = 1` + `api_key = ''` —— 后者保证密钥不随归档条目被任何 dump 出来。
+    /// 行保留以便 `transformation_chapters.model_config_id` / `transformation_novels.default_model_config_id`
+    /// 仍能查到历史 model 元数据(name / base_url / model / concurrency)做展示。
+    pub fn archive(&self, id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE model_configs SET archived = 1, api_key = '' WHERE id = ?1",
+            params![id],
+        )?;
         Ok(())
     }
 
-    /// 表为空时插入一条种子记录;表非空(已有用户配置)时跳过,不报错不覆盖。
-    pub fn seed_default_if_empty(&self, seed: &NewModelConfig) -> Result<Option<i64>> {
-        let n: i64 = self.conn.query_row("SELECT COUNT(*) FROM model_configs", [], |r| r.get(0))?;
-        if n > 0 { return Ok(None); }
-        let id = self.insert(seed)?;
-        Ok(Some(id))
+    /// 取消软删:恢复 `archived = 0`。注意:被抹掉的 `api_key` **不会** 自动恢复,
+    /// 用户需要重新编辑并保存。
+    pub fn restore(&self, id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE model_configs SET archived = 0 WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
     }
 }
 
@@ -77,5 +94,6 @@ fn from_row(row: &Row) -> rusqlite::Result<ModelConfig> {
         max_tokens: row.get(5)?,
         temperature: row.get(6)?,
         concurrency: row.get(7)?,
+        archived: row.get(8)?,
     })
 }

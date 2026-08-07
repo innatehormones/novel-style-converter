@@ -10,7 +10,7 @@ pub use novel::{NewTransformationNovel, NewUpload, TransformationNovel, Upload};
 pub use chapter::{Chapter, NewChapter};
 pub use transformation::{NewTransformationChapter, TransformationChapter, TransformMode, TransformStatus};
 pub use prompt::{Prompt, PromptKind};
-pub use model_config::{default_from_env, ModelConfig, NewModelConfig};
+pub use model_config::{ModelConfig, NewModelConfig};
 pub use data_asset::{DataAsset, NewDataAsset};
 pub use batch::{Batch, BatchStatus, NewBatch, OnFailurePolicy, ResumeAction};
 pub mod workflow_result;
