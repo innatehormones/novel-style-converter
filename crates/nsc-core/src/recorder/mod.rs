@@ -23,6 +23,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
 
 use tokio::sync::mpsc;
 
@@ -114,7 +115,12 @@ impl AiCallRecorder for ChannelRecorder {
 }
 
 /// 启动 background writer —— 监听 channel,逐条落库。
-/// 返回 `JoinHandle`,app 退出时 `handle.abort()`。
+///
+/// **不在调用方线程上 spawn tokio task**,而是自己 `std::thread::spawn` + 内置
+/// `tokio::runtime::Builder::new_current_thread()`,跟 `JobQueue` worker 同一种
+/// 解耦风格 —— 调用方是否在 tokio runtime 里、有没有 reactor,都不影响 recorder 工作。
+/// 这点很重要:`src-tauri/lib.rs::run()` 是 builder 同步阶段,.run() 之前还没有 tokio
+/// reactor,直接 `tokio::spawn` 会 panic `there is no reactor running`。
 ///
 /// DB handle 不在 hot path 出现,完全在 background task 内按路径重开:
 /// 这样 transformer / test_model 不持有 DB,跨线程安全 + 没有 Send/Sync 摩擦。
@@ -122,9 +128,19 @@ pub fn spawn_writer(
     db_path: PathBuf,
     recorder: ChannelRecorder,
     mut rx: mpsc::Receiver<AiCallEvent>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        run_writer(db_path, &mut rx, &recorder).await;
+) -> std::thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("[recorder] failed to build tokio runtime: {e}");
+                return;
+            }
+        };
+        rt.block_on(run_writer(db_path, &mut rx, &recorder));
     })
 }
 

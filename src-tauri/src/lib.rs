@@ -24,11 +24,14 @@ pub fn run() {
     nsc_core::startup_recovery::run(&db.lock().expect("recovery lock").conn)
         .expect("startup safe-recovery failed");
 
-    // ── AI 调用 recorder ────────────────────────────────────────────
-    // Channel 容量 4096;满时 drop new(不阻塞 hot path)。writer 任务按 db_path 重开
+    // ── AI 调用 recorder ───────────────────────────────────────────────────────────────
+    // Channel 容量 4096;满时 drop new(不阻塞 hot path)。Writer 任务按 db_path 重开
     // DB 落库,worker 线程不持 DB 句柄,避免跨线程 Send/Sync 摩擦。
-    // handle 留着 —— app 退出时 tokio runtime 自然结束 writer(通道 drop → recv → break);
-    // 不主动 abort,让最后几行日志能落库。
+    // spawn_writer 自己 std::thread::spawn + 内建 tokio current_thread runtime,
+    // 不依赖调用方线程是否有 tokio reactor(本 run() 是 builder 同步阶段,.run() 之前
+    // 没有 reactor,直接 tokio::spawn 会 panic "there is no reactor running")。
+    // handle 留着 —— app 退出时 sender 被 drop → channel 关闭 → recv 返回 None
+    // → loop break,最后几行日志能落完。不主动 abort,避免截断。
     let (recorder, rx) = ChannelRecorder::new(4096);
     let _writer_handle = spawn_writer(path.clone(), recorder.clone(), rx);
     let recorder: Arc<dyn AiCallRecorder> = Arc::new(recorder);

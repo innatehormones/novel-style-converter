@@ -304,14 +304,14 @@ cargo test -p nsc-core runs an ignored placeholder per file. Old tests reference
 #### 5. 启动 lifecycle
 - `ChannelRecorder::new(4096)` 创建 channel + recorder,后台 writer 任务从通道拿 event 落库
 - channel 容量 4096 远超 worker 并发上限(默认 2 worker + 1 test_model),饱和概率极低
-- `JoinHandle` 留着不用:app 退出 → tokio runtime 自然结束 → channel drop → writer recv 返回 None → loop break,最后几行日志能落完
-- **不**主动 `abort()`,避免截断最后几行
+- `spawn_writer` 内部 `std::thread::spawn` + 内建 `tokio::runtime::Builder::new_current_thread()`,跟 `JobQueue` worker 同一种解耦风格 —— 不依赖调用方线程是否有 tokio reactor(这点很重要:`src-tauri/lib.rs::run()` 是 builder 同步阶段,直接 `tokio::spawn` 会 panic "there is no reactor running")
+- `std::thread::JoinHandle` 留着不用:app 退出 → sender 被 drop → channel 关闭 → writer recv 返回 None → loop break → runtime drop → thread 自然退出,最后几行日志能落完
+- **不**主动 abort,避免截断最后几行
 
 #### 6. context_id 语义
 - transformer 路径:`context_type=transformation_chapter` + `context_id=tid`
-- `transformation_chapters` 行可能后续被删,但日志行不受影响 —— 反查"哪个 tc 行调过 AI"仍能查到(用 `list_ai_call_logs_by_context`)
-- test_model 路径:无 context_type / context_id(单次连通性测试,无业务对象)
 - `transformation_chapters` 行可能后续被删,但日志行不受影响 —— 当前未提供"按 tc id 反查 AI 调用"接口,如需可后续单独加
+- test_model 路径:无 context_type / context_id(单次连通性测试,无业务对象)
 ### What is NOT done
 
 - **transformer 集成单测**:需要 mock `AiProvider` + mock `AiCallRecorder`(`mockall` / 手写 test double),投入产出比低。当前依赖 recorder 单测 + repo 单测 + 手动 dev 验证。
