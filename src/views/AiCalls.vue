@@ -108,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { onMounted, onUnmounted, reactive, ref } from 'vue';
 import Button from '../components/ui/Button.vue';
 import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
@@ -151,6 +151,17 @@ const columns = [
   { key: 'actions', title: '操作', width: '90px', type: 'actions' as const },
 ];
 
+let aiCallPollHandle: number | null = null;
+function startAiCallPoll() {
+  if (aiCallPollHandle !== null) return;
+  aiCallPollHandle = window.setInterval(() => { void reload(); }, 3000);
+}
+function stopAiCallPoll() {
+  if (aiCallPollHandle !== null) {
+    window.clearInterval(aiCallPollHandle);
+    aiCallPollHandle = null;
+  }
+}
 async function reload() {
   loading.value = true;
   error.value = null;
@@ -214,7 +225,8 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
-onMounted(() => void reload());
+onMounted(() => { startAiCallPoll(); void reload(); });
+onUnmounted(() => stopAiCallPoll());
 </script>
 
 <style scoped>

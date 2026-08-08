@@ -266,6 +266,21 @@ pub async fn retry_workflow_chapters(
 }
 
 #[tauri::command]
+pub async fn start_workflow(
+    db: State<'_, Arc<Mutex<Db>>>,
+    batch_id: i64,
+    scheduler: State<'_, Arc<BatchScheduler>>,
+) -> Result<WorkflowSummary, String> {
+    let sched = scheduler.inner().clone();
+    let res = tokio::task::spawn_blocking(move || sched.start_workflow(batch_id))
+        .await
+        .map_err(|e| format!("start_workflow join: {e}"))?
+        .map_err(|e| e.to_string())?;
+    let db = db.lock().map_err(|e| e.to_string())?;
+    Ok(to_summary(&db, &res))
+}
+
+#[tauri::command]
 pub fn list_transformation_source_chapters(
     db: State<'_, Arc<Mutex<Db>>>,
     tn_id: i64,

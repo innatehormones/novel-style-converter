@@ -36,10 +36,15 @@ pub struct TransformationNovel {
     pub data_asset_id: i64,
     pub title: String,
     pub created_at: DateTime<Utc>,
+    /// 用户填的备注。空串等价于"无备注"。
+    /// UI 在 TN 详情页头部只读展示,目前没有编辑入口。
+    pub note: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct NewTransformationNovel {
     pub data_asset_id: i64,
     pub title: String,
+    /// 见 TransformationNovel.note。空串等价于"无备注"。
+    pub note: String,
 }

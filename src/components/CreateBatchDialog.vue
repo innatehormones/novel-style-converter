@@ -39,6 +39,32 @@
       给 LLM 的上下文窗口大小（章）。一般只设"前文转换" 1~3,
       让模型参考前面已经转换好的章节学文风;原文带多了浪费 token。
     </div>
+    <div class="row">
+      <label>失败策略 *</label>
+      <div class="policy-options">
+        <label class="policy-opt">
+          <input type="radio" v-model="onFailurePolicy" value="pause_and_review" />
+          <span class="policy-label">
+            <strong>暂停与审阅</strong>
+            <small>失败时停下来,等你决定</small>
+          </span>
+        </label>
+        <label class="policy-opt">
+          <input type="radio" v-model="onFailurePolicy" value="skip_failed" />
+          <span class="policy-label">
+            <strong>跳过问题章节</strong>
+            <small>失败章节跳过,继续派下一章</small>
+          </span>
+        </label>
+        <label class="policy-opt">
+          <input type="radio" v-model="onFailurePolicy" value="terminate" />
+          <span class="policy-label">
+            <strong>终止工作流</strong>
+            <small>失败时剩余章节全部取消</small>
+          </span>
+        </label>
+      </div>
+    </div>
     <div v-if="error" class="error">{{ error }}</div>
     <div class="hint">
       默认从转换小说继承 prompt / model;此处覆盖后仅作用于本次工作流。
@@ -50,7 +76,7 @@
         :loading="submitting"
         :disabled="!canSubmit"
         @click="onSubmit"
-      >⚙ 创建并运行</Button>
+      >⚙ 创建</Button>
     </template>
   </Dialog>
 </template>
@@ -83,6 +109,7 @@ const label = ref('');
 const ctxPrevOriginal = ref<number | null>(0);
 const ctxPrevTransformed = ref<number | null>(0);
 const ctxNextOriginal = ref<number | null>(0);
+const onFailurePolicy = ref<CreateWorkflowInput['on_failure_policy']>('pause_and_review');
 const submitting = ref(false);
 const error = ref<string | null>(null);
 
@@ -112,6 +139,7 @@ watch(open, async (v) => {
   ctxPrevOriginal.value = 0;
   ctxPrevTransformed.value = 0;
   ctxNextOriginal.value = 0;
+  onFailurePolicy.value = 'pause_and_review';
   try {
     const [pRes, mRes] = await Promise.all([listPrompts(), listModels()]);
     prompts.value = pRes;
@@ -143,6 +171,7 @@ async function onSubmit() {
       ctx_prev_original: ctxPrevOriginal.value ?? 0,
       ctx_prev_transformed: ctxPrevTransformed.value ?? 0,
       ctx_next_original: ctxNextOriginal.value ?? 0,
+      on_failure_policy: onFailurePolicy.value,
     });
     open.value = false;
   } catch (e: unknown) {
@@ -179,4 +208,9 @@ async function onSubmit() {
 .error { color: var(--danger); font-size: 12px; margin-top: 8px; }
 .hint { color: var(--text-muted); font-size: 12px; margin-top: 8px; line-height: 1.5; }
 .ctx-hint { color: var(--text-muted); font-size: 11px; margin-top: -4px; margin-bottom: 12px; line-height: 1.5; }
+.policy-options { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.policy-opt { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 13px; }
+.policy-opt input[type='radio'] { margin-top: 4px; }
+.policy-label { display: flex; flex-direction: column; gap: 2px; }
+.policy-label small { color: var(--text-muted); font-size: 11px; }
 </style>

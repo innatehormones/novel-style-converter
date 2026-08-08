@@ -241,6 +241,14 @@ export interface ChapterWorkflowResultRow {
 }
 
 /** `create_workflow` 入参:后端 snake_case DTO,所有字段必填(spec §5.1)。 */
+/**
+ * `create_workflow` 入参:后端 snake_case DTO,所有字段必填(spec §5.1)。
+ *
+ * `on_failure_policy` 是章节失败时的处理策略:
+ * - `pause_and_review`: 失败时 batch 转 Paused,等用户在 modal 里手动决策(重试/跳过/终止)
+ * - `terminate`:        失败时同 batch 后续章节 cancelled + batch 转 Terminated
+ * - `skip_failed`:      失败时该章标 Skipped,继续派下一章(batch 留 Running)
+ */
 export interface CreateWorkflowInput {
   tn_id: number;
   label: string | null;
@@ -251,6 +259,7 @@ export interface CreateWorkflowInput {
   ctx_prev_original: number;
   ctx_prev_transformed: number;
   ctx_next_original: number;
+  on_failure_policy: 'pause_and_review' | 'terminate' | 'skip_failed';
 }
 
 /**

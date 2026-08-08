@@ -146,7 +146,7 @@ impl JobQueue {
     /// 内部通过 unbounded mpsc 派发给 worker;调用方需保证 `JobSpec` 字段齐全
     /// (job 字段由 `transformation_chapters` 行反查得到,通常在 command 层组装)。
     pub fn enqueue(&self, job: JobSpec) -> i64 {
-        let id = job.transformation_id;
+        let id = job.tc_id;
         self.tx.send(job).expect("queue alive");
         Self::fire(&self.notify, id, false, None, String::new());
         id
@@ -195,7 +195,7 @@ async fn run_job(
     notify: NotifySlot,
     recorder: Arc<dyn AiCallRecorder>,
 ) -> Db {
-    let tid = job.transformation_id;
+    let tid = job.tc_id;
     let chapter_title = job.chapter.title.clone();
     let chapter_idx = job.chapter.idx;
 
@@ -204,7 +204,7 @@ async fn run_job(
         Ok(p) => p,
         Err(err) => {
             let _ = db.transformation_chapters().mark_failed(tid, err.clone());
-            push_failed(&shared, tid, String::new(), 0, err.clone()).await;
+            push_failed(&shared, tid, job.tn_id, String::new(), 0, err.clone()).await;
             JobQueue::fire(&notify, tid, false, Some(err), String::new());
             return db;
         }
@@ -213,7 +213,7 @@ async fn run_job(
     let _ = db.transformation_chapters().mark_running(tid);
 
     let req = TransformRequest {
-        transformation_id: tid,
+        transformation_id: job.tn_id,
         chapter: prep.chapter,
         chapter_content: prep.chapter_content,
         novel_context: crate::transformer::TransformationNovelContext {
@@ -236,12 +236,12 @@ async fn run_job(
     match final_state.db_write {
         DbWrite::Done { tokens_in, tokens_out } => {
             push_running(
-                &shared, tid,
+                &shared, tid, job.tn_id,
                 final_state.chapter_title.clone(),
                 final_state.chapter_idx,
             ).await;
             push_done(
-                &shared, tid,
+                &shared, tid, job.tn_id,
                 final_state.chapter_title,
                 final_state.chapter_idx,
                 tokens_in, tokens_out,
@@ -250,7 +250,7 @@ async fn run_job(
         }
         DbWrite::Failed { err } => {
             push_failed(
-                &shared, tid,
+                &shared, tid, job.tn_id,
                 final_state.chapter_title,
                 final_state.chapter_idx,
                 err.clone(),
@@ -301,7 +301,7 @@ fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
             let list = db.transformation_chapters().list_by_chapter(ch.id)
                 .map_err(|e| e.to_string())?;
             if let Some(t) = list.into_iter().find(|t| {
-                t.transformation_novel_id == job.transformation_id
+                t.transformation_novel_id == job.tn_id
                     && t.prompt_id == job.prompt.id
                     && t.model_config_id == job.model_config.id
                     && matches!(t.status, TransformStatus::Done)
@@ -323,7 +323,7 @@ fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
 
     let _ = idx;
     Ok(Prep {
-        transformation_novel: db.transformation_novels().get(job.transformation_id).map_err(|e| e.to_string())?
+        transformation_novel: db.transformation_novels().get(job.tn_id).map_err(|e| e.to_string())?
             .ok_or_else(|| "tn missing".to_string())?,
         chapter,
         chapter_content,
@@ -371,12 +371,13 @@ fn apply_result(
 async fn push_running(
     shared: &super::job::Shared,
     tid: i64,
+    tn_id: i64,
     chapter_title: String,
     chapter_idx: i32,
 ) {
     let mut s = shared.inner.lock().await;
     s.running.push(JobInfo {
-        transformation_id: tid,
+        tc_id: tid, tn_id: tn_id,
         chapter_title, chapter_idx,
         status: JobStatus::Running,
         error: None, tokens_in: None, tokens_out: None,
@@ -386,13 +387,14 @@ async fn push_running(
 async fn push_done(
     shared: &super::job::Shared,
     tid: i64,
+    tn_id: i64,
     chapter_title: String,
     chapter_idx: i32,
     tokens_in: i32, tokens_out: i32,
 ) {
     let mut s = shared.inner.lock().await;
     s.done.push(JobInfo {
-        transformation_id: tid,
+        tc_id: tid, tn_id: tn_id,
         chapter_title, chapter_idx,
         status: JobStatus::Done,
         error: None, tokens_in: Some(tokens_in), tokens_out: Some(tokens_out),
@@ -402,13 +404,14 @@ async fn push_done(
 async fn push_failed(
     shared: &super::job::Shared,
     tid: i64,
+    tn_id: i64,
     chapter_title: String,
     chapter_idx: i32,
     err: String,
 ) {
     let mut s = shared.inner.lock().await;
     s.failed.push(JobInfo {
-        transformation_id: tid,
+        tc_id: tid, tn_id: tn_id,
         chapter_title, chapter_idx,
         status: JobStatus::Failed,
         error: Some(err),

@@ -14,23 +14,32 @@ pub struct TransformationNovelSummary {
     pub title: String,
     pub created_at: String,
     pub chapters_count: i64,
+    /// 用户填的备注。空串等价于"无备注"。详情页头部标题下面只读展示。
+    pub note: String,
 }
 
 /// 创建 transformation_novel 的入参。inner DTO 字段保持 snake_case
-/// (与 Tauri 的 camelCase outer 自动翻译区分开)。
+/// (与 Tauri 的 camelCase outer 自动翻译区分开)。`note` 允许缺省或 `null`
+/// —— 都映射为空串,旧调用方/迁移期 payload 兼容。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CreateTransformationNovelPayload {
     pub data_asset_id: i64,
     pub title: String,
+    #[serde(default)]
+    pub note: String,
 }
 
-/// 更新 transformation_novel 的入参。
+/// 更新 transformation_novel 的入参。`note` 允许缺省或 `null`,
+/// 都映射为空串(清除已有备注)。目前 UI 没有编辑入口,前端不调用此命令更新 note,
+/// 后端仍支持以备未来。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct UpdateTransformationNovelPayload {
     pub id: i64,
     pub title: String,
+    #[serde(default)]
+    pub note: String,
 }
 
 fn to_summary(db: &Db, n: &TransformationNovel) -> TransformationNovelSummary {
@@ -45,6 +54,7 @@ fn to_summary(db: &Db, n: &TransformationNovel) -> TransformationNovelSummary {
         title: n.title.clone(),
         created_at: n.created_at.to_rfc3339(),
         chapters_count,
+        note: n.note.clone(),
     }
 }
 
@@ -89,6 +99,7 @@ pub fn create_transformation_novel(
         .insert(&NewTransformationNovel {
             data_asset_id: payload.data_asset_id,
             title: title.to_string(),
+            note: payload.note,
         })
         .map_err(|e| e.to_string())
 }
@@ -112,6 +123,7 @@ pub fn update_transformation_novel(
         id: cur.id,
         data_asset_id: cur.data_asset_id,
         title: title.to_string(),
+        note: payload.note,
         created_at: cur.created_at,
     };
     db.transformation_novels().update(&next).map_err(|e| e.to_string())

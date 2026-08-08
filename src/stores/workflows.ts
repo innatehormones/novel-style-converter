@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import {
-  createWorkflow, listWorkflows, getWorkflow, stopWorkflow,
+  createWorkflow, listWorkflows, getWorkflow, startWorkflow, stopWorkflow,
   retryWorkflowChapters, listWorkflowChapters, listTransformationSourceChapters,
   listChapterWorkflowResults,
 } from '../ipc/commands';
@@ -31,7 +31,7 @@ export const useWorkflowsStore = defineStore('workflows', () => {
     resultsByTnChapter.value.set(`${tnId}:${chapterId}`,
       await listChapterWorkflowResults(tnId, chapterId));
   }
-  async function createAndRun(payload: CreateWorkflowInput): Promise<WorkflowSummary> {
+  async function create(payload: CreateWorkflowInput): Promise<WorkflowSummary> {
     loading.value = true;
     try {
       const w = await createWorkflow(payload);
@@ -40,6 +40,11 @@ export const useWorkflowsStore = defineStore('workflows', () => {
       byTn.value.set(w.tn_id, list);
       return w;
     } finally { loading.value = false; }
+  }
+  async function start(batchId: number) {
+    const w = await startWorkflow(batchId);
+    await refresh(batchId);
+    return w;
   }
   async function refresh(batchId: number) {
     const w = await getWorkflow(batchId);
@@ -62,6 +67,6 @@ export const useWorkflowsStore = defineStore('workflows', () => {
   return {
     byTn, chaptersByBatch, sourcesByTn, resultsByTnChapter,
     loading, error, loadSources, loadByTn, loadChapters, loadResultsForChapter,
-    createAndRun, refresh, stop, retry,
+    create, start, refresh, stop, retry,
   };
 });

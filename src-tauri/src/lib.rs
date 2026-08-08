@@ -120,6 +120,7 @@ pub fn run() {
             commands::prompts::count_prompt_usage,
             commands::workflows::list_transformation_source_chapters,
             commands::workflows::create_workflow,
+            commands::workflows::start_workflow,
             commands::workflows::list_workflows,
             commands::workflows::get_workflow,
             commands::workflows::list_workflow_chapters,

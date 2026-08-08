@@ -15,7 +15,7 @@ A single upload can produce many data assets, and the data assets survive the up
 | Model (LLM 配置) | ✅ 完成 | 软删 + 密钥必抹 + per-model 并发 + ProviderCache;`seed_default_model_from_env` 静默兜底移除。详细见 "Model refactor — completed" |
 | Prompts (提示词) | ✅ 完成 | enum 合并 (`TransformMode` → `PromptKind`);render 去 Result;软删;`prev_transformed` 真接 `workflow_result_chapters.content` |
 | AI call logs (调用日志) | ✅ 完成 + 收尾 | 表 + recorder + UI 看板;dead chain (`list_ai_call_logs_by_context`) 全删;`let _ = PromptKind::Compress` 遮掩代码删;**启动 panic 修复** —— `spawn_writer` 改 `std::thread::spawn` + 内建 tokio runtime |
-| Workflows (转换 / batch) | ⏳ 计划已拍板,0 代码改动 | 见 "Workflows — 待重构" 章节;**实际页面操作未跑通**(用户自述) |
+| Workflows (转换 / batch) | ✅ 完成 | `on_failure_policy` 三策略真正生效(PauseAndReview/Terminate/SkipFailed);`create_workflow` 不再自动 dispatch,创建后 batch=pending 等用户点启动;`transformation_novels.note` 加备注字段;`safe_stop_on_dispatch_failure` + `BatchOverrides` + `create_batch` + `dispatch_batch` 删除(死代码) |
 
 **核心架构原则**(贯穿所有已重构模块):
 
@@ -458,44 +458,41 @@ A single upload can produce many data assets, and the data assets survive the up
 
 
 
-## Workflows (转换 / batch) — 待重构
+## Workflows refactor — completed
 
-**状态**: 计划已拍板,0 代码改动。**实际页面操作未跑通**(用户自述) —— 之前 panic + 启动问题修完后才能手动测。
+两轮重构合并。
 
-### 当前结构
-- `src-tauri/src/commands/workflows.rs` (12.5KB): 8 个 IPC 命令 + 4 处内联 SQL + 2 个手写 status parser + 4 个聚合结构体 + 1 个 CONTENT_PREVIEW_CHARS 常量
-- `crates/nsc-core/src/models/{batch,transformation}.rs`: 已有 `BatchStatus` / `TransformStatus` enum + 私有 `str_to_status` / `str_to_policy` helper(repo 内部用,不能改)
-- `crates/nsc-core/src/db/repo/{batch,workflow_result,novel}.rs`: 现有 `BatchRepo::get/list_by_tn/set_status` 等,但 4 处跨表 join 还在 commands/workflows.rs 里
+### Round 1:default_* 删除 + on_failure_policy 真生效
 
-### Scope(下一步要做的)
-1. **`BatchStatus` / `TransformStatus` 加 `TryFrom<&str>`** —— 取代 commands/workflows.rs 里手写的 `parse_batch_status` / `parse_transform_status`(7+6 行 match)。serde `rename_all = "snake_case"` 已配置,可直接对接
-2. **4 个 IPC 聚合类型搬到 `models/workflow.rs`(新文件)**:`WorkflowSummary` / `WorkflowChapterRow` / `SourceChapterRow` / `ChapterWorkflowResultRow`。字段名是 IPC 契约,前端已经在用,保持完全兼容
-3. **4 处内联 SQL 搬到 typed repos**:
-   - `BatchRepo::summary_counts(batch_id)` → 取代 `to_summary` count 查询(transformation_chapters 聚合)
-   - `BatchRepo::list_chapters_with_results(batch_id)` → 取代 `list_workflow_chapters`(transformation_chapters + chapters + workflow_result_chapters 三表 join)
-   - `WorkflowResultRepo::list_for_chapter(tn_id, chapter_id)` → 取代 `list_chapter_workflow_results`(batches + workflow_results + workflow_result_chapters + transformation_chapters 四表 join)
-   - `TransformationNovelRepo::list_source_chapters(tn_id)` → 取代 `list_transformation_source_chapters`(chapters + 子查询 workflow_result_chapters count)
-4. **小 helper**:`fn lock_db(state: State<'_, Arc<Mutex<Db>>>) -> Result<Db, String>` + 在 BatchRepo 加 `get_required(id) -> Result<Batch, String>`(不存在 → `"batch X 不存在"`)
-5. **保留 IPC 签名稳定** —— 前端不动
+**改了什么**
+- `transformation_novels` 三列 `default_*` 删除(migration 0019 重建表)。原因:UI 在 TransformationNovelDialog 收集后写入,但唯一在用的 entry path `create_workflow` 不读 TN 默认值;字段只贡献复杂度不贡献功能。
+- `create_batch` / `dispatch_batch` / `BatchOverrides` 三个 entity 删除(零调用方 + 依赖 default_*)。
+- `on_chapter_failed` 改按 `batches.on_failure_policy` 三分支:
+  - `PauseAndReview`:tc→failed,batch→paused(ended_at=NOW),**不 advance**。等用户用 `resume` 决策。
+  - `Terminate`:tc→failed + 同 batch 后续 pending→cancelled,batch→terminated,**不 advance**。
+  - `SkipFailed`:tc→skipped + `advance_batch` 派下一章(batch 保持 running)。
+- `create_workflow` 把硬编码 `'pause_and_review'` 改成 `policy_str(spec.on_failure_policy)`;新增 `spec.on_failure_policy: OnFailurePolicy` 必填字段。
+- IPC `CreateWorkflowPayload` 加 `on_failure_policy: String`,前端按 snake_case 字符串发(`pause_and_review` / `terminate` / `skip_failed`)。
+- `resume` 的 Retry 分支从 tn.default_* 改读 tc 行固化好的 prompt_id / model_config_id(对齐 advance_batch 派下一章)。
 
-### 不动 / 保留的
-- `BatchScheduler` (`crates/nsc-core/src/transformer/batch_scheduler.rs`) 内的内联 SQL —— 那是事务性 multi-table atomic ops(创建 batch + 创建空 result set + 批量插 tc 行),repo 抽象不好套;留给后续单独评估
-- 前端 `stores/workflows.ts` / `views/TransformationNovelDetail.vue` 等 —— IPC 契约不变
-- `batches.on_failure_policy` 字段、3 种 policy 语义 —— 跟转换流程强耦合,workflows 重构范围之外
+**保留不动**
+- `safe_stop_on_dispatch_failure`(Round 1 中后期删除:create_workflow 不再 dispatch,函数变 dead code)。
+- `BatchScheduler` 内的内联 SQL(事务性 multi-table atomic ops,repo 抽象不好套)。
+- 前端 `stores/workflows.ts` / `views/TransformationNovelDetail.vue` 当时未动。
 
-### 待验证(用户那边测)
-- `create_workflow` 入口:`tn_id` / `chapter_ids[]` / `prompt_id` / `model_config_id` / `mode` / 三个 ctx 窗口数 —— 现有表单是否能完整提交
-- `stop_workflow` / `retry_workflow_chapters`:scheduler 接口 + repo 重写后,semantics 是否一致
-- `list_chapter_workflow_results`:4 表 join 搬到 `WorkflowResultRepo::list_for_chapter` 后,行序/字段是否一致
-- 失败路径:prompt_id 找不到 / model_config_id 已软删 / chapter_id 不在 tn 的 data_asset 范围 —— 各报什么错
+### Round 2:transformation_novels.note + 创建工作流不自动启动
 
-### Design intent(沿用全局原则)
-- **不**为求 repo 一致性而把 `BatchScheduler` 的事务 SQL 也拆出去 —— 那是 atomicity 边界,拆了反而引入新的并发问题
-- **不**为减少一个文件而把 4 个聚合类型塞进 `models/batch.rs` —— 它们跨 batch / transformation_chapters / workflow_result_chapters 三表,独立文件 `workflow.rs` 更清晰
-- IPC 字段名一字不改:前端 `WorkflowSummary` / `WorkflowChapterRow` 等已经引用 `tc_id` / `chapter_id` / `chapter_idx` 等 snake_case,改名 = 静默破坏
-- `TryFrom<&str>` 不引入 `serde_plain` 等额外 crate,手写 match 跟现有 `str_to_status` 几乎一致,避免依赖爆炸
+**改了什么**
+- `transformation_novels` 加 `note TEXT NOT NULL DEFAULT ''`(migration 0020)。用户在新建转换小说弹窗里填一段备注(用途、风格目标、注意事项等),UI 在 TN 详情页头部标题下面只读展示,暂无编辑入口。
+- `create_workflow` 行为变更:不再自动 dispatch,写入 `status='pending'` + `started_at=NULL`。`workflow_results` / 空 `workflow_result_chapters` 槽照建(后续启动时无需再扩列)。
+- 新增 `BatchScheduler::start_workflow(batch_id)` + IPC `start_workflow`:仅当 batch.status=Pending 时把 status→running、started_at=NOW,然后 `advance_batch` 派首章。dispatch 失败时 remaining pending tc→failed、batch→stopped(独立 safe-stop,不沿用 `safe_stop_on_dispatch_failure`)。
 
-### Open questions(等用户测时反馈)
-- `WorkflowChapterRow.content_preview`: 来自 `wrc.content` 前 80 chars。如果某章特别长,要不要分页 / 折叠?
-- `list_workflow_chapters` 当前没分页 —— batch 内 chapter 数 = 全本 chapter 数(可能上千),要不要加 limit / offset?
-- `list_chapter_workflow_results` 返回历史所有 batch 对该 chapter 的结果,要不要按 status 过滤(只 done / 含 failed)?
+**保留不动**
+- `stop_workflow` / `retry_empty_slots` / `resume` 现有语义。
+- Frontend 改动放在后续 round(用户独立安排)。
+
+### 已知后续工作
+
+- **工作流 stopped 后的 resume / retry 操作** —— 用户说后续讨论。
+- **前端 UI 改造** —— 头部排版优化、新增"工作流详情 modal"(左侧章节导航 + 右侧原文/结果)、失败策略 selector 接入 CreateBatchDialog、"启动"按钮 + 工作流 tab 5s 轮询、modal 内第二个 5s 轮询 —— 用户计划中,前端停等。
+- **Workflows 内联 SQL 搬到 typed repos** —— 4 处 join(`to_summary` count / `list_workflow_chapters` / `list_chapter_workflow_results` / `list_transformation_source_chapters`)仍在 commands/workflows.rs。前端停等前不优先处理

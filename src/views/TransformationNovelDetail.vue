@@ -10,6 +10,7 @@ import type {
 import Button from '../components/ui/Button.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import CreateBatchDialog from '../components/CreateBatchDialog.vue';
+import Dialog from '../components/ui/Dialog.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -19,7 +20,7 @@ const store = useWorkflowsStore();
 
 const activeTab = ref<'chapters' | 'workflows'>('chapters');
 
-// 章节一览 tab
+// Chapter Source tab
 const selectedChapterIds = ref<Set<number>>(new Set());
 const openSourceChapterId = ref<number | null>(null);
 
@@ -57,7 +58,7 @@ const selectedWorkflow = computed<WorkflowSummary | null>(() => {
   return workflows.value.find((w) => w.id === selectedWorkflowId.value) ?? null;
 });
 
-// 章节详情侧边栏(章节一览 tab 用)
+// 章节Detail侧边栏(Chapter Source tab 用)
 const openSourceResults = computed<ChapterWorkflowResultRow[]>(() => {
   if (openSourceChapterId.value === null) return [];
   return store.resultsByTnChapter.get(`${tnId.value}:${openSourceChapterId.value}`) ?? [];
@@ -67,7 +68,7 @@ const stopConfirmOpen = ref(false);
 const stopTargetId = ref<number | null>(null);
 const retrySelectedIds = ref<Set<number>>(new Set());
 
-// 章节详情侧边栏的源原文
+// 章节Detail侧边栏的源原文
 const sourceChapterDetail = ref<Chapter | null>(null);
 const sourceChapterText = ref<string>('');
 const sourceChapterLoading = ref(false);
@@ -113,6 +114,15 @@ function closeWorkflowPanel() {
   retrySelectedIds.value = new Set();
 }
 
+async function startWorkflow(id: number) {
+  try {
+    await store.start(id);
+    await store.loadChapters(id);
+  } catch (e: unknown) {
+    console.error(e);
+  }
+}
+
 function askStopWorkflow(id: number) {
   stopTargetId.value = id;
   stopConfirmOpen.value = true;
@@ -130,18 +140,79 @@ async function confirmStopWorkflow() {
   stopTargetId.value = null;
 }
 
+function canRetryChapter(c: WorkflowChapterRow): boolean {
+  return c.status === 'failed' || c.status === 'skipped';
+}
+const canRetryHeader = computed<boolean>(() =>
+  selectedWorkflowChapters.value.some(canRetryChapter),
+);
+
+const retrySubmitting = ref(false);
+const POLLABLE_STATUSES = new Set(['pending', 'running', 'paused']);
+const isBatchLive = computed<boolean>(() => {
+  const s = selectedWorkflow.value;
+  return s !== null && POLLABLE_STATUSES.has(s.status);
+});
+const canRetrySelection = computed<boolean>(() => {
+  const s = selectedWorkflow.value;
+  if (s === null) return false;
+  if (s.status === 'completed' || s.status === 'terminated' || s.status === 'cancelled') return false;
+  return retrySelectedIds.value.size > 0;
+});
+let chapterPollHandle: number | null = null;
+function startChapterPoll() {
+  if (chapterPollHandle !== null) return;
+  chapterPollHandle = window.setInterval(() => {
+    if (selectedWorkflowId.value === null) return;
+    void store.loadChapters(selectedWorkflowId.value);
+  }, 2000);
+}
+function stopChapterPoll() {
+  if (chapterPollHandle !== null) {
+    window.clearInterval(chapterPollHandle);
+    chapterPollHandle = null;
+  }
+}
+watch(selectedWorkflowId, (id) => {
+  if (id !== null) startChapterPoll(); else stopChapterPoll();
+}, { immediate: true });
+watch(isBatchLive, (live) => {
+  if (live) startChapterPoll(); else stopChapterPoll();
+});
+onUnmounted(() => stopChapterPoll());
+
+const chapterLoading = ref<Set<number>>(new Set());
+function isChapterLoading(tcId: number): boolean { return chapterLoading.value.has(tcId); }
+async function retryOne(c: WorkflowChapterRow) {
+  if (selectedWorkflowId.value === null) return;
+  const set = new Set(chapterLoading.value); set.add(c.tc_id); chapterLoading.value = set;
+  retrySubmitting.value = true;
+  try {
+    await store.retry(selectedWorkflowId.value, [c.chapter_id]);
+    await store.loadChapters(selectedWorkflowId.value);
+  } catch (e: unknown) {
+    console.error(e);
+  } finally {
+    retrySubmitting.value = false;
+    const set2 = new Set(chapterLoading.value); set2.delete(c.tc_id); chapterLoading.value = set2;
+  }
+}
+
 async function doRetry() {
   if (selectedWorkflowId.value === null) return;
   const chapterIds = selectedWorkflowChapters.value
     .filter((c) => retrySelectedIds.value.has(c.tc_id))
     .map((c) => c.chapter_id);
   if (chapterIds.length === 0) return;
+  retrySubmitting.value = true;
   try {
     await store.retry(selectedWorkflowId.value, chapterIds);
     retrySelectedIds.value = new Set();
     await store.loadChapters(selectedWorkflowId.value);
   } catch (e: unknown) {
     console.error(e);
+  } finally {
+    retrySubmitting.value = false;
   }
 }
 
@@ -207,8 +278,8 @@ watch(() => workflows.value, (list) => {
   }
 });
 
-// spec §9.1: 默认全选。sources 第一次加载后初始化 selectedChapterIds,
-// 后续用户手动操作不会被覆盖。
+// spec §9.1: 默认Select All。sources 第一次加载后初始化 selectedChapterIds,
+// 后续用户手动Actions不会被覆盖。
 let didInitSelection = false;
 watch(() => sources.value, (list) => {
   if (didInitSelection || list.length === 0) return;
@@ -220,33 +291,33 @@ watch(() => sources.value, (list) => {
 <template>
   <section class="tn-detail">
     <header class="header">
-      <h1>转换工程详情</h1>
+      <h1>Conversion Novel Detail</h1>
       <p class="subtitle">TN #{{ tnId }}</p>
-      <Button @click="router.back()">← 返回</Button>
+      <Button @click="router.back()"><- Back</Button>
     </header>
 
     <div class="tabs">
       <button :class="{ active: activeTab === 'chapters' }" @click="activeTab = 'chapters'">
-        章节一览
+        Chapter Source
       </button>
       <button :class="{ active: activeTab === 'workflows' }" @click="activeTab = 'workflows'">
         工作流
       </button>
     </div>
 
-    <!-- 章节一览 tab -->
+    <!-- Chapter Source tab -->
     <template v-if="activeTab === 'chapters'">
       <div class="actions">
-        <Button size="small" @click="selectAll">全选</Button>
+        <Button size="small" @click="selectAll">Select All</Button>
         <Button size="small" @click="selectNone">全不选</Button>
-        <Button size="small" @click="invertSelection">反选</Button>
+        <Button size="small" @click="invertSelection">Invert</Button>
         <Button
           kind="primary"
           size="small"
           :disabled="selectedCount === 0"
           @click="openCreateBatch"
         >
-          ▶ 新建工作流（{{ selectedCount }} 章）
+          + New Workflow ({{ selectedCount }} 章）
         </Button>
       </div>
       <table v-if="sources.length > 0" class="chapter-table">
@@ -277,7 +348,7 @@ watch(() => sources.value, (list) => {
           </tr>
         </tbody>
       </table>
-      <div v-else class="empty">暂无章节</div>
+      <div v-else class="empty">No chapters yet</div>
     </template>
 
     <!-- 工作流 tab -->
@@ -287,12 +358,13 @@ watch(() => sources.value, (list) => {
           <tr>
             <th>标签</th>
             <th style="width: 100px">状态</th>
-            <th style="width: 80px">总章节数</th>
+            <th style="width: 80px">Total</th>
             <th style="width: 80px">Done</th>
             <th style="width: 80px">Failed</th>
             <th style="width: 80px">Skipped</th>
-            <th style="width: 160px">创建</th>
-            <th style="width: 160px">结束</th>
+            <th style="width: 160px">Created</th>
+            <th style="width: 160px">Ended</th>
+            <th style="width: 140px">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -307,27 +379,31 @@ watch(() => sources.value, (list) => {
             <td>{{ w.skipped_count }}</td>
             <td>{{ fmtTime(w.created_at) }}</td>
             <td>{{ fmtTime(w.ended_at) }}</td>
+            <td class="workflow-actions" @click.stop>
+              <Button v-if="w.status === 'pending'" kind="primary" size="small" @click="startWorkflow(w.id)">Start</Button>
+              <Button size="small" @click="openWorkflowPanel(w)">Detail</Button>
+            </td>
           </tr>
         </tbody>
       </table>
-      <div v-else class="empty">暂无工作流</div>
+      <div v-else class="empty">No workflows yet</div>
     </template>
 
-    <!-- 章节详情侧边面板 -->
+    <!-- 章节Detail侧边面板 -->
     <div v-if="openSourceChapterId !== null" class="side-panel">
       <div class="panel-header">
-        <h3>章节 #{{ openSourceChapterId }} 的工作流结果</h3>
+        <h3>Chapter #{{ openSourceChapterId }} 的工作流结果</h3>
         <Button size="small" @click="closeChapterPanel">关闭</Button>
       </div>
       <section class="original-section">
         <h4>源原文</h4>
         <div v-if="sourceChapterLoading" class="hint">加载中...</div>
         <pre v-else-if="sourceChapterText" class="result-content">{{ sourceChapterText }}</pre>
-        <div v-else class="hint">暂无原文</div>
+        <div v-else class="hint">No source text</div>
       </section>
       <section class="results-section">
-        <h4>各工作流结果</h4>
-        <div v-if="openSourceResults.length === 0" class="empty">暂无结果</div>
+        <h4>Per-workflow Results</h4>
+        <div v-if="openSourceResults.length === 0" class="empty">No results yet</div>
         <ul v-else class="result-list">
           <li v-for="r in openSourceResults" :key="r.batch_id" class="result-item">
             <div class="result-meta">
@@ -340,8 +416,8 @@ watch(() => sources.value, (list) => {
       </section>
     </div>
 
-    <!-- 工作流详情侧边面板 -->
-    <div v-if="selectedWorkflow !== null" class="side-panel">
+    <!-- Workflow Detail侧边面板 -->
+    <Dialog v-if="selectedWorkflow !== null" :open="true" title="Workflow Detail" :width="1100" @update:open="closeWorkflowPanel">
       <div class="panel-header">
         <h3>
           工作流 #{{ selectedWorkflow.id }}{{ selectedWorkflow.label ? ' · ' + selectedWorkflow.label : '' }}
@@ -355,23 +431,24 @@ watch(() => sources.value, (list) => {
           size="small"
           @click="askStopWorkflow(selectedWorkflow.id)"
         >
-          ⏹ 停止工作流
+          ⏹ Stop Workflow
         </Button>
-        <template v-else-if="selectedWorkflow.status === 'stopped'">
-          <Button
-            kind="primary"
-            size="small"
-            :disabled="retrySelectedIds.size === 0"
-            @click="doRetry"
-          >
-            ↻ 重试所选（{{ retrySelectedIds.size }}）
-          </Button>
-        </template>
+        <Button
+          v-if="canRetrySelection"
+          kind="primary"
+          size="small"
+          :disabled="retrySelectedIds.size === 0 || retrySubmitting"
+          :loading="retrySubmitting"
+          @click="doRetry"
+        >
+          ↻ Retry Selected ({{ retrySelectedIds.size }})
+        </Button>
       </div>
       <table v-if="selectedWorkflowChapters.length > 0" class="chapter-table">
         <thead>
           <tr>
-            <th v-if="selectedWorkflow.status === 'stopped'" style="width: 40px">勾选</th>
+            <th v-if="canRetryHeader" style="width: 40px">Pick</th>
+            <th v-if="canRetryHeader" style="width: 80px">Action</th>
             <th style="width: 60px">#</th>
             <th>标题</th>
             <th style="width: 100px">状态</th>
@@ -380,25 +457,39 @@ watch(() => sources.value, (list) => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="c in selectedWorkflowChapters" :key="c.tc_id">
-            <td v-if="selectedWorkflow.status === 'stopped'">
+          <tr v-for="c in selectedWorkflowChapters" :key="c.tc_id" :class="{ 'chapter-row': true, running: c.status === 'running' }">
+            <td>
               <input
+                v-if="canRetryChapter(c)"
                 type="checkbox"
-                :disabled="!(c.status === 'failed' || c.status === 'skipped') || !c.is_empty_slot"
+                :disabled="!c.is_empty_slot"
                 :checked="retrySelectedIds.has(c.tc_id)"
                 @change="(e) => toggleRetrySelection(c.tc_id, (e.target as HTMLInputElement).checked)"
               />
             </td>
+            <td>
+              <Button
+                v-if="canRetryChapter(c)"
+                size="small"
+                :disabled="!c.is_empty_slot || isChapterLoading(c.tc_id)"
+                :loading="isChapterLoading(c.tc_id)"
+                @click="retryOne(c)"
+              >Retry</Button>
+            </td>
             <td>{{ c.chapter_idx }}</td>
             <td>{{ c.chapter_title }}</td>
-            <td>{{ c.status }}</td>
+            <td>
+  <span v-if="c.status === 'running'" class="dot dot-running" />
+  <span v-else-if="c.status === 'pending'" class="dot dot-pending" />
+  <span class="status" :class="c.status">{{ c.status }}</span>
+</td>
             <td class="preview">{{ c.content_preview ?? '—' }}</td>
             <td class="error">{{ c.error ?? '' }}</td>
           </tr>
         </tbody>
       </table>
-      <div v-else class="empty">暂无章节</div>
-    </div>
+      <div v-else class="empty">No chapters yet</div>
+    </Dialog>
 
     <CreateBatchDialog
       v-model:open="createBatchOpen"
@@ -412,7 +503,7 @@ watch(() => sources.value, (list) => {
 
     <ConfirmDialog
       v-model:open="stopConfirmOpen"
-      title="停止工作流"
+      title="Stop Workflow"
       :message="'停止后当前章节会完成,后续章节标记为 Skipped。确定停止吗?'"
       kind="danger"
       confirm-text="停止"
@@ -493,6 +584,30 @@ watch(() => sources.value, (list) => {
 }
 .status.running { background: var(--bg-section); color: var(--text-secondary); }
 .status.stopped { background: var(--warn-bg); color: var(--warn); border-color: var(--warn-border); }
+.chapter-row.running { background: rgba(196, 92, 60, 0.06); }
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.dot-running { background: var(--color-cinnabar); animation: pulse 1.2s ease-in-out infinite; }
+.dot-pending { background: var(--text-muted); opacity: 0.55; }
+.chapter-row.running .status.running { background: var(--color-cinnabar); color: #faf6ee; border-color: var(--color-cinnabar); }
+.spinner-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--color-cinnabar);
+  animation: pulse 1.2s ease-in-out infinite;
+  vertical-align: middle;
+}
+@keyframes pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
 .side-panel {
   position: fixed;
   top: 0;

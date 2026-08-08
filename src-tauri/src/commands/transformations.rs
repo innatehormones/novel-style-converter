@@ -196,8 +196,12 @@ pub fn enqueue_transformation_chapters(
                 })
                 .map_err(|e| e.to_string())?;
             ids.push(id);
+            let tc_for_tn = db.transformation_chapters().get(id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("tc {id} missing"))?;
             jobs.push(JobSpec {
-                transformation_id: id,
+                tc_id: id,
+                tn_id: tc_for_tn.transformation_novel_id,
                 mode,
                 chapter,
                 prompt: prompt.clone(),
