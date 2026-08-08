@@ -199,24 +199,169 @@ A single upload can produce many data assets, and the data assets survive the up
 - "数据资产" tab 显示"已删除 upload"标记:da 的 `source_filename` 已持久化,但 UI 未做"upload 缺失" 警告
 - Chapter title 编辑没限制 —— 用户可改成任何字符串,后续可能要做去重校验
 
-## Transform flow
+## Workflows module (post-refactor)
 
-- BatchScheduler.create_workflow(spec) -> same-batch serial dispatch.
-- JobQueue reads chapter.body and pushes to AiProvider.
-- prev_original / next_original are taken from chapters.body directly (no upload.original_text lookup).
+### Data
 
-## Why the change
+- `transformation_novels` (migration 0006 + 0019 + 0020):
+  - id / data_asset_id (FK → data_assets, ON DELETE CASCADE) / title / **note** / created_at
+  - **删 default_* 三列** (migration 0019, destructive, 不回填) — create_workflow 已要求 caller 必填 prompt/model/mode,UI 收集,原"留 default 给 caller 兜底"路径 (`create_batch` + `BatchOverrides`) 已删除
+  - **note** 字段 (migration 0020) 用于"创建转换小说"时填一段备注(文风目标 / 注意事项);UI 仅在 TN 详情页标题下展示,**不**提供编辑入口
+- `batches` (migration 0009 + 0012):
+  - id / transformation_novel_id (FK, ON DELETE CASCADE) / label / **on_failure_policy** (pause_and_review / terminate / skip_failed) / status (pending / running / stopped / paused / completed / terminated / cancelled) / created_at / started_at / ended_at
+- `transformation_chapters` (migration 0010):
+  - id / transformation_novel_id / chapter_id / mode / prompt_id / model_config_id / ctx_prev_* / batch_id (NULL = 走 enqueue 路径而非 workflow) / style_ref_chapter_id / status (pending/running/done/failed/skipped/cancelled) / result_content (新设计中常 NULL) / tokens_in / tokens_out / error / started_at / completed_at
+- `workflow_results` (0011) + `workflow_result_chapters` (0013): 一份 batch 对应一份 result set,`workflow_result_chapters.content` 持章节级文本真源
 
-- The old byte-range model conflated bytes with chars in CJK text and made upload deletion implicit-cascade chapters of unrelated work.
-- The new model keeps each chapter self-contained and decouples uploads from data assets.
+### Lifecycle: 创建 → 启动 → 运行 → 收尾
 
-## Open improvements (not done)
+#### 1. 用户新建工作流 (TN 详情页 → "New Workflow" 弹窗)
+- 用户必填:章节子集 + prompt + model + 上下文窗口(prev_original / prev_transformed / next_original,单位:章)
+- 加**失败策略** radio(见下)
+- `onCreateBatch(payload)` → IPC `create_workflow` → `BatchScheduler::create_workflow(spec)`:
+  - **不**自动 dispatch:写一行 batch (`status='pending'` + `on_failure_policy`)、N 行 tc (`status='pending'`)、1 行 workflow_result
+  - 事务原子,任一失败回滚整批
+- 弹窗关闭,workflow 留在 batch 列表,用户手动 "Start" 启动
 
-- TransformationNovelDetail could move into a Pinia store to remove ad-hoc refs.
-- Status changes could be event-driven instead of 1s polling.
-- chapters store markers / suppressed / titleOverrides use string keys today; could switch to chapter_id once IDs are exposed end-to-end.
+#### 2. 用户点 Start (batch 详情 / 列表行 Start 按钮)
+- IPC `start_workflow(batch_id)` → `BatchScheduler::start_workflow(batch_id)`:
+  - batch 不在 Pending 报错
+  - 事务:batch → Running,started_at = now
+  - 事务外:从首章 tc (`ORDER BY chapter.idx ASC LIMIT 1, status='pending'`) 构造 `JobSpec { tc_id, tn_id, ... }`,调 `dispatch()` 派首章
+- 一章一派的"逐章模式":每章跑完通过 notify 回调触发下一章
 
+#### 3. worker 执行 (JobQueue worker thread)
+- 每个 worker 内建 current-thread tokio runtime + per-model `Semaphore`
+- 从 mpsc 收 `JobSpec`,跑 `run_job(shared, db, cached_provider, sem, job, notify, recorder)`:
+  1. `tid = job.tc_id`(注意:worker 改状态 / notify 用 tc_id,不再是 transformation_id)
+  2. `prep = read_context(db, job)` 用 `job.tn_id` 查 `transformation_novels`;查不到 → `mark_failed(tid, "tn missing")` + notify failure + return
+  3. `mark_running(tid)` 把 tc 行翻 running
+  4. `acquire(sem).await` 等 model quota
+  5. `DefaultTransformer::transform(req).await`:`req.transformation_id = job.tn_id`(recorder 上下文用 tn_id)
+  6. `apply_result(&db, tid, ...)` 决定 DbWrite::Done / Failed → 改 tc 行 + 写 `workflow_result_chapters.content`
+  7. notify 回调 fire:`sched.on_chapter_done(tid, content)` 或 `on_chapter_failed(tid, err)`,**tid = tc_id**(这是修过两次的 bug,见 design intent)
+  8. `advance_batch(...)` 派下一章 / 收尾 batch 状态
+- **不**阻塞 hot path:recorder 通过 mpsc,丢包 drop new,业务结果不受影响
+
+#### 4. notify 回调 (`src-tauri/src/lib.rs`)
+- **关键约束**:`tid` 必须是 `transformation_chapters.id`,这样 `on_chapter_done(tid, ...)` 才能更新对应 tc 行 + 写 workflow_result
+- 旧实现把 `JobSpec.transformation_id` 既当 tc_id 又当 tn_id 用 → `tn missing` + notify 把 tn_id 当 tc_id 找行找不到 → 章节永远停在 pending。修法:JobSpec 拆成 `tc_id` + `tn_id` 两字段(详见 design intent)
+
+#### 5. on_failure_policy 三分支 (章节失败时)
+
+- `pause_and_review`(默认,UI 默认选项):
+  - 失败章节标 `failed`,`batch` 转 `paused`,等用户在 modal 里手动决策(重试/跳过/终止)
+  - UI 在 Workflow Detail modal 顶栏显示 "Paused — decide for failures",提供 "Retry Selected / Stop Workflow"
+- `terminate`:
+  - 失败章节标 `failed`,同 batch 后续 pending tc 全部 → `cancelled`,batch → `terminated`
+- `skip_failed`:
+  - 失败章节标 `skipped`(`error` 字段保留,`result_content` 清空,用于区分"用户主动 skip"vs"真失败"),batch 留 `running` 继续派下一章
+
+### Retry 机制
+
+#### 单章重试(任意 batch 状态,非终结状态)
+- UI: Workflow Detail modal 每行 (status ∈ {failed, skipped} && is_empty_slot) 渲染独立 `Retry` 按钮
+- 点击 → IPC `retry_workflow_chapters(batch_id, [chapter_id])` → `BatchScheduler::retry_empty_slots(batch_id, &chapter_ids)`
+- 后端允许条件放宽:
+  - `Stopped`:原语义,事务后 batch → Running
+  - `Running` / `Paused`:**且 batch 内无 in-flight `running` tc**(避免重复 dispatch);事务后 batch 状态保持不变
+  - 其它 → 报 Validation("当前 batch 状态不可重试")
+- 事务内:对每个 chapter_id `UPDATE transformation_chapters SET status='pending', error=NULL, ...`;只能改 `failed`/`skipped` 且对应 `workflow_result_chapters.content IS NULL` 的行,否则 Validation
+- 事务后:派 batch 内 `ORDER BY chapter.idx ASC LIMIT 1, status='pending'` 的首个
+
+#### 批量重试(modal 顶部按钮,要求选中 ≥1 章)
+- 与单章同 IPC,`chapter_ids` 数组;`canRetrySelection` 控制按钮可点 (batch 非 completed/terminated/cancelled 且有选中)
+- `retrySubmitting` ref 提供按钮 loading 态,避免重复提交
+
+#### Stop workflow(running → stopped)
+- `stop_workflow(batch_id)` 事务:把 pending tc 标 `skipped`,无 running 时 batch → `stopped`,否则等 worker 回调 finalize
+
+### AI 调用日志接入(recorder)
+
+- `JobQueue::new(workers, db_factory, provider_factory, recorder.clone())` (lib.rs) 把 recorder 灌进 worker 内部
+- `run_job` 把 recorder 传给 `DefaultTransformer { ai, recorder }`
+- `DefaultTransformer.transform` 无论成功失败**始终** record 一次:
+  - `business = TransformChapter`、`context_id = req.transformation_id = tn_id`
+  - 模型 / prompt 摘要 + system/user/response preview(各前 10KB) + tokens + latency
+- `ChannelRecorder::new(4096)` + `spawn_writer(path, recorder, rx)` 后台写 ai_call_logs(自建 tokio runtime,见 AI calls 收尾 commit)
+- UI: AiCalls.vue 顶部加 3 秒轮询,自动刷新列表
+
+### UI / flow (TN 详情页 `/transformations/:tnId`)
+
+- 顶部 header: 标题 + 备注 (note) + `<- Back` 返回
+- 两个 tab:**Chapter Source** (章源选择) / **Workflows** (工作流管理)
+- **Chapter Source tab**:
+  - 操作按钮:`Select All` / `Clear` / `Invert` / `+ New Workflow (n)`
+  - 列表章节 + checkbox + idx + 标题(可点开查看) + 字数 + 已有结果数
+  - "New Workflow" 弹窗:章节子集 + prompt + model + ctx 窗口 + 失败策略
+- **Workflows tab**:
+  - 表头:标签 / 状态 / Total / Done / Failed / Skipped / Created / Ended / **Actions**
+  - 行 actions:**Start** (pending) / **Detail**
+  - Detail 打开 Workflow Detail **Modal**(居中,非抽屉),1100px 宽
+- **Workflow Detail Modal**:
+  - 头部:`Workflow #X · label` + close
+  - 顶栏 actions:`Stop Workflow`(running) / `Retry Selected (n)`(非终结且有选中)
+  - 章节表:`Pick` / `Action` / `#` / 标题 / 状态 / 结果预览 / 错误
+    - pending 行:Pick + Action 列空保留占位
+    - failed/skipped 行:Pick checkbox + 单行 `Retry` 按钮
+    - running 行:橙色脉动点 + 状态徽章;pending 行:灰色点
+  - 章节状态由 modal 内 2 秒 `chapterPollHandle` 拉 `list_workflow_chapters` 轮询;batch 非 `pending/running/paused` 时停
+  - Batch / 章节状态变化通过 watch + setInterval 实现,无需手动刷新
+- **按钮 loading 态**:`Button` 组件加 `.btn.loading` + `.btn-spinner` 旋转;Retry / Retry Selected 在请求中显示
+
+### Design intent
+
+- **JobSpec.tc_id + tn_id 拆分(防 bug)**:
+  - 旧字段 `transformation_id` 同一值既给 read_context 查 tn,又给 mark_running/notify 当 tc_id 用 → 必然有一边错
+  - 拆字段后:worker 改状态用 tc_id(recorder 上下文 / notify 回调),read_context 用 tn_id(查 transformation_novels)
+  - **JobInfo / push_* 也同步拆**,确保 queue 快照语义正确
+- **create_workflow 不自动 dispatch**:
+  - 旧逻辑:create 完立即启动首章,batch→running 一气呵成
+  - 用户要求:创建后必须手动启动 → "创建"按钮文案从"创建并运行"改为"创建",UI 增加"Start"按钮
+  - 设计意图:让用户能在创建后先检查 prompt/model/章节子集再开跑;减少误点"创建"就立刻烧 token
+- **on_failure_policy 三分支而非单一 stop**:
+  - 用户场景多样:压测用 skip_failed 跳过错的;严谨校对用 pause_and_review 逐章决策;一次性跑通不在乎后续用 terminate
+  - 旧设计只有 stop,跳过要手动重试每一章 → 不适合自动化跑批
+- **retry_empty_slots 放宽到 Running/Paused**:
+  - 旧实现只允许 Stopped 后重试 → batch 跑一半发现 1 章失败,要么停掉全批重跑,要么看它跑完再处理
+  - 新实现:无 in-flight tc 时允许单章重试 → 跑批过程中"哪章失败补哪章",batch 不停
+- **transformation_chapters.result_content 留空,真源在 workflow_result_chapters.content**:
+  - 同一章节多次重试时,旧 result_content 会被覆盖,丢失前一次结果
+  - 新设计:tc.result_content 常 NULL(只在 mark_failed / quick reference 用),最终文本落在 workflow_result_chapters.content(由 on_chapter_done 写一次)
+- **Note 字段不加编辑入口**:
+  - 用户原话:"标题下面吧,不过暂时不支持编辑"
+  - 现在 UI 只读展示,后续如果要编辑再加入口,不预埋
+- **Button loading 态全组件共用**:
+  - 旧实现只在 spinner 加在某个组件里,其他按钮不显示
+  - 新实现:`Button` 组件加 `loading` prop → `cursor: progress` + 旋转圆圈;Retry / Retry Selected / Test Model 全部用同一 prop
+
+### Lifecycle cheat sheet
+
+| 触发 | 后端动作 | UI 反馈 |
+|---|---|---|
+| 用户点 New Workflow | `create_workflow` 写 batch (pending) + N tc (pending) + 1 workflow_result | 弹窗关闭,workflow 出现在列表 |
+| 用户点 Start | `start_workflow` batch → running,派首章 | 列表状态变 running,modal 内 pending → running |
+| worker 跑完首章 | `on_chapter_done(tid)` 写 workflow_result_chapters,翻 tc → done,通知 `advance_batch` 派下一章 | 轮询拉到 done,表行更新 |
+| 某章 AI 失败 (skip_failed) | `on_chapter_failed(tid)` 按策略分流 → `mark_failed` + `mark_skipped` (后续 pending tc) + batch 状态更新 | 行变 failed,新行 Retry 按钮出现 |
+| 用户点单章 Retry | `retry_empty_slots([chapter_id])` 放宽条件 → tc 翻 pending,派首章;再次跑通 | 行变 pending → running → done/failed |
+| 用户点 Stop | `stop_workflow(batch_id)` pending tc 标 skipped,batch → stopped (无 in-flight 时) | 行 skipped,顶栏 Stop 按钮消失,Retry Selected 出现 |
+
+### What's NOT done (TODO)
+
+- "暂停与审阅" 模态:用户在 batch 处于 `paused` 状态时,modal 顶栏应该有个 "Resume" 操作弹窗,让用户对失败章节逐章决策(retry / skip / terminate) → `BatchScheduler::on_batch_resume(action: ResumeAction)` 已实现 `Retry(ch_id)` / `Skip(ch_id)` / `Terminate`,但 UI 没接(目前只能手动 Retry / 用 Stop 间接走 terminate 路径)
+- "Workflows" tab 的 `Stop` 按钮缺失:目前只有 batch 在 running 时 modal 内有 Stop;workflow 列表行上没有(其实可加,但用户没要求)
+- ai_call_logs 与 transformation_chapters 的"上下文跳转":目前 AiCalls 详情显示 business+context_id,但 UI 没做"跳到对应 chapter / batch"的链接(只能人工对 id)
+- JobInfo.tn_id 拆出来后,QueueSnapshot IPC DTO 没加 tn_id 字段 → 前端拿不到 tn_id 用于过滤 ai_call_logs(暂时不影响功能)
+
+## Transform flow (high level)
+
+- `BatchScheduler.create_workflow(spec)` → 事务写 batch + N tc + 1 workflow_result;**不**自动派首章
+- 用户点 Start → `start_workflow(batch_id)` → 派首章
+- 每章: `JobQueue.enqueue(JobSpec { tc_id, tn_id, ... })` → worker thread `run_job` → `read_context(tn_id)` → `mark_running(tc_id)` → `DefaultTransformer.transform` (recorder.record) → `apply_result(tc_id)` 写 tc 行 + `workflow_result_chapters.content` → notify `on_chapter_done(tc_id)` / `on_chapter_failed(tc_id, err)` 按 `batch.on_failure_policy` 分流 → `advance_batch` 派下一章或收尾 batch 状态
+- 单章 / 批量重试:`retry_empty_slots` 允许 Stopped / 无 in-flight 的 Running/Paused
+- ai_call_logs 每次每章落一行(成功 / 失败都记),AiCalls.vue 3 秒轮询自动刷新
 ## Test status
+
 
 - `cargo test --workspace` 当前: nsc-core 18 unit tests + nsc-desktop 12 unit tests 全过,0 失败 0 警告
 - 覆盖范围:
