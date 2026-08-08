@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `compress` = 内容压缩,`style` = 文风转换。`transformation_chapters.mode` /
-/// `transformation_novels.default_mode` / `batches.overrides.mode` 全部用这个 enum
+/// `compress` = 内容压缩,`style` = 文风转换。`transformation_chapters.mode` 全部用这个 enum —— 历史曾与 `TransformMode` 是同一个语义的两次定义,合并到此处统一。
 /// —— 历史上与 `TransformMode` 是同一个语义的两次定义,合并到此处统一。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

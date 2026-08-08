@@ -5,7 +5,7 @@ use tauri::State;
 
 use nsc_core::db::Db;
 use nsc_core::error::Error;
-use nsc_core::models::{Batch, BatchStatus, PromptKind, TransformStatus};
+use nsc_core::models::{Batch, BatchStatus, OnFailurePolicy, PromptKind, TransformStatus};
 use nsc_core::transformer::{BatchScheduler, WorkflowCreate};
 
 const CONTENT_PREVIEW_CHARS: usize = 80;
@@ -22,6 +22,7 @@ pub struct CreateWorkflowPayload {
     pub ctx_prev_original: i32,
     pub ctx_prev_transformed: i32,
     pub ctx_next_original: i32,
+    pub on_failure_policy: String,
 }
 
 impl CreateWorkflowPayload {
@@ -30,6 +31,12 @@ impl CreateWorkflowPayload {
             "compress" => PromptKind::Compress,
             "style" => PromptKind::Style,
             other => return Err(Error::Validation(format!("未知 mode: {other}"))),
+        };
+        let on_failure_policy = match self.on_failure_policy.as_str() {
+            "pause_and_review" => OnFailurePolicy::PauseAndReview,
+            "terminate" => OnFailurePolicy::Terminate,
+            "skip_failed" => OnFailurePolicy::SkipFailed,
+            other => return Err(Error::Validation(format!("未知 on_failure_policy: {other}"))),
         };
         Ok(WorkflowCreate {
             transformation_novel_id: self.tn_id,
@@ -41,6 +48,7 @@ impl CreateWorkflowPayload {
             ctx_prev_original: self.ctx_prev_original,
             ctx_prev_transformed: self.ctx_prev_transformed,
             ctx_next_original: self.ctx_next_original,
+            on_failure_policy,
         })
     }
 }

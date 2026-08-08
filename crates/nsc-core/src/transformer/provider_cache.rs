@@ -13,7 +13,7 @@
 //!   这是显式 trade-off —— 改 key 不会热替换,但避免运行中突然 401。
 //! - cache 不在 worker 间共享,避免 `Arc<dyn AiProvider>` 跨线程引用计数竞争。
 //!   worker 数很少(默认 2),provider 重建代价可控,共享收益低。
-//! - 软删 model(`archived=1`)仍可被 worker 命中:`BatchScheduler::create_batch`
+//! - 软删 model(`archived=1`)仍可被 worker 命中:`BatchScheduler::create_workflow`
 //!   按 id 查出的归档行仍能进入 cache;provider.factory 拿到 `api_key=''` 时
 //!   会创建失败(被 OpenAI endpoint 401),让错误以自然的 AI 错误冒出来。
 

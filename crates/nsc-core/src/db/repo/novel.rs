@@ -10,8 +10,7 @@ impl<'a> UploadRepo<'a> {
     pub fn insert(&self, u: &NewUpload) -> Result<i64> {
         let now = Utc::now();
         self.conn.execute(
-            "INSERT INTO uploads (sha256, filename, byte_size, uploaded_at, file_path, original_text, word_count) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO uploads (sha256, filename, byte_size, uploaded_at, file_path, original_text, word_count)              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![u.sha256, u.filename, u.byte_size, now.to_rfc3339(), u.file_path, u.original_text, u.word_count],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -28,8 +27,7 @@ impl<'a> UploadRepo<'a> {
 
     pub fn get(&self, id: i64) -> Result<Option<Upload>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, sha256, filename, byte_size, uploaded_at, file_path, original_text, word_count \
-             FROM uploads WHERE id = ?1"
+            "SELECT id, sha256, filename, byte_size, uploaded_at, file_path, original_text, word_count              FROM uploads WHERE id = ?1"
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
@@ -39,8 +37,7 @@ impl<'a> UploadRepo<'a> {
 
     pub fn list(&self) -> Result<Vec<Upload>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, sha256, filename, byte_size, uploaded_at, file_path, original_text, word_count \
-             FROM uploads ORDER BY id DESC"
+            "SELECT id, sha256, filename, byte_size, uploaded_at, file_path, original_text, word_count              FROM uploads ORDER BY id DESC"
         )?;
         let rows = stmt.query_map([], |row| from_row(row))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -67,8 +64,7 @@ impl<'a> UploadRepo<'a> {
     /// 返回回填的行数(给日志/测试用)。
     pub fn backfill_word_count(&self) -> Result<usize> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, original_text FROM uploads \
-             WHERE word_count = 0 AND length(original_text) > 0",
+            "SELECT id, original_text FROM uploads              WHERE word_count = 0 AND length(original_text) > 0",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
@@ -115,31 +111,20 @@ fn from_row(row: &Row) -> rusqlite::Result<Upload> {
 pub struct TransformationNovelRepo<'a> { pub(crate) conn: &'a rusqlite::Connection }
 
 impl<'a> TransformationNovelRepo<'a> {
-    /// 创建 transformation_novel。不再写 `data_assets.locked_at`(该列已废弃)——
-    /// 是否被引用看 `transformation_novels` 真实行,前端按钮按 join 出来的
-    /// tn_count 走。
+    /// 创建 transformation_novel。是否被引用看 `transformation_novels` 真实行,
+    /// 前端按钮按 join 出来的 tn_count 走。
     pub fn insert(&self, n: &NewTransformationNovel) -> Result<i64> {
         let now = Utc::now().to_rfc3339();
-        let mode_str = n.default_mode.map(|m| match m {
-            crate::models::PromptKind::Compress => "compress",
-            crate::models::PromptKind::Style => "style",
-        });
         self.conn.execute(
-            "INSERT INTO transformation_novels \
-             (data_asset_id, title, created_at, default_model_config_id, default_prompt_id, default_mode) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                n.data_asset_id, n.title, now,
-                n.default_model_config_id, n.default_prompt_id, mode_str,
-            ],
+            "INSERT INTO transformation_novels (data_asset_id, title, created_at)              VALUES (?1, ?2, ?3)",
+            params![n.data_asset_id, n.title, now],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
 
     pub fn get(&self, id: i64) -> Result<Option<TransformationNovel>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, title, created_at, default_model_config_id, default_prompt_id, default_mode \
-             FROM transformation_novels WHERE id = ?1"
+            "SELECT id, data_asset_id, title, created_at              FROM transformation_novels WHERE id = ?1"
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
@@ -149,34 +134,23 @@ impl<'a> TransformationNovelRepo<'a> {
 
     pub fn list(&self) -> Result<Vec<TransformationNovel>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, title, created_at, default_model_config_id, default_prompt_id, default_mode \
-             FROM transformation_novels ORDER BY id DESC"
+            "SELECT id, data_asset_id, title, created_at              FROM transformation_novels ORDER BY id DESC"
         )?;
         let rows = stmt.query_map([], |row| novel_from_row(row))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
     pub fn update(&self, n: &TransformationNovel) -> Result<()> {
-        let mode_str = n.default_mode.map(|m| match m {
-            crate::models::PromptKind::Compress => "compress",
-            crate::models::PromptKind::Style => "style",
-        });
         self.conn.execute(
-            "UPDATE transformation_novels \
-             SET title = ?2, default_model_config_id = ?3, default_prompt_id = ?4, default_mode = ?5 \
-             WHERE id = ?1",
-            params![
-                n.id, n.title,
-                n.default_model_config_id, n.default_prompt_id, mode_str,
-            ],
+            "UPDATE transformation_novels SET title = ?2 WHERE id = ?1",
+            params![n.id, n.title],
         )?;
         Ok(())
     }
 
     pub fn list_by_data_asset(&self, data_asset_id: i64) -> Result<Vec<TransformationNovel>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, title, created_at, default_model_config_id, default_prompt_id, default_mode \
-             FROM transformation_novels WHERE data_asset_id = ?1 ORDER BY id DESC"
+            "SELECT id, data_asset_id, title, created_at              FROM transformation_novels WHERE data_asset_id = ?1 ORDER BY id DESC"
         )?;
         let rows = stmt.query_map(params![data_asset_id], |row| novel_from_row(row))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -194,21 +168,10 @@ fn novel_from_row(row: &Row) -> rusqlite::Result<TransformationNovel> {
         .map(|d| d.with_timezone(&Utc))
         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
             3, rusqlite::types::Type::Text, Box::new(e)))?;
-    let mode_s: Option<String> = row.get(6)?;
-    let default_mode = mode_s.map(|s| match s.as_str() {
-        "compress" => Ok(crate::models::PromptKind::Compress),
-        "style" => Ok(crate::models::PromptKind::Style),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
-            6, rusqlite::types::Type::Text,
-            format!("unknown default_mode: {other}").into())),
-    }).transpose()?;
     Ok(TransformationNovel {
         id: row.get(0)?,
         data_asset_id: row.get(1)?,
         title: row.get(2)?,
         created_at,
-        default_model_config_id: row.get(4)?,
-        default_prompt_id: row.get(5)?,
-        default_mode,
     })
 }

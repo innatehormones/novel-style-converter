@@ -63,7 +63,7 @@ impl<'a> ModelConfigRepo<'a> {
     }
 
     /// 软删:`archived = 1` + `api_key = ''` —— 后者保证密钥不随归档条目被任何 dump 出来。
-    /// 行保留以便 `transformation_chapters.model_config_id` / `transformation_novels.default_model_config_id`
+    /// 行保留以便 `transformation_chapters.model_config_id` 仍能查到历史 model 元数据(name / base_url / model / concurrency)做展示。
     /// 仍能查到历史 model 元数据(name / base_url / model / concurrency)做展示。
     pub fn archive(&self, id: i64) -> Result<()> {
         self.conn.execute(
