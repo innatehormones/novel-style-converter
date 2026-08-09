@@ -17,17 +17,18 @@ export function formatSize(b: number): string {
   return `${(b / 1024 / 1024).toFixed(2)} MB`;
 }
 
-/// 与后端 text::word::count 一致: 汉字每字 1、英文每字母 1、数字每位 1;
-/// 标点 / 空白 / 控制字符不算。使用 Unicode property \p{L}|\p{N} 匹配字母 / 数字,
-/// 与 Rust 的 c.is_alphanumeric() 对中文、英文、数字的行为一致。
+/// 与后端 text::word::count 一致: 字数 = 除空白外的所有字符。
+/// 包含汉字、字母、数字、标点符号(ASCII 标点 + CJK 标点)。
+/// 与 Word / WPS / 网文平台 / AI 输出的字数概念一致。
 export function countWords(s: string): number {
   if (s.length === 0) return 0;
   let n = 0;
   for (const c of s) {
-    if (/^[\p{L}\p{N}]$/u.test(c)) n += 1;
+    if (!/\s/.test(c)) n += 1;
   }
   return n;
 }
+
 
 /// 千分位 + "字"。`!Number.isFinite(n) || n < 0` 时显示 "?",避免负数 / NaN
 /// 渲染成 "NaN 字" 之类的调试串。零值显示 "0 字"。

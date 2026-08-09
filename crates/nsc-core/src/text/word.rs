@@ -1,10 +1,7 @@
-/// 字数 = alphanumeric 字符数(汉字 + 字母 + 数字)。空白 / 标点 / 换行不计。
-///
-/// 旧版本按"非空白连续段"计数,中文段落无空格时整段被算成 1 个 word,
-/// 用户反馈"万字一章显示 200 字"。改成字符级计数:中文每字 1、英文每字母 1、
-/// 数字每字 1,标点 / 空白 / 控制字符不计。跟 Word / WPS 的"字数"统计一致。
+/// 字数 = 除空白和换行外的所有字符。包含汉字、字母、数字、标点符号。
+/// 与 Word / WPS / 网文平台 / AI 输出的字的概念一致。
 pub fn count(s: &str) -> i32 {
-    s.chars().filter(|c| c.is_alphanumeric()).count() as i32
+    s.chars().filter(|c| !c.is_whitespace()).count() as i32
 }
 
 #[cfg(test)]
@@ -12,34 +9,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_and_whitespace_only() {
+    fn empty() {
         assert_eq!(count(""), 0);
+    }
+
+    #[test]
+    fn whitespace_only() {
         assert_eq!(count("   "), 0);
-        assert_eq!(count("\n\t　 "), 0);
+        assert_eq!(count("\n\t "), 0);
     }
 
     #[test]
-    fn chinese_runs() {
-        // 字符级计数:每个汉字算 1。
-        assert_eq!(count("第一章 开始"), 5);
+    fn chinese_pure() {
+        // 中文每字 1
+        assert_eq!(count("第一章 开启"), 5);
         assert_eq!(count("正文一\n\n正文二"), 6);
-        // 万字一章 → 10000,不再退化成 1。
-        assert_eq!(count(&"字".repeat(10_000)), 10_000);
+        assert_eq!(count(&"一".repeat(10_000)), 10_000);
     }
 
     #[test]
-    fn english_runs() {
-        // 英文字母按字符计(不是 word);"hello" = 5。
+    fn english_pure() {
         assert_eq!(count("hello world"), 10);
-        // apostrophe / 空格都不算 alphanumeric
-        assert_eq!(count("don't go there"), 11);
+        assert_eq!(count("don\"t go there"), 12);
     }
 
     #[test]
     fn mixed_chinese_english() {
         assert_eq!(count("hello 中文"), 7);
-        // 第1章(3 汉字 + 1 数字) + Chapter One(10 字母) = 14
-        assert_eq!(count("第1章 Chapter One"), 13);
+        assert_eq!(count("第 1 章 Chapter One"), 13);
     }
 
     #[test]
@@ -49,9 +46,16 @@ mod tests {
     }
 
     #[test]
-    fn punctuation_not_counted() {
-        // 标点不算字数。
-        assert_eq!(count("你好,世界!"), 4);
-        assert_eq!(count("“引号”也算标点"), 6);
+    fn punctuation_counted() {
+        // 标点符号现在算字
+        assert_eq!(count("你好,世界!"), 6);
+        assert_eq!(count("“引号”也算标点"), 8);
+    }
+
+    #[test]
+    fn cjk_punctuation_counted() {
+        // CJK 标点全要算
+        assert_eq!(count("大清早，对方恢复神志，挥剑对他动手。"), 18);
+        assert_eq!(count("她说道：“吃下它。”"), 10);
     }
 }

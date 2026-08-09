@@ -30,6 +30,8 @@ impl Db {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         run_schemas(&conn)?;
         UploadRepo { conn: &conn }.backfill_word_count()?;
+        UploadRepo { conn: &conn }.recompute_all_word_count()?;
+        ChapterRepo { conn: &conn }.recompute_all_word_count()?;
         Ok(Self { conn })
     }
 

@@ -103,4 +103,26 @@ impl<'a> ChapterRepo<'a> {
         let rows = stmt.query_map(params![data_asset_id, after_idx, n], chapter_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
+
+    /// 重新计算所有 chapter 的 word_count(不再过滤 word_count = 0)。
+    /// 字数定义改了(包含标点)后用这个一次性同步;幂等,Db::open 跑一次就行。
+    pub fn recompute_all_word_count(&self) -> Result<usize> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, body FROM chapters              WHERE length(body) > 0",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut updated = 0;
+        for row in rows {
+            let (id, text) = row?;
+            let wc = crate::text::word_count(&text) as i64;
+            self.conn.execute(
+                "UPDATE chapters SET word_count = ?2 WHERE id = ?1",
+                params![id, wc],
+            )?;
+            updated += 1;
+        }
+        Ok(updated)
+    }
 }
