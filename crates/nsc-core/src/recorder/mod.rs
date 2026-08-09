@@ -160,7 +160,7 @@ async fn write_one(db_path: &PathBuf, event: &AiCallEvent) -> Result<()> {
     // Db::open 内部跑 migrate(已应用版本直接 skip),对每次 write 重开一连接
     // 代价 = 每次 syscall + prepared statement 缓存丢失
     // 但 DB 在本机 + WAL 模式下,200μs 级别,background 路径可接受。
-    let db = Db::open(db_path)?;
+    let db = Db::connect(db_path)?;
     let (sys_prev, sys_size) = truncate_preview(&event.system_full);
     let (user_prev, user_size) = truncate_preview(&event.user_full);
     let (resp_prev, resp_size) = truncate_preview(&event.response_full);

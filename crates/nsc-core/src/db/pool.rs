@@ -15,7 +15,7 @@ use super::repo::{
 /// 调用方不能把 `Arc<Db>` 移入 `tokio::spawn` future、`spawn_blocking` closure,
 /// 也不能把它装进 `Box<dyn Transformer>` 等 trait object 通过共享引用跨线程持有。
 /// 跨线程 / 跨 future 共享 DB 的标准做法:**按路径重开** ——
-/// 捕获 `db_path: PathBuf`,在 worker 内部调 `Db::open(&path)` 拿 owned `Db`,
+/// 捕获 `db_path: PathBuf`,在 worker 内部调 `Db::connect(&path)` 拿 owned `Db`,
 /// 操作完即 drop。
 #[derive(Debug)]
 pub struct Db { pub conn: Connection }
@@ -23,15 +23,29 @@ pub struct Db { pub conn: Connection }
 impl Db {
     /// 打开或创建 SQLite 文件,跑未应用的 migrations。父目录需自行 `create_dir_all`。
     pub fn open(path: &Path) -> Result<Self> {
-        let conn = Connection::open_with_flags(
+        let db = Self::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
         )?;
+        run_schemas(&db.conn)?;
+        UploadRepo { conn: &db.conn }.backfill_word_count()?;
+        UploadRepo { conn: &db.conn }.recompute_all_word_count()?;
+        ChapterRepo { conn: &db.conn }.recompute_all_word_count()?;
+        Ok(db)
+    }
+
+    /// Open an already initialized database for runtime work.
+    ///
+    /// Unlike `open`, this does not run schemas or full-table maintenance. Background
+    /// workers must use this entry point so opening a connection never performs writes.
+    pub fn connect(path: &Path) -> Result<Self> {
+        Self::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+    }
+
+    fn open_with_flags(path: &Path, flags: OpenFlags) -> Result<Self> {
+        let conn = Connection::open_with_flags(path, flags)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        run_schemas(&conn)?;
-        UploadRepo { conn: &conn }.backfill_word_count()?;
-        UploadRepo { conn: &conn }.recompute_all_word_count()?;
-        ChapterRepo { conn: &conn }.recompute_all_word_count()?;
         Ok(Self { conn })
     }
 
@@ -123,5 +137,29 @@ mod tests {
     fn opens_in_memory_and_seeds_schema() {
         let db = Db::open_in_memory().unwrap();
         let _uploads = db.uploads();
+    }
+
+    #[test]
+    fn runtime_connection_rejects_uninitialized_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.db");
+
+        assert!(Db::connect(&path).is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn runtime_connection_opens_while_another_connection_is_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("locked.db");
+        let initialized = Db::open(&path).unwrap();
+        initialized.conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let runtime = Db::connect(&path).unwrap();
+
+        assert_eq!(
+            runtime.applied_schema_versions().unwrap(),
+            initialized.applied_schema_versions().unwrap(),
+        );
     }
 }
