@@ -8,6 +8,7 @@ import type {
   CreateWorkflowInput, Chapter,
 } from '../ipc/types';
 import Button from '../components/ui/Button.vue';
+import { countWords, formatWordCount } from '../utils/format';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import CreateBatchDialog from '../components/CreateBatchDialog.vue';
 import Dialog from '../components/ui/Dialog.vue';
@@ -119,6 +120,8 @@ const detailChapter = ref<WorkflowChapterRow | null>(null);
 const detailLoading = ref(false);
 const detailTransformed = ref<string | null>(null);
 const detailTransformedStatus = ref<string | null>(null);
+const detailSourceWordCount = computed<number>(() => sourceChapterDetail.value?.word_count ?? 0);
+const detailTransformedWordCount = computed<number>(() => detailTransformed.value === null ? 0 : countWords(detailTransformed.value));
 async function openChapterDetail(c: WorkflowChapterRow) {
   detailChapter.value = c;
   detailTransformed.value = null;
@@ -519,7 +522,10 @@ watch(() => sources.value, (list) => {
     <Dialog v-if="detailChapter !== null" :open="true" title="Chapter Detail" :width="1200" @update:open="closeChapterDetail">
       <div class="detail-grid">
         <section>
-          <h4>Source Original</h4>
+          <h4>
+            Source Original
+            <span v-if="!sourceChapterLoading && sourceChapterText" class="word-count">{{ formatWordCount(detailSourceWordCount) }}</span>
+          </h4>
           <div v-if="sourceChapterLoading" class="hint">Loading...</div>
           <pre v-else-if="sourceChapterText" class="result-content">{{ sourceChapterText }}</pre>
           <div v-else class="hint">No source text</div>
@@ -528,6 +534,7 @@ watch(() => sources.value, (list) => {
           <h4>
             Transformed
             <span v-if="detailTransformedStatus" class="status" :class="detailTransformedStatus">{{ detailTransformedStatus }}</span>
+            <span v-if="!detailLoading && detailTransformed" class="word-count">{{ formatWordCount(detailTransformedWordCount) }}</span>
           </h4>
           <div v-if="detailLoading" class="hint">Loading...</div>
           <pre v-else-if="detailTransformed" class="result-content">{{ detailTransformed }}</pre>
@@ -645,6 +652,13 @@ watch(() => sources.value, (list) => {
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-height: 400px; }
 .detail-grid section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .detail-grid h4 { margin: 0; font-size: 14px; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
+.detail-grid h4 .word-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: var(--font-weight-regular);
+  font-family: var(--font-mono);
+  margin-left: auto;
+}
 .detail-grid .result-content { background: var(--bg-section); border: 1px solid var(--border-soft); border-radius: var(--radius-pin); padding: 12px; white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.6; }
 .row-actions { text-align: right; }
 .dot {
