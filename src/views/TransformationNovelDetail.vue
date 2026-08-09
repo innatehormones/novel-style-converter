@@ -114,6 +114,58 @@ function closeWorkflowPanel() {
   retrySelectedIds.value = new Set();
 }
 
+// Chapter Detail modal (within Workflow Detail modal)
+const detailChapter = ref<WorkflowChapterRow | null>(null);
+const detailLoading = ref(false);
+const detailTransformed = ref<string | null>(null);
+const detailTransformedStatus = ref<string | null>(null);
+async function openChapterDetail(c: WorkflowChapterRow) {
+  detailChapter.value = c;
+  detailTransformed.value = null;
+  detailTransformedStatus.value = null;
+  sourceChapterDetail.value = null;
+  sourceChapterText.value = '';
+  detailLoading.value = true;
+  sourceChapterLoading.value = true;
+  try {
+    await Promise.all([
+      store.loadResultsForChapter(tnId.value, c.chapter_id),
+      ipcGetChapter(c.chapter_id).then((ch) => {
+        sourceChapterDetail.value = ch;
+        sourceChapterText.value = ch.body;
+      }),
+    ]);
+    const list = store.resultsByTnChapter.get(`${tnId.value}:${c.chapter_id}`) ?? [];
+    const match = list.find((r) => r.batch_id === selectedWorkflowId.value);
+    detailTransformed.value = match?.content ?? null;
+    detailTransformedStatus.value = match?.status ?? null;
+  } catch (e: unknown) {
+    console.error(e);
+  } finally {
+    detailLoading.value = false;
+    sourceChapterLoading.value = false;
+  }
+}
+function closeChapterDetail() {
+  detailChapter.value = null;
+  detailTransformed.value = null;
+  detailTransformedStatus.value = null;
+}
+async function retryFromDetail() {
+  const c = detailChapter.value;
+  if (c === null || selectedWorkflowId.value === null) return;
+  retrySubmitting.value = true;
+  try {
+    await store.retry(selectedWorkflowId.value, [c.chapter_id]);
+    await store.loadChapters(selectedWorkflowId.value);
+    closeChapterDetail();
+  } catch (e: unknown) {
+    console.error(e);
+  } finally {
+    retrySubmitting.value = false;
+  }
+}
+
 async function startWorkflow(id: number) {
   try {
     await store.start(id);
@@ -143,9 +195,6 @@ async function confirmStopWorkflow() {
 function canRetryChapter(c: WorkflowChapterRow): boolean {
   return c.status === 'failed' || c.status === 'skipped';
 }
-const canRetryHeader = computed<boolean>(() =>
-  selectedWorkflowChapters.value.some(canRetryChapter),
-);
 
 const retrySubmitting = ref(false);
 const POLLABLE_STATUSES = new Set(['pending', 'running', 'paused']);
@@ -180,23 +229,6 @@ watch(isBatchLive, (live) => {
   if (live) startChapterPoll(); else stopChapterPoll();
 });
 onUnmounted(() => stopChapterPoll());
-
-const chapterLoading = ref<Set<number>>(new Set());
-function isChapterLoading(tcId: number): boolean { return chapterLoading.value.has(tcId); }
-async function retryOne(c: WorkflowChapterRow) {
-  if (selectedWorkflowId.value === null) return;
-  const set = new Set(chapterLoading.value); set.add(c.tc_id); chapterLoading.value = set;
-  retrySubmitting.value = true;
-  try {
-    await store.retry(selectedWorkflowId.value, [c.chapter_id]);
-    await store.loadChapters(selectedWorkflowId.value);
-  } catch (e: unknown) {
-    console.error(e);
-  } finally {
-    retrySubmitting.value = false;
-    const set2 = new Set(chapterLoading.value); set2.delete(c.tc_id); chapterLoading.value = set2;
-  }
-}
 
 async function doRetry() {
   if (selectedWorkflowId.value === null) return;
@@ -447,9 +479,8 @@ watch(() => sources.value, (list) => {
       <table v-if="selectedWorkflowChapters.length > 0" class="chapter-table">
         <thead>
           <tr>
-            <th v-if="canRetryHeader" style="width: 40px">Pick</th>
-            <th v-if="canRetryHeader" style="width: 80px">Action</th>
-            <th style="width: 60px">#</th>
+            <th style="width: 40px">Pick</th>
+            <th style="width: 80px">Action</th>
             <th>标题</th>
             <th style="width: 100px">状态</th>
             <th>结果预览</th>
@@ -467,16 +498,9 @@ watch(() => sources.value, (list) => {
                 @change="(e) => toggleRetrySelection(c.tc_id, (e.target as HTMLInputElement).checked)"
               />
             </td>
-            <td>
-              <Button
-                v-if="canRetryChapter(c)"
-                size="small"
-                :disabled="!c.is_empty_slot || isChapterLoading(c.tc_id)"
-                :loading="isChapterLoading(c.tc_id)"
-                @click="retryOne(c)"
-              >Retry</Button>
+            <td class="row-actions" @click.stop>
+              <Button size="small" @click="openChapterDetail(c)">Detail</Button>
             </td>
-            <td>{{ c.chapter_idx }}</td>
             <td>{{ c.chapter_title }}</td>
             <td>
   <span v-if="c.status === 'running'" class="dot dot-running" />
@@ -490,6 +514,39 @@ watch(() => sources.value, (list) => {
       </table>
       <div v-else class="empty">No chapters yet</div>
     </Dialog>
+
+    <!-- Chapter Detail modal (within Workflow Detail) -->
+    <Dialog v-if="detailChapter !== null" :open="true" title="Chapter Detail" :width="1200" @update:open="closeChapterDetail">
+      <div class="detail-grid">
+        <section>
+          <h4>Source Original</h4>
+          <div v-if="sourceChapterLoading" class="hint">Loading...</div>
+          <pre v-else-if="sourceChapterText" class="result-content">{{ sourceChapterText }}</pre>
+          <div v-else class="hint">No source text</div>
+        </section>
+        <section>
+          <h4>
+            Transformed
+            <span v-if="detailTransformedStatus" class="status" :class="detailTransformedStatus">{{ detailTransformedStatus }}</span>
+          </h4>
+          <div v-if="detailLoading" class="hint">Loading...</div>
+          <pre v-else-if="detailTransformed" class="result-content">{{ detailTransformed }}</pre>
+          <div v-else class="hint">Not yet transformed</div>
+        </section>
+      </div>
+      <template #footer>
+        <Button
+          v-if="detailChapter !== null && canRetryChapter(detailChapter)"
+          kind="primary"
+          size="small"
+          :disabled="!detailChapter.is_empty_slot || retrySubmitting"
+          :loading="retrySubmitting"
+          @click="retryFromDetail"
+        >Retry</Button>
+        <Button size="small" @click="closeChapterDetail">Close</Button>
+      </template>
+    </Dialog>
+
 
     <CreateBatchDialog
       v-model:open="createBatchOpen"
@@ -585,6 +642,11 @@ watch(() => sources.value, (list) => {
 .status.running { background: var(--bg-section); color: var(--text-secondary); }
 .status.stopped { background: var(--warn-bg); color: var(--warn); border-color: var(--warn-border); }
 .chapter-row.running { background: rgba(196, 92, 60, 0.06); }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-height: 400px; }
+.detail-grid section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.detail-grid h4 { margin: 0; font-size: 14px; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
+.detail-grid .result-content { background: var(--bg-section); border: 1px solid var(--border-soft); border-radius: var(--radius-pin); padding: 12px; white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.6; }
+.row-actions { text-align: right; }
 .dot {
   display: inline-block;
   width: 8px;
