@@ -109,6 +109,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue';
+import { formatTime } from '../utils/format';
 import Button from '../components/ui/Button.vue';
 import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
@@ -212,9 +213,6 @@ async function doClear() {
   }
 }
 
-function formatTime(s: string): string {
-  return s.replace('T', ' ').replace(/\.\d+/, '').replace('Z', '');
-}
 
 function formatLatency(ms: number): string {
   if (ms < 1000) return `${ms} ms`;

@@ -66,6 +66,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue';
+import { formatTime } from '../utils/format';
 import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
 import Tag from './ui/Tag.vue';
@@ -110,9 +111,6 @@ function onClose() {
   emit('close');
 }
 
-function formatTime(s: string): string {
-  return s.replace('T', ' ').replace(/[.]\d+/, '').replace('Z', '');
-}
 
 function formatLatency(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
