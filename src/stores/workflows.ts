@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import {
-  createWorkflow, listWorkflows, getWorkflow, startWorkflow, stopWorkflow,
+  createWorkflow, listWorkflows, getWorkflow, stopWorkflow,
   retryWorkflowChapters, listWorkflowChapters, listTransformationSourceChapters,
   listChapterWorkflowResults,
 } from '../ipc/commands';
@@ -41,12 +41,7 @@ export const useWorkflowsStore = defineStore('workflows', () => {
       return w;
     } finally { loading.value = false; }
   }
-  async function start(batchId: number) {
-    const w = await startWorkflow(batchId);
-    await refresh(batchId);
-    return w;
-  }
-  async function refresh(batchId: number) {
+async function refresh(batchId: number) {
     const w = await getWorkflow(batchId);
     const list = byTn.value.get(w.tn_id);
     if (list) {
@@ -67,6 +62,6 @@ export const useWorkflowsStore = defineStore('workflows', () => {
   return {
     byTn, chaptersByBatch, sourcesByTn, resultsByTnChapter,
     loading, error, loadSources, loadByTn, loadChapters, loadResultsForChapter,
-    create, start, refresh, stop, retry,
+    create, refresh, stop, retry,
   };
 });

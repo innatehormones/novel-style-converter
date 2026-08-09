@@ -38,7 +38,7 @@ impl JobQueue {
     /// **工厂闭包是 JobQueue 能跨线程工作的核心**(因为 `Db` 不是 `Sync`,
     /// `AiProvider` 不是 `Send` 共享的)。
     /// - `db_factory`:每个 worker 启动时调一次,拿到**独立 owned** `Db`。
-    ///   典型实现:`move || Ok(Db::open(&db_path))`。
+    ///   典型实现:`move || Ok(Db::connect(&db_path))`。
     /// - `provider_factory`:每个 job 调一次,基于 `ModelConfig` 生成 owned
     ///   `Box<dyn AiProvider>`。**必须返回 owned**(不能返回 `&'a dyn AiProvider`),
     ///   否则 `Box<dyn Transformer>` 装不下。

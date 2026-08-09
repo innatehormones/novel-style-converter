@@ -182,8 +182,6 @@ export const listWorkflows = (tnId: number): Promise<WorkflowSummary[]> =>
 export const getWorkflow = (batchId: number): Promise<WorkflowSummary> =>
   invoke<WorkflowSummary>('get_workflow', { batchId });
 
-export const startWorkflow = (batchId: number): Promise<WorkflowSummary> =>
-  invoke<WorkflowSummary>('start_workflow', { batchId });
 
 export const listWorkflowChapters = (batchId: number): Promise<WorkflowChapterRow[]> =>
   invoke<WorkflowChapterRow[]>('list_workflow_chapters', { batchId });

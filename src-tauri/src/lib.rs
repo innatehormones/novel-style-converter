@@ -40,7 +40,7 @@ pub fn run() {
     let db_path_for_workers = path.clone();
     let job_queue = Arc::new(JobQueue::new(
         2,
-        move || Ok(Db::open(&db_path_for_workers).expect("worker db open")),
+        move || Ok(Db::connect(&db_path_for_workers).expect("worker db open")),
         |cfg: &nsc_core::models::ModelConfig| -> Box<dyn AiProvider> {
             Box::new(
                 OpenAiProvider::new(cfg.base_url.clone(), cfg.api_key.clone())
@@ -120,7 +120,6 @@ pub fn run() {
             commands::prompts::count_prompt_usage,
             commands::workflows::list_transformation_source_chapters,
             commands::workflows::create_workflow,
-            commands::workflows::start_workflow,
             commands::workflows::list_workflows,
             commands::workflows::get_workflow,
             commands::workflows::list_workflow_chapters,

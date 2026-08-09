@@ -52,16 +52,16 @@ impl BatchScheduler {
         Self { db_path, job_queue }
     }
 
-    /// 原子创建工作流(spec §5.1):单事务里写 batches(status='pending') +
+    /// 原子创建并启动工作流(spec §5.1,§12):单事务里写 batches(status='running',started_at=now) +
     /// workflow_results + N × transformation_chapters(status='pending') +
-    /// N × 空 workflow_result_chapters;不派首章 —— 由用户在 UI 点"启动"
-    /// 触发 `start_workflow` 把 batch 从 Pending 推到 Running 再 dispatch。
+    /// N × 空 workflow_result_chapters;事务提交后立刻 advance_batch 派首章。
+    /// 派首章失败时 safe_stop:所有 pending tc → failed,batch → stopped。
     /// 字段全是必填,不回退任何 TN 默认。
     pub fn create_workflow(&self, spec: WorkflowCreate) -> Result<Batch> {
         if spec.chapter_ids.is_empty() {
             return Err(Error::Validation("必须选择至少一个章节".into()));
         }
-        let db = Db::open(&self.db_path)?;
+        let db = Db::connect(&self.db_path)?;
 
         // 1. 校验 TN / chapter 归属 / prompt / model / mode↔prompt.kind 一致
         let tn = db.transformation_novels().get(spec.transformation_novel_id)?
@@ -77,20 +77,19 @@ impl BatchScheduler {
         }
         let prompt = db.prompts().get(spec.prompt_id)?
             .ok_or_else(|| Error::NotFound(format!("prompt {} 不存在", spec.prompt_id)))?;
-        // model_config 只用来校验存在性(create_workflow 不 dispatch),
-        // 后续 start_workflow 派首章时再按 tc 行的 model_config_id 取具体配置。
+        // model_config 只用来校验存在性;create_workflow 事务提交后立刻按 tc 行的 model_config_id 派首章。
         let _model = db.model_configs().get(spec.model_config_id)?
             .ok_or_else(|| Error::NotFound(format!("model_config {} 不存在", spec.model_config_id)))?;
         if PromptKind::from(prompt.kind) != spec.mode {
             return Err(Error::Validation("prompt kind 与 mode 不一致".into()));
         }
 
-        // 2. 单事务:batch(status=pending,started_at=NULL) + 结果集 + N × tc + N × 空槽
+        // 2. 单事务:batch(status=running,started_at=now) + 结果集 + N × tc + N × 空槽
         let now = Utc::now().to_rfc3339();
         let batch_id: i64 = {
             let tx = db.conn.unchecked_transaction()?;
             tx.execute(
-                "INSERT INTO batches (transformation_novel_id, label, on_failure_policy, status, created_at)                  VALUES (?1, ?2, ?3, 'pending', ?4)",
+                "INSERT INTO batches (transformation_novel_id, label, on_failure_policy, status, created_at, started_at)                  VALUES (?1, ?2, ?3, 'running', ?4, ?4)",
                 rusqlite::params![
                     spec.transformation_novel_id, spec.label,
                     policy_str(spec.on_failure_policy), now,
@@ -126,42 +125,14 @@ impl BatchScheduler {
             batch_id
         };
 
-        let batch = db.batches().get(batch_id)?
-            .ok_or_else(|| Error::NotFound("batch 写入后回读失败".into()))?;
-        Ok(batch)
-    }
-
-    /// 用户在 UI 点"启动"把 Pending 工作流推到 Running 并 dispatch 首章。
-    /// 与 `advance_batch` 的区别:start_workflow 是"从未启动推到运行",
-    /// advance_batch 是"运行中派下一章"。两者路径会合到 dispatch。
-    /// 失败时 safe_stop:pending tc → failed,batch → stopped。
-    pub fn start_workflow(&self, batch_id: i64) -> Result<Batch> {
-        let db = Db::open(&self.db_path)?;
-        let batch = db.batches().get(batch_id)?
-            .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
-        if !matches!(batch.status, BatchStatus::Pending) {
-            return Err(Error::Validation(format!(
-                "batch {batch_id} 状态 {:?} 不能 start(必须 Pending)", batch.status
-            )));
-        }
-        let now = Utc::now().to_rfc3339();
-        {
-            let tx = db.conn.unchecked_transaction()?;
-            tx.execute(
-                "UPDATE batches SET status='running', started_at=?1 WHERE id=?2",
-                rusqlite::params![now, batch_id],
-            )?;
-            tx.commit()?;
-        }
-        // advance_batch 会读 pending tc 并 dispatch。如果 dispatch 失败,
-        // 把剩余 pending 一律 failed,batch → stopped(不沿用 safe_stop_on_dispatch_failure,
-        // 因为 start 路径下没有 first_tid 概念,逐个 tc 标失败更直观)。
+        // 创建即运行(spec §12):事务提交后立刻 advance_batch 派首章。
+        // 派首章失败时 safe_stop,所有 pending tc → failed,batch → stopped。
         if let Err(e) = self.advance_batch(&db, batch_id) {
             let now2 = Utc::now().to_rfc3339();
             let tx2 = db.conn.unchecked_transaction()?;
             tx2.execute(
                 "UPDATE transformation_chapters                  SET status='failed', error=?2, completed_at=?3, result_content=NULL,                      tokens_in=NULL, tokens_out=NULL                  WHERE batch_id=?1 AND status='pending'",
-                rusqlite::params![batch_id, format!("start_workflow dispatch 失败: {e}"), now2],
+                rusqlite::params![batch_id, format!("create_workflow 派首章失败: {e}"), now2],
             )?;
             tx2.execute(
                 "UPDATE batches SET status='stopped', ended_at=?1 WHERE id=?2",
@@ -170,9 +141,10 @@ impl BatchScheduler {
             tx2.commit()?;
             return Err(e);
         }
-        let updated = db.batches().get(batch_id)?
-            .ok_or_else(|| Error::NotFound("batch 回读失败".into()))?;
-        Ok(updated)
+
+        let batch = db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound("batch 写入后回读失败".into()))?;
+        Ok(batch)
     }
 
     /// 派发一个具体 tc(按 tid)。从 Db 读 chapter,构造 JobSpec 塞进 JobQueue。
