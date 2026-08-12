@@ -207,6 +207,7 @@ export interface WorkflowSummary {
   failed_count: number;
   skipped_count: number;
   total_count: number;
+  promoted_count: number;
 }
 
 /** `list_workflow_chapters` 返回:tc 行 + 章节标题/idx + 关联结果槽预览。 */

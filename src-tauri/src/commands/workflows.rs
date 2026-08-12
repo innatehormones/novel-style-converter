@@ -66,6 +66,7 @@ pub struct WorkflowSummary {
     pub failed_count: i64,
     pub skipped_count: i64,
     pub total_count: i64,
+    pub promoted_count: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -135,6 +136,11 @@ fn to_summary(db: &Db, b: &Batch) -> WorkflowSummary {
         rusqlite::params![b.id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     ).unwrap_or((0, 0, 0, 0));
+    let promoted_count: i64 = db.conn.query_row(
+        "SELECT COUNT(*) FROM data_assets WHERE source_workflow_id = ?1",
+        rusqlite::params![b.id],
+        |row| row.get(0),
+    ).unwrap_or(0);
     WorkflowSummary {
         id: b.id,
         tn_id: b.transformation_novel_id,
@@ -147,6 +153,7 @@ fn to_summary(db: &Db, b: &Batch) -> WorkflowSummary {
         failed_count: failed,
         skipped_count: skipped,
         total_count: total,
+        promoted_count,
     }
 }
 
