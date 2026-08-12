@@ -11,11 +11,14 @@ import Button from '../components/ui/Button.vue';
 import { countWords, formatTime, formatWordCount } from '../utils/format';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import CreateBatchDialog from '../components/CreateBatchDialog.vue';
+import PromoteWorkflowDialog from '../components/PromoteWorkflowDialog.vue';
 import Dialog from '../components/ui/Dialog.vue';
 
 const route = useRoute();
 const router = useRouter();
 const tnId = computed(() => Number(route.params.tnId));
+/// 用 tnId 作为默认 title 后缀(暂无 transformation 元数据加载,够用)。
+const tnTitle = computed(() => `数据资产 #${tnId.value}`);
 
 const store = useWorkflowsStore();
 
@@ -68,6 +71,31 @@ const openSourceResults = computed<ChapterWorkflowResultRow[]>(() => {
 const stopConfirmOpen = ref(false);
 const stopTargetId = ref<number | null>(null);
 const retrySelectedIds = ref<Set<number>>(new Set());
+
+// 工作流转正
+const promoteOpen = ref(false);
+const promoteSubmitting = ref(false);
+const promoteError = ref<string | null>(null);
+
+function openPromoteDialog() {
+  if (selectedWorkflow.value === null) return;
+  promoteError.value = null;
+  promoteOpen.value = true;
+}
+async function confirmPromote(title: string) {
+  const sw = selectedWorkflow.value;
+  if (sw === null) return;
+  promoteSubmitting.value = true;
+  promoteError.value = null;
+  try {
+    await store.promote(sw.id, title);
+    promoteOpen.value = false;
+  } catch (e: unknown) {
+    promoteError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    promoteSubmitting.value = false;
+  }
+}
 
 // 章节Detail侧边栏的源原文
 const sourceChapterDetail = ref<Chapter | null>(null);
@@ -438,6 +466,11 @@ watch(() => sources.value, (list) => {
             <td>{{ fmtTime(w.created_at) }}</td>
             <td>{{ fmtTime(w.ended_at) }}</td>
             <td class="workflow-actions" @click.stop>
+              <span
+                v-if="w.promoted_count > 0"
+                class="promoted-tag"
+                :title="`已转正 ${w.promoted_count} 份`"
+              >转正 × {{ w.promoted_count }}</span>
               <Button size="small" @click="openWorkflowPanel(w)">详情</Button>
             </td>
           </tr>
@@ -504,6 +537,21 @@ watch(() => sources.value, (list) => {
         >
           ↻ 重试所选 ({{ retrySelectedIds.size }})
         </Button>
+        <Button
+          v-if="selectedWorkflow.status === 'stopped'"
+          size="small"
+          :loading="promoteSubmitting"
+          @click="openPromoteDialog"
+        >
+          ▶ 转为数据资产
+        </Button>
+        <span
+          v-if="selectedWorkflow.status === 'stopped' && selectedWorkflow.promoted_count > 0"
+          class="promoted-tag"
+          :title="`已基于此工作流转正 ${selectedWorkflow.promoted_count} 份数据资产`"
+        >
+          已转正 × {{ selectedWorkflow.promoted_count }}
+        </span>
       </div>
       <div v-if="reconvertError" class="error-banner">
         <span>重新转换失败：{{ reconvertError }}</span>
@@ -585,6 +633,17 @@ watch(() => sources.value, (list) => {
       </template>
     </Dialog>
 
+
+    <PromoteWorkflowDialog
+      v-if="selectedWorkflow !== null"
+      v-model:open="promoteOpen"
+      :workflow-label="selectedWorkflow.label ?? `工作流 #${selectedWorkflow.id}`"
+      :source-data-asset-title="tnTitle"
+      :success-count="selectedWorkflow.done_count"
+      :fail-count="selectedWorkflow.failed_count"
+      :skip-count="selectedWorkflow.skipped_count"
+      @confirm="confirmPromote"
+    />
 
     <CreateBatchDialog
       v-model:open="createBatchOpen"
@@ -813,5 +872,17 @@ watch(() => sources.value, (list) => {
   font-size: 12px;
   color: var(--text-muted);
   padding: 8px 0;
+}
+.promoted-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  font-size: 12px;
+  font-weight: 500;
+  margin-right: 6px;
+  cursor: default;
+  white-space: nowrap;
 }
 </style>
