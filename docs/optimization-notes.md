@@ -15,7 +15,7 @@ A single upload can produce many data assets, and the data assets survive the up
 | Model (LLM 配置) | ✅ 完成 | 软删 + 密钥必抹 + per-model 并发 + ProviderCache;`seed_default_model_from_env` 静默兜底移除。详细见 "Model refactor — completed" |
 | Prompts (提示词) | ✅ 完成 | enum 合并 (`TransformMode` → `PromptKind`);render 去 Result;软删;`prev_transformed` 真接 `workflow_result_chapters.content` |
 | AI call logs (调用日志) | ✅ 完成 + 收尾 | 表 + recorder + UI 看板;dead chain (`list_ai_call_logs_by_context`) 全删;`let _ = PromptKind::Compress` 遮掩代码删;**启动 panic 修复** —— `spawn_writer` 改 `std::thread::spawn` + 内建 tokio runtime |
-| Workflows (转换 / batch) | ✅ 完成 | `on_failure_policy` 三策略真正生效(PauseAndReview/Terminate/SkipFailed);`create_workflow` 不再自动 dispatch,创建后 batch=pending 等用户点启动;`transformation_novels.note` 加备注字段;`safe_stop_on_dispatch_failure` + `BatchOverrides` + `create_batch` + `dispatch_batch` 删除(死代码) |
+| Workflows (转换 / batch) | ✅ 完成 + **转正** | `on_failure_policy` 三策略真正生效;`create_workflow` 不再自动 dispatch;`transformation_novels.note`;死代码删除。**新加工作流转正数据资产**(见 "Workflow → DataAsset 转正" 段) |
 
 **核心架构原则**(贯穿所有已重构模块):
 
@@ -602,6 +602,84 @@ A single upload can produce many data assets, and the data assets survive the up
 - 同类问题可能潜伏在 `BatchScheduler` / `startup_recovery` 等其他 module,review 时关注
 
 
+
+## Workflow → DataAsset 转正(工作流结果物化为新数据资产)
+
+### 业务目的
+
+工作流跑完(doned + failed + skipped 都有)后,用户可以**手动**触发转正,把整批结果物化为一份**新的**数据资产(`data_assets`)。新 da 与源 da **互相独立**(沿用 `upload_id` 但本身是独立实体),可以单独在数据资产列表浏览、编辑、删除。
+
+不自动触发 —— 用户主导。理由:转正是"工作流成果的可交付",不是后台流水线动作。
+
+### 核心业务规则
+
+1. **触发前置**:`batch.status='stopped'`(其他状态 → Validation 拒绝)
+2. **前置校验**(每个 tc):`status ∈ {done, failed, skipped}`;`done` 的必须 `workflow_result_chapters.content IS NOT NULL`(数据损坏兜底)
+3. **二元填充规则**:
+   - `done` → 写 `transformed` chapter(`body = wrc.content`,`source_chapter_id = 原 chapter.id`)
+   - `failed` / `skipped` → 写 `original` chapter(`body = 原 chapter.body`,`source_chapter_id = 原 chapter.id`)
+4. **数据资产标记**:`kind = 'promoted'`(区别于 `kind = 'source'`),`source_workflow_id` + `source_data_asset_id` 软引用源对象
+5. **允许重复转正**:append-only,每次独立 da,`title` 必填供用户区分
+6. **删除边界**:
+   - 删源 `data_assets` → `promoted.source_data_asset_id SET NULL`(软引用,promoted 保留)
+   - 删源 `batches` → `promoted.source_workflow_id SET NULL`(同上)
+   - 删 promoted → cascade 删其 chapters(沿用 v15 已有的 upload 上传级联)
+
+### Data 扩展(migration 0021,破坏性,测试阶段不写回滚)
+
+```sql
+ALTER TABLE data_assets ADD COLUMN kind TEXT NOT NULL DEFAULT 'source';
+ALTER TABLE data_assets ADD COLUMN source_workflow_id INTEGER REFERENCES batches(id) ON DELETE SET NULL;
+ALTER TABLE data_assets ADD COLUMN source_data_asset_id INTEGER REFERENCES data_assets(id) ON DELETE SET NULL;
+ALTER TABLE data_assets ADD COLUMN note TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE chapters ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'original';
+ALTER TABLE chapters ADD COLUMN source_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL;
+```
+
+`DataAssetKind` enum:`Source` / `Promoted`(serde rename lowercase)。
+
+### 关键 IPC
+
+| 命令 | 入参 | 出参 | 用途 |
+|---|---|---|---|
+| `promote_workflow` | `batch_id, title` | `DataAsset` | 单事务转正:校验 → 写 da → 写 N chapters |
+| `count_promoted_data_assets_by_workflow` | `batch_id` | `i64` | workflow 列表 badge 显示 |
+| `list_promoted_data_assets_for_workflow` | `batch_id` | `DataAsset[]` | workflow 详情下钻"派生的数据资产" |
+| `list_data_assets_by_upload` | `upload_id` | `DataAsset[]` | upload 详情展示所有派生(包含 promoted) |
+
+`list_data_assets` / `list_workflows` / `get_workflow` 返回结构分别加了 `kind / source_*/note / promoted_count` 字段。
+
+### 单事务顺序(在 `PromotionRepo::create_promoted_from_workflow`)
+
+1. 读 `batch.status` → 校验 `'stopped'`
+2. 读 `source_data_asset_id` (batch → tn → da) + `upload_id` (从 da)
+3. SELECT tc + chapter + wrc.content(LEFT JOIN 拿结果),`ORDER BY chapter.idx ASC`
+4. 前置校验:每个 tc 的 status + done 必须有 content
+5. INSERT promoted da(`kind='promoted'`,`source_workflow_id=batch_id`,`source_data_asset_id=原da`,沿用 `upload_id`)
+6. INSERT N 个 chapter(`source_kind` / `source_chapter_id=原 chapter.id` 按二元规则填)
+7. COMMIT
+
+任一失败 → ROLLBACK,无副作用。
+
+### Design intent
+
+- **append-only,允许重复转正**:用户可能用同一 batch 多次转正(不同 title,不同 note);历史保留,便于对比或重做
+- **软引用而非 FK 级联**:`source_workflow_id` / `source_data_asset_id` 用 `ON DELETE SET NULL` 而非 `CASCADE`,工作流 / 源 da 删除不影响 promoted 的可读性(用户可能想保留"这份转换结果"作为存档)
+- **二元填充规则** vs. **失败章节留空**:用户原话"无论里面成功失败(若失败用原文,成功用转换的文章),可以将一个工作流转成新的数据资产" —— **结果永远填满**,不让 promote 出来的 da 出现"半成品"
+- **手动触发 vs. 自动**:`batch.status` 进 `'stopped'` 后**不**自动 promote;用户主导,UI 加"转正"按钮触发
+- **数据迁移破坏性**:不写回滚,清库重来;开发期收益 > 维护成本
+
+### 已知后续工作
+
+- 前端 UI 接入(任务 11-15 计划中,见下)
+  - `PromoteWorkflowDialog.vue`(输入 title + note,显示将派生几个 chapter)
+  - `TransformationNovelDetail.vue` 工作流列表加 "转正" 按钮 + 派生数 badge
+  - `Library.vue` 加 `kind` / `promoted_count` 列
+  - `Upload.vue` 加 `promoted_count` 派生数
+  - `parse.vue` 接 promoted da 只读模式 + `source_kind` 列
+
+---
 
 ## Workflows refactor — completed
 
