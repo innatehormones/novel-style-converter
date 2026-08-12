@@ -1,6 +1,6 @@
 <template>
   <section>
-    <PageHeader :title="pageTitle" subtitle="在这里管理上传文件、解析后的数据资产与转换工程">
+    <PageHeader :title="pageTitle" subtitle="在这里管理上传原文、解析后的数据资产与转换工程">
       <template #actions>
         <Button v-if="page === 'uploads'" kind="primary" :loading="store.uploading" @click="uploadDialogOpen = true">上传 .txt</Button>
       </template>
@@ -36,7 +36,7 @@
 
     <template v-else-if="page === 'data-assets'">
       <div v-if="!store.loading && store.dataAssets.length === 0" class="empty">
-        还没有数据资产。请到“上传”页面选择文件并解析章节。
+        还没有数据资产。请到“上传原文”页面选择文件并解析章节。
       </div>
       <Table
         v-else
@@ -119,7 +119,7 @@
 
     <ConfirmDialog
       v-model:open="deleteUploadConfirmOpen"
-      title="删除上传"
+      title="删除上传原文"
       :message="deleteUploadMessage"
       kind="danger"
       confirm-text="删除"
@@ -185,7 +185,7 @@ function daCount(uploadId: number): number {
 type Page = 'uploads' | 'data-assets' | 'transformations';
 const page = computed<Page>(() => (route.meta.libraryPage as Page | undefined) ?? 'uploads');
 const pageTitle = computed(() => ({
-  uploads: '上传',
+  uploads: '上传原文',
   'data-assets': '数据资产',
   transformations: '转换工程',
 })[page.value]);

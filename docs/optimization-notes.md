@@ -11,7 +11,7 @@ A single upload can produce many data assets, and the data assets survive the up
 
 | 模块 | 状态 | 主要边界 / 关键 commit |
 |---|---|---|
-| Upload (上传) | ✅ 完成 | 解耦 upload / data_asset;chapter.body 自包含;删除 preview + 非 cascade。详细见 "Upload module (post-refactor)" |
+| Upload (上传原文) | ✅ 完成 | 解耦 upload / data_asset;chapter.body 自包含;删除 preview + 非 cascade。详细见 "Upload module (post-refactor)" |
 | Model (LLM 配置) | ✅ 完成 | 软删 + 密钥必抹 + per-model 并发 + ProviderCache;`seed_default_model_from_env` 静默兜底移除。详细见 "Model refactor — completed" |
 | Prompts (提示词) | ✅ 完成 | enum 合并 (`TransformMode` → `PromptKind`);render 去 Result;软删;`prev_transformed` 真接 `workflow_result_chapters.content` |
 | AI call logs (调用日志) | ✅ 完成 + 收尾 | 表 + recorder + UI 看板;dead chain (`list_ai_call_logs_by_context`) 全删;`let _ = PromptKind::Compress` 遮掩代码删;**启动 panic 修复** —— `spawn_writer` 改 `std::thread::spawn` + 内建 tokio runtime |
@@ -139,7 +139,7 @@ A single upload can produce many data assets, and the data assets survive the up
 
 ### UI / flow
 
-#### 1. Library "上传" tab(列表)
+#### 1. Library "上传原文" tab(列表)
 - 列: filename / size / words / uploaded / **数据资产 N 个** / 操作
 - "数据资产" 列来自 `daCountByUpload` computed:O(N) 扫 `store.dataAssets` 建 Map<upload_id, count>
 - 操作按钮:**查看** / **解析章节** / **删除**
@@ -177,7 +177,7 @@ A single upload can produce many data assets, and the data assets survive the up
 - **同一 upload 可多次 commit** → 多个 da 共存(parse 后跳 `/library/data/:newDaId`)
 - 离开 parse 页 `onUnmounted` 调 `store.unload()` —— 清空 rawText/source/workingChapters 等大对象,释放 pinia store 内存
 
-#### 5. 删除 upload(在 Library "上传" tab)
+#### 5. 删除 upload(在 Library "上传原文" tab)
 - 按钮 → 调 `preview_upload_deletion` IPC 列出派生 da(`{id, title, chapters_count, tn_count}`)
 - 弹 ConfirmDialog 警告:
   - 0 个派生 da: "Confirm delete upload \"X\"?"
