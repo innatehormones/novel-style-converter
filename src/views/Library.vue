@@ -45,8 +45,16 @@
         :row-key="(row) => row.id"
       >
         <template #cell-title="{ row }">{{ row.title }}</template>
+        <template #cell-kind="{ row }">
+          <Tag v-if="row.kind === 'promoted'" kind="success">派生</Tag>
+          <Tag v-else>源</Tag>
+        </template>
         <template #cell-source="{ row }">
           <span class="muted">{{ row.filename }}</span>
+        </template>
+        <template #cell-derived="{ row }">
+          <Tag v-if="row.promoted_count > 0" kind="success">{{ row.promoted_count }} 个</Tag>
+          <span v-else class="muted">—</span>
         </template>
         <template #cell-words="{ row }">{{ formatWordCount(row.word_count) }}</template>
         <template #cell-status="{ row }">
@@ -221,8 +229,10 @@ const uploadColumns = [
 
 const daColumns = [
   { key: 'title', title: '标题', width: '220px' },
+  { key: 'kind', title: '类型', width: '100px' },
   { key: 'source', title: '来源', width: '260px' },
   { key: 'words', title: '字数', width: '100px' },
+  { key: 'derived', title: '派生数', width: '100px' },
   { key: 'status', title: '状态', width: '120px' },
   { key: 'parsed', title: '解析时间', width: '180px' },
   { key: 'actions', title: '操作', width: '200px', type: 'actions' as const },
