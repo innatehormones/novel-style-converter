@@ -1,6 +1,6 @@
 <template>
   <section>
-    <PageHeader :title="pageTitle" subtitle="在这里管理上传文件、解析后的数据资产与转换工作区">
+    <PageHeader :title="pageTitle" subtitle="在这里管理上传文件、解析后的数据资产与转换工程">
       <template #actions>
         <Button v-if="page === 'uploads'" kind="primary" :loading="store.uploading" @click="uploadDialogOpen = true">上传 .txt</Button>
       </template>
@@ -58,18 +58,18 @@
         </template>
         <template #cell-words="{ row }">{{ formatWordCount(row.word_count) }}</template>
         <template #cell-status="{ row }">
-          <Tag v-if="row.tn_count > 0" kind="warn">有 {{ row.tn_count }} 个工作区</Tag>
+          <Tag v-if="row.tn_count > 0" kind="warn">有 {{ row.tn_count }} 个工程</Tag>
           <Tag v-else kind="success">无引用</Tag>
         </template>
         <template #cell-parsed="{ row }">{{ formatTime(row.parsed_at) }}</template>
         <template #cell-actions="{ row }">
           <Button size="small" @click="goDataAsset(row.id)">打开</Button>
-          <Button size="small" @click="openCreateTn(row.id)">新建工作区</Button>
+          <Button size="small" @click="openCreateTn(row.id)">新建工程</Button>
           <Button
             size="small"
             kind="danger"
             :disabled="row.tn_count > 0"
-            :title="row.tn_count > 0 ? `有 ${row.tn_count} 个工作区引用,请先删除工作区` : ''"
+            :title="row.tn_count > 0 ? `有 ${row.tn_count }} 个工程引用,请先删除工程` : ''"
             @click="onDeleteDa(row.id, row.title)"
           >删除</Button>
         </template>
@@ -78,7 +78,7 @@
 
     <template v-else>
       <div v-if="!store.loading && store.transformationNovels.length === 0" class="empty">
-        还没有转换工作区。请到“数据资产”页面选择资产并新建工作区。
+        还没有转换工程。请到“数据资产”页面选择资产并新建工程。
       </div>
       <Table
         v-else
@@ -187,7 +187,7 @@ const page = computed<Page>(() => (route.meta.libraryPage as Page | undefined) ?
 const pageTitle = computed(() => ({
   uploads: '上传',
   'data-assets': '数据资产',
-  transformations: '转换工作区',
+  transformations: '转换工程',
 })[page.value]);
 
 const uploadDialogOpen = ref(false);

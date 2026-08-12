@@ -44,7 +44,7 @@ interface Item { to: string; label: string; icon: Component }
 const topItems: Item[] = [
   { to: '/uploads', label: '上传', icon: markRaw(IconUpload) },
   { to: '/data-assets', label: '数据资产', icon: markRaw(IconDatabase) },
-  { to: '/transformations', label: '转换工作区', icon: markRaw(IconRepeat) },
+  { to: '/transformations', label: '转换工程', icon: markRaw(IconRepeat) },
   { to: '/prompts', label: '提示词', icon: markRaw(IconFileText) },
   { to: '/models', label: '模型', icon: markRaw(IconBox) },
   { to: '/ai-calls', label: 'AI 调用', icon: markRaw(IconActivity) },

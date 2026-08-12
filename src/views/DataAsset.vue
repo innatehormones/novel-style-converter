@@ -9,7 +9,7 @@
       <template #meta>
         <span v-if="store.kind === 'promoted'" class="badge derived">派生资产</span>
         <span v-else class="badge">源资产</span>
-        <span v-if="store.tnCount > 0" class="badge locked">有 {{ store.tnCount }} 个工作区</span>
+        <span v-if="store.tnCount > 0" class="badge locked">有 {{ store.tnCount }} 个工程</span>
         <span v-else-if="store.kind === 'source'" class="badge">已解析</span>
         <span v-if="store.parsedAt" class="src">{{ formatTime(store.parsedAt) }}</span>
         <span v-if="store.sourceWorkflowId !== null" class="src">来自工作流 #{{ store.sourceWorkflowId }}</span>
@@ -18,7 +18,7 @@
         <Button
           kind="danger"
           :disabled="store.tnCount > 0"
-          :title="store.tnCount > 0 ? `有 ${store.tnCount} 个工作区引用,请先删除工作区` : ''"
+          :title="store.tnCount > 0 ? `有 ${store.tnCount} 个工程引用,请先删除工程` : ''"
           @click="onDelete"
         >删除资产</Button>
       </template>
