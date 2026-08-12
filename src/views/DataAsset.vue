@@ -7,9 +7,12 @@
         </Button>
       </template>
       <template #meta>
+        <span v-if="store.kind === 'promoted'" class="badge derived">派生资产</span>
+        <span v-else class="badge">源资产</span>
         <span v-if="store.tnCount > 0" class="badge locked">有 {{ store.tnCount }} 个工作区</span>
-        <span v-else class="badge">已解析</span>
+        <span v-else-if="store.kind === 'source'" class="badge">已解析</span>
         <span v-if="store.parsedAt" class="src">{{ formatTime(store.parsedAt) }}</span>
+        <span v-if="store.sourceWorkflowId !== null" class="src">来自工作流 #{{ store.sourceWorkflowId }}</span>
       </template>
       <template #actions>
         <Button
@@ -56,6 +59,8 @@
             >
               <span class="idx">{{ index + 1 }}</span>
               <span class="title">{{ item.title }}</span>
+              <span v-if="store.sourceKinds[index] === 'transformed'" class="kind-tag transformed" title="来自工作流转换结果">转换</span>
+              <span v-else class="kind-tag original" title="原文(派生 da 失败章节)">原文</span>
               <span class="size">{{ item.word_count }} 字</span>
             </div>
           </template>
@@ -243,5 +248,27 @@ function onBack() {
   justify-content: center;
   color: var(--text-secondary);
   font-size: 13px;
+}
+.badge.derived {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-color: #c8e6c9;
+}
+.kind-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+.kind-tag.transformed {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+.kind-tag.original {
+  background: #f5f5f5;
+  color: #757575;
 }
 </style>

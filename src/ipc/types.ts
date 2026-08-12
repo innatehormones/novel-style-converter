@@ -119,6 +119,8 @@ export interface DataAssetChapter {
   title: string;
   body: string;
   word_count: number;
+  /// 章节来源:transformed = 工作流转换结果;original = 原文(派生 da 失败章节回退)。
+  source_kind: 'transformed' | 'original';
 }
 
 /// commit_data_asset 入参:title + 章节列表(每个含 title + byte 范围)。

@@ -15,6 +15,12 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
   const selectedIdx = ref<number | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  /// 跟 chapters 数组对齐:每条对应章节的 source_kind(给 UI 标签用)。
+  const sourceKinds = ref<('transformed' | 'original')[]>([]);
+  // 工作流转正相关元数据
+  const kind = ref<'source' | 'promoted'>('source');
+  const sourceWorkflowId = ref<number | null>(null);
+  const note = ref<string>('');
 
   let requestToken = 0;
 
@@ -23,10 +29,14 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
     loading.value = true;
     error.value = null;
     chapters.value = [];
+    sourceKinds.value = [];
     title.value = '';
     filename.value = '';
     parsedAt.value = null;
     tnCount.value = 0;
+    kind.value = 'source';
+    sourceWorkflowId.value = null;
+    note.value = '';
     ++requestToken;
     const token = requestToken;
     try {
@@ -40,12 +50,20 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
         content: c.body,
         word_count: c.word_count,
       }));
+      sourceKinds.value = chs.map((c: DataAssetChapter) => c.source_kind);
       const row: DataAssetRow | undefined = assets.find((a: DataAssetRow) => a.id === id);
       if (row) {
         title.value = row.title;
         filename.value = row.filename;
         parsedAt.value = row.parsed_at;
         tnCount.value = row.tn_count;
+        kind.value = row.kind;
+        sourceWorkflowId.value = row.source_workflow_id;
+        note.value = row.note ?? '';
+      } else {
+        kind.value = 'source';
+        sourceWorkflowId.value = null;
+        note.value = '';
       }
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
@@ -69,8 +87,9 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
 
   return {
     dataAssetId, title, filename, parsedAt, tnCount,
-    chapters, selectedIdx, selectedContent,
+    chapters, sourceKinds, selectedIdx, selectedContent,
     loading, error,
+    kind, sourceWorkflowId, note,
     load, selectChapter, selectFirstIfNone,
   };
 });

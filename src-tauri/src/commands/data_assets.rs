@@ -15,6 +15,9 @@ pub struct DataAssetChapter {
     pub title: String,
     pub body: String,
     pub word_count: i32,
+    /// 章节来源:transformed = 工作流转换结果;original = 原文(派生 da 失败章节回退)。
+    /// 旧 da(migration 0021 之前)没有该字段,反序列化时默认 "original"。
+    pub source_kind: String,
 }
 
 impl From<&Chapter> for DataAssetChapter {
@@ -25,6 +28,7 @@ impl From<&Chapter> for DataAssetChapter {
             title: c.title.clone(),
             body: c.body.clone(),
             word_count: c.word_count,
+            source_kind: c.source_kind.clone(),
         }
     }
 }
