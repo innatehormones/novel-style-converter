@@ -65,6 +65,7 @@ pub fn commit_data_asset(
         upload_id,
         title: title.to_string(),
         source_filename,
+        ..Default::default()
     }).map_err(|e| e.to_string())?;
 
     let new_chapters: Vec<NewChapter> = chapters.into_iter().enumerate().map(|(i, c)| {
@@ -75,6 +76,7 @@ pub fn commit_data_asset(
             title: c.title,
             body: c.content,
             word_count: wc,
+            ..Default::default()
         }
     }).collect();
 

@@ -68,6 +68,9 @@ impl Db {
     pub fn prompts(&self) -> PromptRepo<'_> { PromptRepo { conn: &self.conn } }
     pub fn model_configs(&self) -> ModelConfigRepo<'_> { ModelConfigRepo { conn: &self.conn } }
     pub fn data_assets(&self) -> DataAssetRepo<'_> { DataAssetRepo { conn: &self.conn } }
+    pub fn promotion(&self) -> crate::db::repo::promotion::PromotionRepo<'_> {
+        crate::db::repo::promotion::PromotionRepo { conn: &self.conn }
+    }
     pub fn batches(&self) -> BatchRepo<'_> { BatchRepo { conn: &self.conn } }
     pub fn workflow_results(&self) -> WorkflowResultRepo<'_> {
         WorkflowResultRepo { conn: &self.conn }

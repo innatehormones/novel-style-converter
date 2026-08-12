@@ -148,6 +148,7 @@ pub fn parse_chapters(
             title: s.title,
             body: s.content,
             word_count: wc,
+            ..Default::default()
         }
     }).collect();
     let db = db.lock().map_err(|e| e.to_string())?;

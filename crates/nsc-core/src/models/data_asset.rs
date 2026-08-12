@@ -27,4 +27,22 @@ pub struct NewDataAsset {
     pub upload_id: i64,
     pub title: String,
     pub source_filename: String,
+    pub kind: crate::models::DataAssetKind,
+    pub source_workflow_id: Option<i64>,
+    pub source_data_asset_id: Option<i64>,
+    pub note: String,
+}
+
+impl Default for NewDataAsset {
+    fn default() -> Self {
+        Self {
+            upload_id: 0,
+            title: String::new(),
+            source_filename: String::new(),
+            kind: crate::models::DataAssetKind::Source,
+            source_workflow_id: None,
+            source_data_asset_id: None,
+            note: String::new(),
+        }
+    }
 }

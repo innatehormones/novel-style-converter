@@ -16,5 +16,6 @@ pub use data_asset::DataAssetRepo;
 pub use batch::{BatchRepo, BatchStatusCount};
 pub use ai_call_log::{truncate_preview, AiCallLogRepo, PREVIEW_BYTES};
 pub mod workflow_result;
+pub mod promotion;
 
 pub use workflow_result::WorkflowResultRepo;
