@@ -10,13 +10,13 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   ModelConfig, ModelConfigInput,
   UploadSummary, CleaningPreview,
-  DataAssetChapter, DataAssetRow, CommitDataAssetInput,
+  DataAssetChapter, DataAssetRow, DataAsset, CommitDataAssetInput,
   ChapterSegment, ChapterMeta, ChapterContentRow, Chapter, ChapterInput,
   TransformationNovelSummary, TransformationChapterRow,
   CreateTransformationNovelInput, UpdateTransformationNovelInput,
   EnqueuePayload, EnqueueAllPayload, QueueSnapshot,
   Prompt, PromptInput, TestModelReport,
-  CreateWorkflowInput, WorkflowSummary, WorkflowChapterRow,
+  CreateWorkflowInput, PromoteWorkflowInput, WorkflowSummary, WorkflowChapterRow,
   SourceChapterRow, ChapterWorkflowResultRow,
   UploadDeletePreview,
   AiCallLog, AiCallLogFilter,
@@ -175,6 +175,23 @@ export const listTransformationSourceChapters = (tnId: number): Promise<SourceCh
 
 export const createWorkflow = (payload: CreateWorkflowInput): Promise<WorkflowSummary> =>
   invoke<WorkflowSummary>('create_workflow', { payload });
+
+// ── Workflow → DataAsset 转正 ──────────────────────────────────────
+/// 把 Stopped workflow 的结果物化为新的 promoted data_asset。
+export const promoteWorkflow = (input: PromoteWorkflowInput): Promise<DataAsset> =>
+  invoke<DataAsset>('promote_workflow', input);
+
+/// 统计指定 workflow 已派生出多少 promoted da(给 UI badge 用)。
+export const countPromotedDataAssetsByWorkflow = (batchId: number): Promise<number> =>
+  invoke<number>('count_promoted_data_assets_by_workflow', { batchId });
+
+/// 列出指定 workflow 派生的所有 promoted da(详情下钻用)。
+export const listPromotedDataAssetsForWorkflow = (batchId: number): Promise<DataAsset[]> =>
+  invoke<DataAsset[]>('list_promoted_data_assets_for_workflow', { batchId });
+
+/// 列出指定 upload 派生的所有 data_asset(包含 source + promoted)。
+export const listDataAssetsByUpload = (uploadId: number): Promise<DataAsset[]> =>
+  invoke<DataAsset[]>('list_data_assets_by_upload', { uploadId });
 
 export const listWorkflows = (tnId: number): Promise<WorkflowSummary[]> =>
   invoke<WorkflowSummary[]>('list_workflows', { tnId });

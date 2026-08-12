@@ -62,6 +62,22 @@ export interface UploadSummary {
   word_count: number;
 }
 
+/// 数据资产类型 — source 是原始解析产物,promoted 是从工作流结果派生的新资产。
+export type DataAssetKind = 'source' | 'promoted';
+
+/// 单条 data_asset 元数据(供 promote_workflow / list_data_assets_by_upload 等返回)。
+export interface DataAsset {
+  id: number;
+  upload_id: number;
+  title: string;
+  parsed_at: string;
+  source_filename: string;
+  kind: DataAssetKind;
+  source_workflow_id: number | null;
+  source_data_asset_id: number | null;
+  note: string;
+}
+
 /// State 2: 一次解析结果 = 一份 data_asset + 一组分章节切片。
 export interface DataAssetSummary {
   id: number;
@@ -84,6 +100,16 @@ export interface DataAssetRow {
   word_count: number;
   /// COUNT(transformation_novels.id) WHERE data_asset_id = da.id。
   tn_count: number;
+  /// 资产类型:source = 原始解析;promoted = 从工作流结果派生。
+  kind: DataAssetKind;
+  /// 当 kind=promoted 时,记录源 workflow(batch.id);source 时为 null。
+  source_workflow_id: number | null;
+  /// 当 kind=promoted 时,记录源 data_asset.id;source 时为 null。
+  source_data_asset_id: number | null;
+  /// 用户备注。
+  note: string;
+  /// 派生出多少 promoted da(仅 source 类型有值;promoted 类型始终 0)。
+  promoted_count: number;
 }
 
 /// State 2 章节元数据(从 list_data_asset_chapters 返回)。正文由前端按 byte 切片 original_text。
@@ -135,6 +161,10 @@ export interface Chapter {
   title: string;
   body: string;
   word_count: number;
+  /// 章节来源:transformed = 工作流转换结果;original = 原文(派生 da 的失败章节回退)。
+  source_kind: 'transformed' | 'original';
+  /// 派生时指向源 chapter.id(只在派生 da 里有值)。
+  source_chapter_id: number | null;
 }
 
 /**
@@ -195,6 +225,11 @@ export type WorkflowStatus = 'running' | 'stopped';
  * `list_workflows` / `get_workflow` 返回:工作流汇总 + 章节计数。
  * counts 直接嵌在行内 —— 不用单独调 count 接口。
  */
+export interface PromoteWorkflowInput {
+  batchId: number;
+  title: string;
+}
+
 export interface WorkflowSummary {
   id: number;
   tn_id: number;
