@@ -1,5 +1,7 @@
 pub mod novel;
 pub mod chapter;
+pub mod data_asset_kind;
+pub use data_asset_kind::DataAssetKind;
 pub mod transformation;
 pub mod prompt;
 pub mod model_config;

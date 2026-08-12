@@ -22,12 +22,32 @@ fn from_row(row: &Row) -> rusqlite::Result<DataAsset> {
     let parsed_at = DateTime::parse_from_rfc3339(&parsed_at_s)
         .map(|d| d.with_timezone(&Utc))
         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e)))?;
+    let kind_s: String = row.get(5)?;
+    let kind = crate::models::DataAssetKind::parse(&kind_s).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(KindParseError(kind_s.clone())))
+    })?;
+
+#[derive(Debug)]
+struct KindParseError(String);
+impl std::fmt::Display for KindParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown kind: {}", self.0)
+    }
+}
+impl std::error::Error for KindParseError {}
+    let source_workflow_id: Option<i64> = row.get(6)?;
+    let source_data_asset_id: Option<i64> = row.get(7)?;
+    let note: String = row.get(8)?;
     Ok(DataAsset {
         id: row.get(0)?,
         upload_id: row.get(1)?,
         title: row.get(2)?,
         parsed_at,
         source_filename: row.get(4)?,
+        kind,
+        source_workflow_id,
+        source_data_asset_id,
+        note,
     })
 }
 
@@ -43,7 +63,7 @@ impl<'a> DataAssetRepo<'a> {
 
     pub fn get(&self, id: i64) -> Result<Option<DataAsset>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, upload_id, title, parsed_at, source_filename              FROM data_assets WHERE id = ?1",
+            "SELECT id, upload_id, title, parsed_at, source_filename, kind, source_workflow_id, source_data_asset_id, note              FROM data_assets WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
@@ -53,7 +73,7 @@ impl<'a> DataAssetRepo<'a> {
 
     pub fn list(&self) -> Result<Vec<DataAsset>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, upload_id, title, parsed_at, source_filename              FROM data_assets ORDER BY id DESC",
+            "SELECT id, upload_id, title, parsed_at, source_filename, kind, source_workflow_id, source_data_asset_id, note              FROM data_assets ORDER BY id DESC",
         )?;
         let rows = stmt.query_map([], from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -61,7 +81,7 @@ impl<'a> DataAssetRepo<'a> {
 
     pub fn find_by_upload(&self, upload_id: i64) -> Result<Vec<DataAsset>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, upload_id, title, parsed_at, source_filename              FROM data_assets WHERE upload_id = ?1 ORDER BY id DESC",
+            "SELECT id, upload_id, title, parsed_at, source_filename, kind, source_workflow_id, source_data_asset_id, note              FROM data_assets WHERE upload_id = ?1 ORDER BY id DESC",
         )?;
         let rows = stmt.query_map(params![upload_id], from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
