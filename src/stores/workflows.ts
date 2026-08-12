@@ -3,11 +3,11 @@ import { ref } from 'vue';
 import {
   createWorkflow, listWorkflows, getWorkflow, stopWorkflow,
   retryWorkflowChapters, listWorkflowChapters, listTransformationSourceChapters,
-  listChapterWorkflowResults,
+  listChapterWorkflowResults, promoteWorkflow, listPromotedDataAssetsForWorkflow,
 } from '../ipc/commands';
 import type {
   CreateWorkflowInput, WorkflowSummary, WorkflowChapterRow, SourceChapterRow,
-  ChapterWorkflowResultRow,
+  ChapterWorkflowResultRow, DataAsset,
 } from '../ipc/types';
 
 export const useWorkflowsStore = defineStore('workflows', () => {
@@ -59,9 +59,25 @@ async function refresh(batchId: number) {
     await refresh(batchId);
     return w;
   }
+
+  // promoted data assets 派生索引:batchId -> 列表
+  const promotedByBatch = ref<Map<number, DataAsset[]>>(new Map());
+
+  async function promote(batchId: number, title: string): Promise<DataAsset> {
+    const newDa = await promoteWorkflow({ batchId, title });
+    await refresh(batchId);
+    const list = promotedByBatch.value.get(batchId) ?? [];
+    list.unshift(newDa);
+    promotedByBatch.value.set(batchId, list);
+    return newDa;
+  }
+  async function loadPromotedByBatch(batchId: number) {
+    promotedByBatch.value.set(batchId, await listPromotedDataAssetsForWorkflow(batchId));
+  }
+
   return {
-    byTn, chaptersByBatch, sourcesByTn, resultsByTnChapter,
+    byTn, chaptersByBatch, sourcesByTn, resultsByTnChapter, promotedByBatch,
     loading, error, loadSources, loadByTn, loadChapters, loadResultsForChapter,
-    create, refresh, stop, retry,
+    loadPromotedByBatch, create, refresh, stop, retry, promote,
   };
 });
