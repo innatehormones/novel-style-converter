@@ -1,6 +1,6 @@
 <template>
   <section>
-    <PageHeader :title="pageTitle" subtitle="在这里管理上传文件、解析后的数据资产与转换小说">
+    <PageHeader :title="pageTitle" subtitle="在这里管理上传文件、解析后的数据资产与转换工作区">
       <template #actions>
         <Button v-if="page === 'uploads'" kind="primary" :loading="store.uploading" @click="uploadDialogOpen = true">上传 .txt</Button>
       </template>
@@ -64,7 +64,7 @@
         <template #cell-parsed="{ row }">{{ formatTime(row.parsed_at) }}</template>
         <template #cell-actions="{ row }">
           <Button size="small" @click="goDataAsset(row.id)">打开</Button>
-          <Button size="small" @click="openCreateTn(row.id)">转换</Button>
+          <Button size="small" @click="openCreateTn(row.id)">新建工作区</Button>
           <Button
             size="small"
             kind="danger"
@@ -78,7 +78,7 @@
 
     <template v-else>
       <div v-if="!store.loading && store.transformationNovels.length === 0" class="empty">
-        还没有转换小说。请到“数据资产”页面选择资产并新建转换。
+        还没有转换工作区。请到“数据资产”页面选择资产并新建工作区。
       </div>
       <Table
         v-else
@@ -187,7 +187,7 @@ const page = computed<Page>(() => (route.meta.libraryPage as Page | undefined) ?
 const pageTitle = computed(() => ({
   uploads: '上传',
   'data-assets': '数据资产',
-  transformations: '转换',
+  transformations: '转换工作区',
 })[page.value]);
 
 const uploadDialogOpen = ref(false);

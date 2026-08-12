@@ -15,7 +15,7 @@ A single upload can produce many data assets, and the data assets survive the up
 | Model (LLM 配置) | ✅ 完成 | 软删 + 密钥必抹 + per-model 并发 + ProviderCache;`seed_default_model_from_env` 静默兜底移除。详细见 "Model refactor — completed" |
 | Prompts (提示词) | ✅ 完成 | enum 合并 (`TransformMode` → `PromptKind`);render 去 Result;软删;`prev_transformed` 真接 `workflow_result_chapters.content` |
 | AI call logs (调用日志) | ✅ 完成 + 收尾 | 表 + recorder + UI 看板;dead chain (`list_ai_call_logs_by_context`) 全删;`let _ = PromptKind::Compress` 遮掩代码删;**启动 panic 修复** —— `spawn_writer` 改 `std::thread::spawn` + 内建 tokio runtime |
-| Workflows (转换 / batch) | ✅ 完成 + **转正** | `on_failure_policy` 三策略真正生效;`create_workflow` 不再自动 dispatch;`transformation_novels.note`;死代码删除。**新加工作流转正数据资产**(见 "Workflow → DataAsset 转正" 段) |
+| Workflows (转换工作区 / batch) | ✅ 完成 + **转正** | `on_failure_policy` 三策略真正生效;`create_workflow` 不再自动 dispatch;`transformation_novels.note`;死代码删除。**新加工作流转正数据资产**(见 "Workflow → DataAsset 转正" 段) |
 
 **核心架构原则**(贯穿所有已重构模块):
 
