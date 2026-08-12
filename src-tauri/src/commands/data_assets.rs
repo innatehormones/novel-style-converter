@@ -94,6 +94,11 @@ pub struct DataAssetRow {
     pub byte_size: i64,
     pub word_count: i64,
     pub tn_count: i64,
+    pub kind: nsc_core::models::DataAssetKind,
+    pub source_workflow_id: Option<i64>,
+    pub source_data_asset_id: Option<i64>,
+    pub note: String,
+    pub promoted_count: i64,
 }
 
 impl From<DataAssetWithUpload> for DataAssetRow {
@@ -107,6 +112,11 @@ impl From<DataAssetWithUpload> for DataAssetRow {
             byte_size: d.byte_size,
             word_count: d.word_count,
             tn_count: d.tn_count,
+            kind: d.kind,
+            source_workflow_id: d.source_workflow_id,
+            source_data_asset_id: d.source_data_asset_id,
+            note: String::new(),
+            promoted_count: d.promoted_count,
         }
     }
 }
@@ -146,4 +156,51 @@ pub fn delete_data_asset(
     let db = db.lock().map_err(|e| e.to_string())?;
     db.data_assets().delete(data_asset_id)
         .map_err(|e| e.to_string())
+}
+
+/// 把一个 Stopped workflow 转正为新的 promoted data_asset。
+/// 业务语义:见 spec §5.1 — 单事务,失败回滚。
+#[tauri::command]
+pub fn promote_workflow(
+    db: State<'_, Arc<Mutex<Db>>>,
+    batch_id: i64,
+    title: String,
+) -> Result<nsc_core::models::DataAsset, String> {
+    let db = db.lock().map_err(|e| e.to_string())?;
+    let new_id = db.promotion()
+        .create_promoted_from_workflow(batch_id, title)
+        .map_err(|e| e.to_string())?;
+    db.data_assets().get(new_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("新 da {new_id} 找不到"))
+}
+
+/// 统计指定 workflow 已派生出多少 promoted data_asset。
+#[tauri::command]
+pub fn count_promoted_data_assets_by_workflow(
+    db: State<'_, Arc<Mutex<Db>>>,
+    batch_id: i64,
+) -> Result<i64, String> {
+    let db = db.lock().map_err(|e| e.to_string())?;
+    db.promotion().count_by_workflow(batch_id).map_err(|e| e.to_string())
+}
+
+/// 列出指定 workflow 派生的所有 promoted data_asset。
+#[tauri::command]
+pub fn list_promoted_data_assets_for_workflow(
+    db: State<'_, Arc<Mutex<Db>>>,
+    batch_id: i64,
+) -> Result<Vec<nsc_core::models::DataAsset>, String> {
+    let db = db.lock().map_err(|e| e.to_string())?;
+    db.promotion().list_by_workflow(batch_id).map_err(|e| e.to_string())
+}
+
+/// 列出指定 upload 派生的所有 data_asset(包含 source + promoted)。
+#[tauri::command]
+pub fn list_data_assets_by_upload(
+    db: State<'_, Arc<Mutex<Db>>>,
+    upload_id: i64,
+) -> Result<Vec<nsc_core::models::DataAsset>, String> {
+    let db = db.lock().map_err(|e| e.to_string())?;
+    db.promotion().list_by_upload(upload_id).map_err(|e| e.to_string())
 }
