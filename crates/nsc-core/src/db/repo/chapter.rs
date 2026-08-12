@@ -13,14 +13,16 @@ fn chapter_from_row(row: &Row<'_>) -> rusqlite::Result<Chapter> {
         title: row.get(3)?,
         body: row.get(4)?,
         word_count: row.get(5)?,
+        source_chapter_id: row.get(6)?,
+        source_kind: row.get(7)?,
     })
 }
 
 impl<'a> ChapterRepo<'a> {
     pub fn insert(&self, c: &NewChapter) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO chapters (data_asset_id, idx, title, body, word_count)              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![c.data_asset_id, c.idx, c.title, c.body, c.word_count],
+            "INSERT INTO chapters (data_asset_id, idx, title, body, word_count, source_kind, source_chapter_id)              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![c.data_asset_id, c.idx, c.title, c.body, c.word_count, c.source_kind.clone(), c.source_chapter_id],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -41,7 +43,7 @@ impl<'a> ChapterRepo<'a> {
 
     pub fn list_by_data_asset(&self, data_asset_id: i64) -> Result<Vec<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, body, word_count              FROM chapters WHERE data_asset_id = ?1 ORDER BY idx ASC",
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind              FROM chapters WHERE data_asset_id = ?1 ORDER BY idx ASC",
         )?;
         let rows = stmt.query_map(params![data_asset_id], chapter_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -49,7 +51,7 @@ impl<'a> ChapterRepo<'a> {
 
     pub fn get(&self, id: i64) -> Result<Option<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, body, word_count              FROM chapters WHERE id = ?1",
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind              FROM chapters WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
@@ -88,7 +90,7 @@ impl<'a> ChapterRepo<'a> {
 
     pub fn prev_n(&self, data_asset_id: i64, before_idx: i32, n: i32) -> Result<Vec<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, body, word_count              FROM chapters WHERE data_asset_id = ?1 AND idx < ?2              ORDER BY idx DESC LIMIT ?3",
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind              FROM chapters WHERE data_asset_id = ?1 AND idx < ?2              ORDER BY idx DESC LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![data_asset_id, before_idx, n], chapter_from_row)?;
         let mut v: Vec<Chapter> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
@@ -98,7 +100,7 @@ impl<'a> ChapterRepo<'a> {
 
     pub fn next_n(&self, data_asset_id: i64, after_idx: i32, n: i32) -> Result<Vec<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, body, word_count              FROM chapters WHERE data_asset_id = ?1 AND idx > ?2              ORDER BY idx ASC LIMIT ?3",
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind              FROM chapters WHERE data_asset_id = ?1 AND idx > ?2              ORDER BY idx ASC LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![data_asset_id, after_idx, n], chapter_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)

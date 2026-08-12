@@ -178,6 +178,8 @@ impl BatchScheduler {
                 title: chapter.title.clone(),
                 body: chapter.body.clone(),
                 word_count: chapter.word_count,
+                source_kind: chapter.source_kind.clone(),
+                source_chapter_id: chapter.source_chapter_id,
             },
             prompt: prompt.clone(),
             model_config: model.clone(),
