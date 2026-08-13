@@ -166,3 +166,43 @@ pub fn update_upload_text(
     }
     db.uploads().set_original_text(id, &text).map_err(|e| e.to_string())
 }
+
+
+/// 按字节区间返回 upload 文本。offset/length 都会向最近的 UTF-8 字符边界对齐,
+/// 避免在多字节字符中间切断。前端按固定步长串行请求以实现大文件懒加载:
+/// 单次返回 ≤ CHUNK_LOAD_STEP 字节,UI 边收边显示,避免一次性渲染 N MB textarea 卡顿。
+#[tauri::command]
+pub fn get_upload_text_chunk(
+    db: State<'_, Arc<Mutex<Db>>>,
+    id: i64,
+    byte_offset: usize,
+    byte_length: usize,
+) -> Result<Response, String> {
+    let text = {
+        let db = db.lock().map_err(|e| e.to_string())?;
+        let u = db.uploads().get(id).map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("upload {id} 不存在"))?;
+        if u.original_text.is_empty() {
+            return Err(format!(
+                "upload {} 的 original_text 为空，请重新上传该文件",
+                u.id,
+            ));
+        }
+        u.original_text.clone()
+    };
+    let bytes = text.as_bytes();
+    let total = bytes.len();
+    if byte_offset >= total {
+        return Ok(Response::new(Vec::new()));
+    }
+    let end_byte = (byte_offset + byte_length).min(total);
+    let mut start = byte_offset;
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = end_byte;
+    while end > start && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    Ok(Response::new(bytes[start..end].to_vec()))
+}

@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import type { ChapterSegment, ChapterInput } from '../ipc/types';
 import {
   commitDataAsset as ipcCommitDataAsset,
+  findDataAssetByUpload as ipcFindDataAssetByUpload,
   getUploadText as ipcGetUploadText,
   getUpload as ipcGetUpload,
   listChapterSegments as ipcListChapterSegments,
@@ -159,18 +160,23 @@ export const useChaptersStore = defineStore('chapters', () => {
     ++requestToken;
     const token = requestToken;
     try {
-      const [text, committedSegs, meta] = await Promise.all([
+      // 元数据 + 原文 + 派生 data_asset 列表可并行。
+      // 注意:listCommittedSegments 接收的是 data_asset_id 而不是 upload_id,
+      // 之前误用 uploadId 调用,会撞到 id 相同的别的 data_asset 拿到别人家的章节。
+      const [text, meta, dataAssetIds] = await Promise.all([
         ipcGetUploadText(id),
-        ipcListCommittedSegments(id).catch(() => []),
         ipcGetUpload(id).catch(() => null),
+        ipcFindDataAssetByUpload(id).catch(() => [] as number[]),
       ]);
       if (token !== requestToken) return;
       rawText.value = text;
       filename.value = meta?.filename ?? '';
       let segs: ChapterSegment[];
       let kind: SourceKind;
-      if (committedSegs.length > 0) {
-        segs = committedSegs;
+      const ownedDataAssetId = dataAssetIds[0] ?? null;
+      if (ownedDataAssetId !== null) {
+        // 本 upload 派生过 data_asset,取最近一个的已提交章节作起始状态
+        segs = await ipcListCommittedSegments(ownedDataAssetId);
         kind = 'committed';
       } else {
         segs = await ipcListChapterSegments(id, [], []);

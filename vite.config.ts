@@ -14,7 +14,9 @@ export default defineConfig({
   ],
   clearScreen: false,
   server: {
-    host: 'localhost',
+    // WebView2 在 Windows 上把 'localhost' 解析为 IPv4 127.0.0.1,容易和 Vite 监听
+    // [::1](IPv6) 错位,造成 ERR_CONNECTION_REFUSED。固定 127.0.0.1 走 IPv4 最稳。
+    host: '127.0.0.1',
     port: 43801,
     strictPort: true,
     watch: {

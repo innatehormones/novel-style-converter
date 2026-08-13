@@ -89,6 +89,7 @@ pub fn run() {
             commands::uploads::delete_upload,
             commands::uploads::get_upload,
             commands::uploads::get_upload_text,
+            commands::uploads::get_upload_text_chunk,
             commands::uploads::update_upload_text,
             commands::chapters::list_chapter_segments,
             commands::chapters::list_committed_segments,

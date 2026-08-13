@@ -200,7 +200,7 @@ fn upload_rejects_missing_source() {
 
     let err = upload_file(&db, &bogus, "x.txt", dest_dir.path()).unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("io error") || msg.contains("not found") || msg.contains("\u7cfb\u7edf\u627e\u4e0d\u5230"),
+    assert!(msg.contains("io error") || msg.contains("not found") || msg.contains("系统找不到"),
         "unexpected error: {msg}");
 }
 
@@ -239,7 +239,7 @@ fn upload_rejects_oversized_file_without_reading() {
 
     let err = upload_file(&db, &src, "big.txt", dest_dir.path()).unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("\u8fc7\u5927") || msg.to_lowercase().contains("too large"),
+    assert!(msg.contains("过大") || msg.to_lowercase().contains("too large"),
         "unexpected error: {msg}");
 }
 
@@ -252,7 +252,7 @@ fn upload_decodes_gbk_source() {
     let src = write_source(src_dir.path(), "gbk.txt", &gbk);
 
     let u = upload_file(&db, &src, "gbk.txt", dest_dir.path()).unwrap();
-    assert_eq!(u.original_text, "\u4f60\u597d,\u4e16\u754c!");
+    assert_eq!(u.original_text, "你好,世界!");
 }
 ```
 
@@ -306,29 +306,29 @@ pub fn upload_file(
 ) -> Result<Upload> {
     let filename = filename.trim();
     if filename.is_empty() {
-        return Err(Error::Validation("\u6587\u4ef6\u540d\u4e0d\u80fd\u4e3a\u7a7a".into()));
+        return Err(Error::Validation("文件名不能为空".into()));
     }
 
     let meta = std::fs::metadata(source)?;
     if !meta.is_file() {
         return Err(Error::Validation(format!(
-            "{} \u4e0d\u662f\u6587\u4ef6",
+            "{} 不是文件",
             source.display()
         )));
     }
     let size = meta.len();
     if size == 0 {
-        return Err(Error::Validation("\u6587\u4ef6\u4e3a\u7a7a".into()));
+        return Err(Error::Validation("文件为空".into()));
     }
     if size > MAX_UPLOAD_BYTES {
         return Err(Error::Validation(format!(
-            "\u6587\u4ef6\u8fc7\u5927: {size} bytes (\u4e0a\u9650 {MAX_UPLOAD_BYTES} bytes)"
+            "文件过大: {size} bytes (上限 {MAX_UPLOAD_BYTES} bytes)"
         )));
     }
 
     let bytes = std::fs::read(source)?;
     let DecodedText { text, .. } = decode_to_utf8(&bytes)
-        .map_err(|e| Error::Validation(format!("\u89e3\u7801\u5931\u8d25: {e}")))?;
+        .map_err(|e| Error::Validation(format!("解码失败: {e}")))?;
 
     let sha = sha256_hex(&bytes);
 
@@ -528,10 +528,10 @@ pub fn upload_file(
 pub fn delete_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String> {
     let db = db.lock().map_err(|e| e.to_string())?;
     let u = db.uploads().get(id).map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("upload {id} \u4e0d\u5b58\u5728"))?;
+        .ok_or_else(|| format!("upload {id} 不存在"))?;
     if let Some(da) = db.data_assets().find_by_upload(id).map_err(|e| e.to_string())? {
         if db.data_assets().is_locked(da.id).map_err(|e| e.to_string())? {
-            return Err("upload \u5bf9\u5e94\u7684 data_asset \u5df2\u9501\u5b9a,\u65e0\u6cd5\u5220\u9664".into());
+            return Err("upload 对应的 data_asset 已锁定,无法删除".into());
         }
     }
     let _ = std::fs::remove_file(&u.file_path);
@@ -542,7 +542,7 @@ pub fn delete_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), Strin
 pub fn get_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<UploadSummary, String> {
     let db = db.lock().map_err(|e| e.to_string())?;
     let u = db.uploads().get(id).map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("upload {id} \u4e0d\u5b58\u5728"))?;
+        .ok_or_else(|| format!("upload {id} 不存在"))?;
     Ok(to_summary(&u))
 }
 
@@ -551,7 +551,7 @@ pub fn get_upload_text(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<Respons
     let text = {
         let db = db.lock().map_err(|e| e.to_string())?;
         let u = db.uploads().get(id).map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("upload {id} \u4e0d\u5b58\u5728"))?;
+            .ok_or_else(|| format!("upload {id} 不存在"))?;
         if !u.original_text.is_empty() {
             u.original_text.clone()
         } else {
@@ -569,10 +569,10 @@ pub fn update_upload_text(
 ) -> Result<(), String> {
     let db = db.lock().map_err(|e| e.to_string())?;
     if db.uploads().get(id).map_err(|e| e.to_string())?.is_none() {
-        return Err(format!("upload {id} \u4e0d\u5b58\u5728"));
+        return Err(format!("upload {id} 不存在"));
     }
     if db.data_assets().find_by_upload(id).map_err(|e| e.to_string())?.is_some() {
-        return Err("\u8be5 upload \u5df2\u6709 data_asset,\u65e0\u6cd5\u4fee\u6539\u539f\u6587\u3002\u8bf7\u5148\u5728\u6570\u636e\u8d44\u4ea7\u9875\u5220\u9664\u540e\u518d\u4fee\u6539\u3002".into());
+        return Err("该 upload 已有 data_asset,无法修改原文。请先在数据资产页删除后再修改。".into());
     }
     db.uploads().set_original_text(id, &text).map_err(|e| e.to_string())
 }
@@ -720,20 +720,20 @@ Replace the contents of `src/components/UploadDialog.vue` with the version below
 
 ```vue
 <template>
-  <Dialog v-model:open="open" title="\u4e0a\u4f20 .txt \u6587\u4ef6" :width="480">
+  <Dialog v-model:open="open" title="上传 .txt 文件" :width="480">
     <div class="row">
-      <label>\u6587\u672c\u6587\u4ef6 *</label>
+      <label>文本文件 *</label>
       <Button kind="primary" :disabled="picking" @click="onPick">
-        {{ picking ? '\u9009\u62e9\u4e2d...' : (filePath ? '\u91cd\u65b0\u9009\u62e9' : '\u9009\u62e9\u6587\u4ef6') }}
+        {{ picking ? '选择中...' : (filePath ? '重新选择' : '选择文件') }}
       </Button>
     </div>
     <div v-if="fileInfo" class="file-info">
-      {{ fileInfo.name }} \u00b7 {{ fileInfo.path }}
+      {{ fileInfo.name }} · {{ fileInfo.path }}
     </div>
     <div v-if="error" class="error">{{ error }}</div>
     <template #footer>
-      <Button :disabled="submitting" @click="open = false">\u53d6\u6d88</Button>
-      <Button kind="primary" :loading="submitting" :disabled="!canSubmit || submitting" @click="onSubmit">\u4e0a\u4f20</Button>
+      <Button :disabled="submitting" @click="open = false">取消</Button>
+      <Button kind="primary" :loading="submitting" :disabled="!canSubmit || submitting" @click="onSubmit">上传</Button>
     </template>
   </Dialog>
 </template>
@@ -1060,12 +1060,12 @@ Expected: smoke exits 0 (it doesn't actually exercise upload, but confirms the a
 
 - [ ] **Step 1: Find and update the upload description**
 
-Search `README.md` for the section covering upload. Likely section header mentions "\u5c0f\u8bf4\u5bfc\u5165 / \u4e0a\u4f20 .txt / sha256 \u53bb\u91cd".
+Search `README.md` for the section covering upload. Likely section header mentions "小说导入 / 上传 .txt / sha256 去重".
 
 If the README has a "功能概述" subsection listing upload behavior, replace any wording that mentions frontend FileReader or ArrayBuffer bytes with the new flow. Add a sentence:
 
 ```markdown
-- \u4e0a\u4f20\u94fe\u8def: \u524d\u7aef\u901a\u8fc7 `tauri-plugin-dialog` \u9009\u62e9\u6587\u4ef6\u8def\u5f84, \u540e\u7aef `nsc_core::upload` \u81ea\u884c\u8bfb\u53d6\u3001\u89e3\u7801\u3001SHA-256 \u53bb\u91cd\u5e76\u5199\u5165 `%APPDATA%/novel-style-converter/uploads/<sha>.txt`, DB \u63d2\u5165\u5931\u8d25\u65f6\u56de\u6eda\u5220\u9664\u7269\u7406\u6587\u4ef6, \u907f\u514d\u5b64\u513f\u6587\u4ef6\u3002\u5355\u6587\u4ef6\u4e0a\u9650 256 MiB (`MAX_UPLOAD_BYTES`).
+- 上传链路: 前端通过 `tauri-plugin-dialog` 选择文件路径, 后端 `nsc_core::upload` 自行读取、解码、SHA-256 去重并写入 `%APPDATA%/novel-style-converter/uploads/<sha>.txt`, DB 插入失败时回滚删除物理文件, 避免孤儿文件。单文件上限 256 MiB (`MAX_UPLOAD_BYTES`).
 ```
 
 (Slot this into the most relevant spot in the existing feature list, preserving tone.)

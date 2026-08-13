@@ -66,6 +66,22 @@ export async function getUploadText(id: number): Promise<string> {
   return new TextDecoder().decode(new Uint8Array(payload));
 }
 
+/// 按字节区间懒加载 upload 原文。后端会对齐到 UTF-8 字符边界,实际返回长度可能略小于 length。
+/// 大文件详情页用此接口分块拉取,避免一次性渲染 N MB textarea 卡顿。
+export async function getUploadTextChunk(
+  id: number,
+  byteOffset: number,
+  byteLength: number,
+): Promise<string> {
+  const payload = await invoke<ArrayBuffer | string>('get_upload_text_chunk', {
+    id,
+    byteOffset,
+    byteLength,
+  });
+  if (typeof payload === 'string') return payload;
+  return new TextDecoder().decode(new Uint8Array(payload));
+}
+
 export function getUpload(id: number): Promise<UploadSummary> {
   return invoke<UploadSummary>('get_upload', { id });
 }

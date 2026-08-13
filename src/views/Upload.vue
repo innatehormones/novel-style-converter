@@ -9,7 +9,7 @@
       <template #actions>
         <Button :loading="saving" :disabled="!dirty" @click="save">保存</Button>
         <Button
-          :disabled="uploadId == null || dirty"
+          :disabled="uploadId == null || !textLoaded || dirty"
           @click="openCleaning"
         >清洗</Button>
         <Button kind="primary" :disabled="uploadId == null || dirty" @click="goParse">转为数据资产</Button>
@@ -21,15 +21,28 @@
         <Tag>实体文件</Tag>
       </div>
       <span class="meta-text" :title="metaTooltip">
-        {{ mbSize }} MB · {{ lineCount }} 行 · {{ charCount }} 字
+        <template v-if="textLoaded">{{ mbSize }} MB · {{ formatWordCount(wordCount) }}</template>
+        <template v-else-if="totalBytes > 0">
+          加载原文 {{ formatBytes(loadedBytes) }} / {{ formatBytes(totalBytes) }}
+          ({{ Math.floor((loadedBytes / totalBytes) * 100) }}%)
+        </template>
+        <template v-else>{{ mbSize }} MB · {{ formatWordCount(wordCount) }}</template>
       </span>
     </div>
     <div class="body">
       <textarea
+        v-if="textLoaded"
         v-model="rawText"
         class="raw"
         spellcheck="false"
       />
+      <div v-else class="raw raw-loading">
+        <span v-if="error">{{ error }}</span>
+        <span v-else-if="totalBytes > 0">
+          原文加载中... {{ Math.floor((loadedBytes / totalBytes) * 100) }}%
+        </span>
+        <span v-else>原文加载中...</span>
+      </div>
     </div>
     <CleaningDialog
       v-model:open="cleaningOpen"
@@ -46,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Button from '../components/ui/Button.vue';
 import Tag from '../components/ui/Tag.vue';
@@ -54,7 +67,9 @@ import PageHeader from '../components/ui/PageHeader.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import IconArrowLeft from '~icons/lucide/arrow-left';
-import { getUpload, getUploadText, updateUploadText } from '../ipc/commands';
+import { getUpload, getUploadTextChunk, updateUploadText } from '../ipc/commands';
+import { formatWordCount } from '../utils/format';
+import type { UploadSummary } from '../ipc/types';
 import CleaningDialog from '../components/CleaningDialog.vue';
 
 const route = useRoute();
@@ -63,8 +78,15 @@ const uploadId = ref<number | null>(null);
 const filename = ref('');
 const sha256 = ref('');
 const byteSize = ref(0);
-const rawText = ref('');
-const savedText = ref('');
+const uploadMeta = ref<UploadSummary | null>(null);
+// rawText 可能十几 MB,用 shallowRef 跳过 Vue deep proxy,赋值/读取都直接走原生 string,省掉逐字符响应式追踪。
+const rawText = shallowRef('');
+const textLoaded = ref(false);
+// 大文件分块加载的进度反馈
+const loadedBytes = ref(0);
+const totalBytes = ref(0);
+const CHUNK_STEP = 256 * 1024; // 256 KB / 块
+const dirty = ref(false);
 const saving = ref(false);
 const error = ref<string | null>(null);
 const cleaningOpen = ref(false);
@@ -79,26 +101,65 @@ onMounted(async () => {
     return;
   }
   uploadId.value = id;
+  // meta 先拿:标题/字节/字数立即可用,不等大文本
   try {
-    const [meta, text] = await Promise.all([
-      getUpload(id),
-      getUploadText(id),
-    ]);
+    const meta = await getUpload(id);
     filename.value = meta?.filename ?? '';
     sha256.value = meta?.sha256 ?? '';
     byteSize.value = meta?.byte_size ?? 0;
-    rawText.value = text;
-    savedText.value = text;
+    uploadMeta.value = meta ?? null;
+    // dirty 在 load 后保持 false,首次编辑时才置 true
+    watch(rawText, () => { dirty.value = true; });
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e);
+    return;
+  }
+  // 大文本分块拉:meta 已先出,原文按 256 KB / 块串行拉,进度条同步更新。
+  // 全部到位后一次性 join + 单次 textarea 渲染(避免 57 次 O(n^2) 拼接),这一步本身会卡几秒刲十几秒,是浏览器硬件限制。
+  totalBytes.value = byteSize.value;
+  loadedBytes.value = 0;
+  rawText.value = '';
+  textLoaded.value = false;
+  try {
+    await loadUploadTextInChunks(id);
+    textLoaded.value = true;
+    // 程序赋值(rawText 从 '' → 完整原文)也会触发 dirty watcher,加载完成后重置,
+    // 避免一进页面"保存"按钮就亮起。
+    dirty.value = false;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e);
   }
 });
 
-const dirty = computed(() => rawText.value !== savedText.value);
-const lineCount = computed(() => rawText.value.split(/\r\n|\n|\r/).length);
-const charCount = computed(() => [...rawText.value].length);
+/// 串行按字节区间拉原文,先积到数组里不触发 textarea 重渲染,
+/// 全部到位后再一次性 join 写入 rawText(避免 57 次字符串拼接变 O(n^2))。
+async function loadUploadTextInChunks(id: number): Promise<void> {
+  let offset = 0;
+  const total = totalBytes.value;
+  const parts: string[] = [];
+  while (offset < total) {
+    const chunk = await getUploadTextChunk(id, offset, CHUNK_STEP);
+    if (chunk.length === 0) break;
+    parts.push(chunk);
+    offset += new TextEncoder().encode(chunk).length;
+    if (offset > total) offset = total;
+    loadedBytes.value = offset;
+  }
+  // 一次性 join + 单次 rawText 赋值
+  rawText.value = parts.join('');
+}
+
+// 字数直接用 DB 里的 word_count(upload_file 时一次性算好存表),不重复从 rawText 算
+// rawText 可能十几 MB,逐字符统计会卡住首屏
+const wordCount = computed(() => uploadMeta.value?.word_count ?? 0);
 const mbSize = computed(() => (byteSize.value / 1024 / 1024).toFixed(2));
 const metaTooltip = computed(() => (sha256.value ? `SHA256: ${sha256.value}` : ''));
+/// 与后端 byte_size 对齐的字节数展示,大文件用 MB 单位,小文件用 KB / B。
+function formatBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(2)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${n} B`;
+}
 
 function onBack() {
   void router.push('/uploads');
@@ -110,7 +171,7 @@ async function save() {
   error.value = null;
   try {
     await updateUploadText(uploadId.value, rawText.value);
-    savedText.value = rawText.value;
+    dirty.value = false;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -126,7 +187,7 @@ function goParse() {
 async function openCleaning() {
   if (uploadId.value == null) return;
   if (rawText.value.length > 10 * 1024 * 1024) {
-    alertMessage.value = '文本过大,请先手动精简';
+    alertMessage.value = '文本过大,请先手动精箁';
     alertOpen.value = true;
     return;
   }
@@ -136,7 +197,7 @@ async function openCleaning() {
 
 function onCleaningConfirm(cleanedText: string) {
   rawText.value = cleanedText;
-  // savedText 不动 → dirty 变为 true;与手动编辑走同一保存路径。
+  // watch(rawText) 触发 → dirty 置 true;与手动编辑走同一保存路径。
 }
 </script>
 
@@ -184,6 +245,15 @@ function onCleaningConfirm(cleanedText: string) {
 }
 .raw:focus {
   border-color: var(--border-strong);
+}
+.raw-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+  font-family: var(--font-serif);
 }
 .alert {
   margin-top: 12px;

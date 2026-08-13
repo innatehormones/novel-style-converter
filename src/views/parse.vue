@@ -24,8 +24,12 @@
 
     <div class="panes">
       <div class="pane">
-        <div class="pane-title">章节列表({{ store.workingChapters.length }})</div>
+        <div class="pane-title">
+          <span>章节列表({{ store.workingChapters.length }})</span>
+          <span v-if="store.loading && store.workingChapters.length === 0" class="pane-hint">分析中...</span>
+        </div>
         <DynamicScroller
+          v-if="chaptersWithIdx.length > 0"
           class="scroller"
           :items="chaptersWithIdx"
           :min-item-size="48"
@@ -60,6 +64,12 @@
             </DynamicScrollerItem>
           </template>
         </DynamicScroller>
+        <div v-else-if="store.loading" class="pane-empty">
+          <span>正在分析章节...</span>
+        </div>
+        <div v-else class="pane-empty">
+          <span>暂无章节</span>
+        </div>
       </div>
 
       <div class="pane">
@@ -451,6 +461,26 @@ async function confirmCommit() {
   min-width: 64px;
   text-align: center;
   flex-shrink: 0;
+}
+.pane-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.pane-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.pane-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+  font-family: var(--font-serif);
 }
 .line-row {
   display: flex;
