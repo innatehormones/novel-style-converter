@@ -1,4 +1,4 @@
-﻿# novel-style-converter Business Description (post-refactor)
+# novel-style-converter Business Description (post-refactor)
 
 ## Two independent data blocks
 
@@ -603,83 +603,111 @@ A single upload can produce many data assets, and the data assets survive the up
 
 
 
-## Workflow → DataAsset 转正(工作流结果物化为新数据资产)
 
-### 业务目的
+## Overview (总览页)
 
-工作流跑完(doned + failed + skipped 都有)后,用户可以**手动**触发转正,把整批结果物化为一份**新的**数据资产(`data_assets`)。新 da 与源 da **互相独立**(沿用 `upload_id` 但本身是独立实体),可以单独在数据资产列表浏览、编辑、删除。
+主菜单最顶部的「总览」按 **DAG** 一次性展示整张关系图,5 秒轮询,可视化让用户一眼看清
+「上传原文 → 数据资产 → 转换工程 → 工作流 → 派生数据」之间的血缘与执行进度。
 
-不自动触发 —— 用户主导。理由:转正是"工作流成果的可交付",不是后台流水线动作。
+### 技术栈
 
-### 核心业务规则
+- **渲染**:`@vue-flow/core` + `@vue-flow/background` + `@vue-flow/controls` + `@vue-flow/minimap`
+- **布局**:`dagre`(纯 JS 库,前端调用)
+- **历史**:`cytoscape` + `cytoscape-dagre` 已移除(原版节点形状 / 文字被色块吞、5s 轮询会 reset 视口)
 
-1. **触发前置**:`batch.status='stopped'`(其他状态 → Validation 拒绝)
-2. **前置校验**(每个 tc):`status ∈ {done, failed, skipped}`;`done` 的必须 `workflow_result_chapters.content IS NOT NULL`(数据损坏兜底)
-3. **二元填充规则**:
-   - `done` → 写 `transformed` chapter(`body = wrc.content`,`source_chapter_id = 原 chapter.id`)
-   - `failed` / `skipped` → 写 `original` chapter(`body = 原 chapter.body`,`source_chapter_id = 原 chapter.id`)
-4. **数据资产标记**:`kind = 'promoted'`(区别于 `kind = 'source'`),`source_workflow_id` + `source_data_asset_id` 软引用源对象
-5. **允许重复转正**:append-only,每次独立 da,`title` 必填供用户区分
-6. **删除边界**:
-   - 删源 `data_assets` → `promoted.source_data_asset_id SET NULL`(软引用,promoted 保留)
-   - 删源 `batches` → `promoted.source_workflow_id SET NULL`(同上)
-   - 删 promoted → cascade 删其 chapters(沿用 v15 已有的 upload 上传级联)
+### 节点(5 类,严格区分视觉)
 
-### Data 扩展(migration 0021,破坏性,测试阶段不写回滚)
+5 个自定义 Vue 组件,每张是 240×92 的 div 卡片 + Lucide 图标 + 渐变背景 + 顶部粗 4px 边;
+hover 时整体上抬 1px、加深阴影。
 
-```sql
-ALTER TABLE data_assets ADD COLUMN kind TEXT NOT NULL DEFAULT 'source';
-ALTER TABLE data_assets ADD COLUMN source_workflow_id INTEGER REFERENCES batches(id) ON DELETE SET NULL;
-ALTER TABLE data_assets ADD COLUMN source_data_asset_id INTEGER REFERENCES data_assets(id) ON DELETE SET NULL;
-ALTER TABLE data_assets ADD COLUMN note TEXT NOT NULL DEFAULT '';
+| kind | 组件 | 图标(Lucide) | 主色 | 强调 |
+|---|---|---|---|---|
+| `upload` | `UploadNode.vue` | `file-text` | 深石板 `#1E293B → #0F172A` | 深底浅字,与其它彩色卡片拉开层次 |
+| `source_data_asset` | `SourceDaNode.vue` | `database` | 蓝渐变 `#3B82F6 → #2563EB` | 实心边框,白字 |
+| `promoted_data_asset` | `PromotedDaNode.vue` | `sparkles` | 绿渐变 `#34D399 → #10B981`,实线边框 | 与 source_da(蓝)同结构,靠颜色 + `sparkles` 图标区分派生语义,白字 |
+| `transformation_novel` | `TnNode.vue` | `layers` | 橙渐变 `#FB923C → #EA580C` | 中央枢纽,白字 |
+| `batch` | `BatchNode.vue` | `refresh-cw` | 紫渐变 `#8B5CF6 → #6D28D9` | 按 status 动态配色 + status pill |
 
-ALTER TABLE chapters ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'original';
-ALTER TABLE chapters ADD COLUMN source_chapter_id INTEGER REFERENCES chapters(id) ON DELETE SET NULL;
-```
+#### batch 按 status 配色(`BatchNode.vue`)
 
-`DataAssetKind` enum:`Source` / `Promoted`(serde rename lowercase)。
+| status | 背景渐变 | 边框 | 文字 | pill 背景 |
+|---|---|---|---|---|
+| `running` | `#60A5FA → #2563EB` | `#1D4ED8` | 白 | 半透白 |
+| `paused` | `#FCD34D → #F59E0B` | `#B45309` | 深棕 `#78350F` | 深棕半透 |
+| `stopped` / `terminated` / `cancelled` | `#F87171 → #DC2626` | `#B91C1C` | 白 | 半透白 |
+| `completed` | `#34D399 → #10B981` | `#047857` | 深绿 `#064E3B` | 深绿半透 |
+| `pending` / 其它 | 默认紫 `#8B5CF6 → #6D28D9` | `#5B21B6` | 白 | 半透白 |
 
-### 关键 IPC
+每张卡片顶部一行 kind 标签(11px 大写 + 图标),中部是标题(15px 粗体,溢出 ellipsis),
+底部是 meta 行(12px,如 `12 章 · 1.5万 字`)。
 
-| 命令 | 入参 | 出参 | 用途 |
-|---|---|---|---|
-| `promote_workflow` | `batch_id, title` | `DataAsset` | 单事务转正:校验 → 写 da → 写 N chapters |
-| `count_promoted_data_assets_by_workflow` | `batch_id` | `i64` | workflow 列表 badge 显示 |
-| `list_promoted_data_assets_for_workflow` | `batch_id` | `DataAsset[]` | workflow 详情下钻"派生的数据资产" |
-| `list_data_assets_by_upload` | `upload_id` | `DataAsset[]` | upload 详情展示所有派生(包含 promoted) |
+### 边(4 类,只有正向,绝无回溯)
 
-`list_data_assets` / `list_workflows` / `get_workflow` 返回结构分别加了 `kind / source_*/note / promoted_count` 字段。
+`type: 'smoothstep'`,按 `edge.kind` 配 4 色:
 
-### 单事务顺序(在 `PromotionRepo::create_promoted_from_workflow`)
+| edge.kind | 颜色 | 含义 |
+|---|---|---|
+| `upload_to_source_da` | 灰 `#475569` | 上传文件 → 解析出来的 source 数据资产 |
+| `da_to_tn` | 蓝 `#1E40AF` | 数据资产 → 转换工程(以该 da 为输入) |
+| `tn_to_batch` | 棕 `#7C2D12` | 转换工程 → 某个工作流实例 |
+| `batch_to_promoted_da` | 绿 `#047857` | 工作流结果 → 转正出来的派生数据资产 |
 
-1. 读 `batch.status` → 校验 `'stopped'`
-2. 读 `source_data_asset_id` (batch → tn → da) + `upload_id` (从 da)
-3. SELECT tc + chapter + wrc.content(LEFT JOIN 拿结果),`ORDER BY chapter.idx ASC`
-4. 前置校验:每个 tc 的 status + done 必须有 content
-5. INSERT promoted da(`kind='promoted'`,`source_workflow_id=batch_id`,`source_data_asset_id=原da`,沿用 `upload_id`)
-6. INSERT N 个 chapter(`source_kind` / `source_chapter_id=原 chapter.id` 按二元规则填)
-7. COMMIT
+`data_assets.source_data_asset_id`(派生链回溯指针)与 `UploadDeletePreview` 等
+**不画边**,仅在节点 `subtitle` 展示 —— 视觉上保证无环。
 
-任一失败 → ROLLBACK,无副作用。
+### 多代派生
 
-### Design intent
+`promoted_da` 可以再次成为 source(自接一个 tn + batch + 新的 promoted_da)。
+后端 `OverviewRepo::load_graph()` 一次 SELECT 出全部节点和边,前端 **无需特判**;
+图按数据自然展开深度,`upload` 到第 N 代 `promoted_da` 最多 6 条边路,
+不同分支深度可以不同。**绝对无环**(任何回溯指针都不画边)。
 
-- **append-only,允许重复转正**:用户可能用同一 batch 多次转正(不同 title,不同 note);历史保留,便于对比或重做
-- **软引用而非 FK 级联**:`source_workflow_id` / `source_data_asset_id` 用 `ON DELETE SET NULL` 而非 `CASCADE`,工作流 / 源 da 删除不影响 promoted 的可读性(用户可能想保留"这份转换结果"作为存档)
-- **二元填充规则** vs. **失败章节留空**:用户原话"无论里面成功失败(若失败用原文,成功用转换的文章),可以将一个工作流转成新的数据资产" —— **结果永远填满**,不让 promote 出来的 da 出现"半成品"
-- **手动触发 vs. 自动**:`batch.status` 进 `'stopped'` 后**不**自动 promote;用户主导,UI 加"转正"按钮触发
-- **数据迁移破坏性**:不写回滚,清库重来;开发期收益 > 维护成本
+### 顶部统计卡片(5 张)
 
-### 已知后续工作
+1. 上传原文数
+2. 数据资产数
+3. 转换工程数
+4. 工作中 batch 数(`running + paused`)
+5. 最近 24h 失败 batch 数
 
-- 前端 UI 接入(任务 11-15 计划中,见下)
-  - `PromoteWorkflowDialog.vue`(输入 title + note,显示将派生几个 chapter)
-  - `TransformationNovelDetail.vue` 工作流列表加 "转正" 按钮 + 派生数 badge
-  - `Library.vue` 加 `kind` / `promoted_count` 列
-  - `Upload.vue` 加 `promoted_count` 派生数
-  - `parse.vue` 接 promoted da 只读模式 + `source_kind` 列
+### 附件(挂在 `<VueFlow>` 内部)
 
----
+- **`<Background>`**:点阵,gap 20、size 1
+- **`<Controls>`**:左下角,zoom in/out / fit / lock
+- **`<MiniMap pannable zoomable>`**:右下角缩略图,显示整图全貌
+
+### 布局与视口
+
+- **dagre JS 在前端算 position**(`Overview.vue:applyGraph`):
+  - `rankdir: 'TB'`(自上而下)
+  - `nodesep: 80`、`ranksep: 120`
+  - `marginx / marginy: 40`
+  - dagre 节点尺寸 `260×120`(留 buffer;实际卡片 240×92)
+  - dagre 返回的是**中心点**,减半宽高转换为 vue-flow 的**左上角**坐标
+- **首次加载**:`fit-view-on-init`,自动铺满可视区
+- **后续 5s 轮询**:`@move` 事件里把 `flowTransform({x, y, zoom})` 存进 `savedViewport`,
+  首次加载过后由它接管;轮询时整体重算 dagre 位置后替换 `flowNodes.value = newNodes`,
+  因此用户拖拽 / 缩放不会被打回中心(cytoscape 时代 `fit: true` + `layoutstop` 回调的 reset bug 彻底消除)
+- **缩放范围**:`minZoom: 0.1` / `maxZoom: 4`
+- **平移与缩放**:`pan-on-drag: true`(鼠标拖空白)、`pan-on-scroll: true`(滚轮平移)、`zoom-on-double-click: false`(双击不再缩放)
+- **交互**:无手动刷新按钮,完全由 5s 轮询驱动(避免按钮和轮询互相打架)
+- **节点**:`nodes-draggable: false`(节点固定位置,不让用户拖乱布局)、`elements-selectable: true`(可以选中)
+
+### 实现
+
+- **后端**:`OverviewRepo::load_graph()` 一次 SELECT 出 5 类实体 + 4 类正向边
+- **IPC**:`get_overview_graph`(单命令,前端 5s 轮询时只走这条)
+- **前端**:
+  - `src/views/Overview.vue` —— 主页面 + 5 个 stat-card + vue-flow 容器 + 5s 轮询
+  - `src/components/overview/*.vue` —— 5 个自定义节点组件
+  - `nodeTypes` 用 `markRaw` 注册,避免 Vue 把组件代理成响应式
+  - 路由 `/overview`,左侧菜单第 1 项
+
+### 设计约束
+
+- **无截断**:节点数 ≥ 500 时仅底部显示一行提示(可拖拽 / 滚轮缩放 / 拖动平移);不强行折叠隐藏关系
+- **节点悬停反馈**:`transform: translateY(-1px)` + 加深阴影
+- **失败必现**:`getOverviewGraph` 抛错时,顶部红色错误条直接展示 `error.message`,不静默
 
 ## Workflows refactor — completed
 

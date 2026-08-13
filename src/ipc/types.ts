@@ -1,19 +1,19 @@
-// 字段命名约定:
-// - 响应类型(后端 `#[derive(Serialize)]` 的实体,如 `ModelConfig` / `Upload`)
-//   保持 snake_case,与 `crates/nsc-core/src/models/*.rs` 一一对应。
-// - IPC 入参的 *命令参数名*(`payload` / `id` 等)由 Tauri 自动 camelCase 化,
-//   所以外层 `invoke('cmd', { ... })` 的 key 用 camelCase。
-// - IPC 入参的内层 DTO(后端显式 `#[serde(rename_all="snake_case")]` 的)
-//   必须按 snake_case 原样发,前端 wrapper 不要做任何 inline 改名。
-// 字段变更必须同步修改后端 DTO + 本文件 + commands.ts 中对应 wrapper。
+// 瀛楁鍛藉悕绾﹀畾:
+// - 鍝嶅簲绫诲瀷(鍚庣 `#[derive(Serialize)]` 鐨勫疄浣?濡?`ModelConfig` / `Upload`)
+//   淇濇寔 snake_case,涓?`crates/nsc-core/src/models/*.rs` 涓€涓€瀵瑰簲銆?
+// - IPC 鍏ュ弬鐨?*鍛戒护鍙傛暟鍚?(`payload` / `id` 绛?鐢?Tauri 鑷姩 camelCase 鍖?
+//   鎵€浠ュ灞?`invoke('cmd', { ... })` 鐨?key 鐢?camelCase銆?
+// - IPC 鍏ュ弬鐨勫唴灞?DTO(鍚庣鏄惧紡 `#[serde(rename_all="snake_case")]` 鐨?
+//   蹇呴』鎸?snake_case 鍘熸牱鍙?鍓嶇 wrapper 涓嶈鍋氫换浣?inline 鏀瑰悕銆?
+// 瀛楁鍙樻洿蹇呴』鍚屾淇敼鍚庣 DTO + 鏈枃浠?+ commands.ts 涓搴?wrapper銆?
 
 /**
- * 后端 `model_configs` 行的前端镜像。
- * - `api_key` 明文存 SQLite,前端拿到也要原样回传(不要脱敏 —— 提交时仍需要真实值)
- * - `concurrency` 是 per-model 并发上限:worker 端按 `model_config_id` 共享信号量。
- *   有效范围 [1,16];超过物理 worker 数(默认 2)不会触发额外阻塞,但下限 1 防止 0 死锁。
- * - `archived = 1` 表示软删(API key 已被清空);仍保留在 list 响应里供 UI 展示历史 model。
- * - 字段全部 snake_case 来自后端 serde(后端**不**做 rename)
+ * 鍚庣 `model_configs` 琛岀殑鍓嶇闀滃儚銆?
+ * - `api_key` 鏄庢枃瀛?SQLite,鍓嶇鎷垮埌涔熻鍘熸牱鍥炰紶(涓嶈鑴辨晱 鈥斺€?鎻愪氦鏃朵粛闇€瑕佺湡瀹炲€?
+ * - `concurrency` 鏄?per-model 骞跺彂涓婇檺:worker 绔寜 `model_config_id` 鍏变韩淇″彿閲忋€?
+ *   鏈夋晥鑼冨洿 [1,16];瓒呰繃鐗╃悊 worker 鏁?榛樿 2)涓嶄細瑙﹀彂棰濆闃诲,浣嗕笅闄?1 闃叉 0 姝婚攣銆?
+ * - `archived = 1` 琛ㄧず杞垹(API key 宸茶娓呯┖);浠嶄繚鐣欏湪 list 鍝嶅簲閲屼緵 UI 灞曠ず鍘嗗彶 model銆?
+ * - 瀛楁鍏ㄩ儴 snake_case 鏉ヨ嚜鍚庣 serde(鍚庣**涓?*鍋?rename)
  */
 export interface ModelConfig {
   id: number;
@@ -28,17 +28,17 @@ export interface ModelConfig {
 }
 
 /**
- * `upsert_model` / `test_model` 入参:`id === 0` 表示新建,否则按 id 更新。
- * 这是后端 snake_case DTO(内层字段原样发,不要 inline 改名)。
+ * `upsert_model` / `test_model` 鍏ュ弬:`id === 0` 琛ㄧず鏂板缓,鍚﹀垯鎸?id 鏇存柊銆?
+ * 杩欐槸鍚庣 snake_case DTO(鍐呭眰瀛楁鍘熸牱鍙?涓嶈 inline 鏀瑰悕)銆?
  */
 export type ModelConfigInput = Omit<ModelConfig, 'id' | 'archived'> & { id: number };
 
 /**
- * `test_model` 结构化返回：
- * - 成功：`content_preview` 填响应前 200 字符，`tokens_in/out` 来自 provider usage。
- * - 失败：`error` 填完整字符串（provider 创建失败 / 非 2xx / 空 choices / 缺 usage 都会写）；
- *   `content_preview` 与 tokens 全为 null。
- * - 任意路径都会填 `latency_ms`（创建 provider 失败也计超时）。
+ * `test_model` 缁撴瀯鍖栬繑鍥烇細
+ * - 鎴愬姛锛歚content_preview` 濉搷搴斿墠 200 瀛楃锛宍tokens_in/out` 鏉ヨ嚜 provider usage銆?
+ * - 澶辫触锛歚error` 濉畬鏁村瓧绗︿覆锛坧rovider 鍒涘缓澶辫触 / 闈?2xx / 绌?choices / 缂?usage 閮戒細鍐欙級锛?
+ *   `content_preview` 涓?tokens 鍏ㄤ负 null銆?
+ * - 浠绘剰璺緞閮戒細濉?`latency_ms`锛堝垱寤?provider 澶辫触涔熻瓒呮椂锛夈€?
  */
 export interface TestModelReport {
   model: string;
@@ -50,7 +50,7 @@ export interface TestModelReport {
   error: string | null;
 }
 
-/// State 1: 原始上传文件元数据。不含章节结构(章节在 data_assets)。
+/// State 1: 鍘熷涓婁紶鏂囦欢鍏冩暟鎹€備笉鍚珷鑺傜粨鏋?绔犺妭鍦?data_assets)銆?
 export interface UploadSummary {
   id: number;
   sha256: string;
@@ -58,14 +58,14 @@ export interface UploadSummary {
   byte_size: number;
   uploaded_at: string;
   file_path: string;
-  /// zh-aware 字数(汉字 + 字母 + 数字),upload_file 时后端一次算好。
+  /// zh-aware 瀛楁暟(姹夊瓧 + 瀛楁瘝 + 鏁板瓧),upload_file 鏃跺悗绔竴娆＄畻濂姐€?
   word_count: number;
 }
 
-/// 数据资产类型 — source 是原始解析产物,promoted 是从工作流结果派生的新资产。
+/// 鏁版嵁璧勪骇绫诲瀷 鈥?source 鏄師濮嬭В鏋愪骇鐗?promoted 鏄粠宸ヤ綔娴佺粨鏋滄淳鐢熺殑鏂拌祫浜с€?
 export type DataAssetKind = 'source' | 'promoted';
 
-/// 单条 data_asset 元数据(供 promote_workflow / list_data_assets_by_upload 等返回)。
+/// 鍗曟潯 data_asset 鍏冩暟鎹?渚?promote_workflow / list_data_assets_by_upload 绛夎繑鍥?銆?
 export interface DataAsset {
   id: number;
   upload_id: number;
@@ -78,7 +78,7 @@ export interface DataAsset {
   note: string;
 }
 
-/// State 2: 一次解析结果 = 一份 data_asset + 一组分章节切片。
+/// State 2: 涓€娆¤В鏋愮粨鏋?= 涓€浠?data_asset + 涓€缁勫垎绔犺妭鍒囩墖銆?
 export interface DataAssetSummary {
   id: number;
   upload_id: number;
@@ -88,7 +88,7 @@ export interface DataAssetSummary {
   tn_count: number;
 }
 
-/// Library.vue "数据资产" tab 行:data_asset 元数据 + 来源 upload 文件名 + 章节总字数。
+/// Library.vue "鏁版嵁璧勪骇" tab 琛?data_asset 鍏冩暟鎹?+ 鏉ユ簮 upload 鏂囦欢鍚?+ 绔犺妭鎬诲瓧鏁般€?
 export interface DataAssetRow {
   id: number;
   upload_id: number;
@@ -96,34 +96,34 @@ export interface DataAssetRow {
   parsed_at: string;
   filename: string;
   byte_size: number;
-  /// SUM(chapters.word_count) WHERE data_asset_id = da.id。
+  /// SUM(chapters.word_count) WHERE data_asset_id = da.id銆?
   word_count: number;
-  /// COUNT(transformation_novels.id) WHERE data_asset_id = da.id。
+  /// COUNT(transformation_novels.id) WHERE data_asset_id = da.id銆?
   tn_count: number;
-  /// 资产类型:source = 原始解析;promoted = 从工作流结果派生。
+  /// 璧勪骇绫诲瀷:source = 鍘熷瑙ｆ瀽;promoted = 浠庡伐浣滄祦缁撴灉娲剧敓銆?
   kind: DataAssetKind;
-  /// 当 kind=promoted 时,记录源 workflow(batch.id);source 时为 null。
+  /// 褰?kind=promoted 鏃?璁板綍婧?workflow(batch.id);source 鏃朵负 null銆?
   source_workflow_id: number | null;
-  /// 当 kind=promoted 时,记录源 data_asset.id;source 时为 null。
+  /// 褰?kind=promoted 鏃?璁板綍婧?data_asset.id;source 鏃朵负 null銆?
   source_data_asset_id: number | null;
-  /// 用户备注。
+  /// 鐢ㄦ埛澶囨敞銆?
   note: string;
-  /// 派生出多少 promoted da(仅 source 类型有值;promoted 类型始终 0)。
+  /// 娲剧敓鍑哄灏?promoted da(浠?source 绫诲瀷鏈夊€?promoted 绫诲瀷濮嬬粓 0)銆?
   promoted_count: number;
 }
 
-/// State 2 章节元数据(从 list_data_asset_chapters 返回)。正文由前端按 byte 切片 original_text。
+/// State 2 绔犺妭鍏冩暟鎹?浠?list_data_asset_chapters 杩斿洖)銆傛鏂囩敱鍓嶇鎸?byte 鍒囩墖 original_text銆?
 export interface DataAssetChapter {
   id: number;
   idx: number;
   title: string;
   body: string;
   word_count: number;
-  /// 章节来源:transformed = 工作流转换结果;original = 原文(派生 da 失败章节回退)。
+  /// 绔犺妭鏉ユ簮:transformed = 宸ヤ綔娴佽浆鎹㈢粨鏋?original = 鍘熸枃(娲剧敓 da 澶辫触绔犺妭鍥為€€)銆?
   source_kind: 'transformed' | 'original';
 }
 
-/// commit_data_asset 入参:title + 章节列表(每个含 title + byte 范围)。
+/// commit_data_asset 鍏ュ弬:title + 绔犺妭鍒楄〃(姣忎釜鍚?title + byte 鑼冨洿)銆?
 export interface CommitDataAssetInput {
   title: string;
   chapters: Array<{
@@ -146,8 +146,8 @@ export interface ChapterMeta {
 }
 
 /**
- * `get_chapter_contents` 返回:章节正文预览(预览页用)。内容是后端从
- * `uploads.original_text` 按 byte range 切片后,剥首行标题再 trim。
+ * `get_chapter_contents` 杩斿洖:绔犺妭姝ｆ枃棰勮(棰勮椤电敤)銆傚唴瀹规槸鍚庣浠?
+ * `uploads.original_text` 鎸?byte range 鍒囩墖鍚?鍓ラ琛屾爣棰樺啀 trim銆?
  */
 export interface ChapterContentRow {
   idx: number;
@@ -155,7 +155,7 @@ export interface ChapterContentRow {
   content: string;
 }
 
-/// 章节切片实体。byte_start/byte_end 永远在 upload.original_text 坐标系。
+/// 绔犺妭鍒囩墖瀹炰綋銆俠yte_start/byte_end 姘歌繙鍦?upload.original_text 鍧愭爣绯汇€?
 export interface Chapter {
   id: number;
   data_asset_id: number;
@@ -163,15 +163,15 @@ export interface Chapter {
   title: string;
   body: string;
   word_count: number;
-  /// 章节来源:transformed = 工作流转换结果;original = 原文(派生 da 的失败章节回退)。
+  /// 绔犺妭鏉ユ簮:transformed = 宸ヤ綔娴佽浆鎹㈢粨鏋?original = 鍘熸枃(娲剧敓 da 鐨勫け璐ョ珷鑺傚洖閫€)銆?
   source_kind: 'transformed' | 'original';
-  /// 派生时指向源 chapter.id(只在派生 da 里有值)。
+  /// 娲剧敓鏃舵寚鍚戞簮 chapter.id(鍙湪娲剧敓 da 閲屾湁鍊?銆?
   source_chapter_id: number | null;
 }
 
 /**
- * `commit_data_asset` / `parse_chapters` 入参的章节元素:
- * 仅标题 + byte 范围。后端按 byte range 切片原文计算 `word_count` / `idx`。
+ * `commit_data_asset` / `parse_chapters` 鍏ュ弬鐨勭珷鑺傚厓绱?
+ * 浠呮爣棰?+ byte 鑼冨洿銆傚悗绔寜 byte range 鍒囩墖鍘熸枃璁＄畻 `word_count` / `idx`銆?
  */
 export type ChapterInput = {
   title: string;
@@ -179,9 +179,9 @@ export type ChapterInput = {
 };
 
 /**
- * `list_transformation_novels` 返回:转换小说元数据。
- * `chapters_count` 是该 `data_asset_id` 下所有 chapters 的总数,
- * 不代表这本 tn 实际有多少 transformation_chapter 行。
+ * `list_transformation_novels` 杩斿洖:杞崲灏忚鍏冩暟鎹€?
+ * `chapters_count` 鏄 `data_asset_id` 涓嬫墍鏈?chapters 鐨勬€绘暟,
+ * 涓嶄唬琛ㄨ繖鏈?tn 瀹為檯鏈夊灏?transformation_chapter 琛屻€?
  */
 export interface TransformationNovelSummary {
   id: number;
@@ -195,9 +195,9 @@ export interface TransformationNovelSummary {
 }
 
 /**
- * `create_transformation_novel` 入参:后端 snake_case DTO,
- * 三个默认字段为可空,内层字段原样发,不要 inline 改名。
- * 命名加 Input 后缀,与后端 `*Payload` 区分,避免跨语言同名歧义。
+ * `create_transformation_novel` 鍏ュ弬:鍚庣 snake_case DTO,
+ * 涓変釜榛樿瀛楁涓哄彲绌?鍐呭眰瀛楁鍘熸牱鍙?涓嶈 inline 鏀瑰悕銆?
+ * 鍛藉悕鍔?Input 鍚庣紑,涓庡悗绔?`*Payload` 鍖哄垎,閬垮厤璺ㄨ瑷€鍚屽悕姝т箟銆?
  */
 export interface CreateTransformationNovelInput {
   data_asset_id: number;
@@ -208,8 +208,8 @@ export interface CreateTransformationNovelInput {
 }
 
 /**
- * `update_transformation_novel` 入参:后端 snake_case DTO,三个默认字段可空。
- * null 表示清空存量默认值(后端 update 行为:用 payload 覆盖 cur.default_*)。
+ * `update_transformation_novel` 鍏ュ弬:鍚庣 snake_case DTO,涓変釜榛樿瀛楁鍙┖銆?
+ * null 琛ㄧず娓呯┖瀛橀噺榛樿鍊?鍚庣 update 琛屼负:鐢?payload 瑕嗙洊 cur.default_*)銆?
  */
 export interface UpdateTransformationNovelInput {
   id: number;
@@ -219,13 +219,13 @@ export interface UpdateTransformationNovelInput {
   default_mode?: 'compress' | 'style' | null;
 }
 
-// === Workflow 工作流 ===
-/** 后端 `BatchStatus` 收敛到两态:`running` / `stopped`(spec §3.3)。Stopped 后只能 retry 空槽。 */
+// === Workflow 宸ヤ綔娴?===
+/** 鍚庣 `BatchStatus` 鏀舵暃鍒颁袱鎬?`running` / `stopped`(spec 搂3.3)銆係topped 鍚庡彧鑳?retry 绌烘Ы銆?*/
 export type WorkflowStatus = 'running' | 'stopped';
 
 /**
- * `list_workflows` / `get_workflow` 返回:工作流汇总 + 章节计数。
- * counts 直接嵌在行内 —— 不用单独调 count 接口。
+ * `list_workflows` / `get_workflow` 杩斿洖:宸ヤ綔娴佹眹鎬?+ 绔犺妭璁℃暟銆?
+ * counts 鐩存帴宓屽湪琛屽唴 鈥斺€?涓嶇敤鍗曠嫭璋?count 鎺ュ彛銆?
  */
 export interface PromoteWorkflowInput {
   batchId: number;
@@ -247,7 +247,7 @@ export interface WorkflowSummary {
   promoted_count: number;
 }
 
-/** `list_workflow_chapters` 返回:tc 行 + 章节标题/idx + 关联结果槽预览。 */
+/** `list_workflow_chapters` 杩斿洖:tc 琛?+ 绔犺妭鏍囬/idx + 鍏宠仈缁撴灉妲介瑙堛€?*/
 export interface WorkflowChapterRow {
   tc_id: number;
   chapter_id: number;
@@ -259,7 +259,7 @@ export interface WorkflowChapterRow {
   is_empty_slot: boolean;
 }
 
-/** `list_transformation_source_chapters` 返回:tn 下全部源章节 + 非空结果数。 */
+/** `list_transformation_source_chapters` 杩斿洖:tn 涓嬪叏閮ㄦ簮绔犺妭 + 闈炵┖缁撴灉鏁般€?*/
 export interface SourceChapterRow {
   chapter_id: number;
   idx: number;
@@ -268,7 +268,7 @@ export interface SourceChapterRow {
   non_empty_result_count: number;
 }
 
-/** `list_chapter_workflow_results` 返回:某源章节在所有工作流里的结果(按 batch_id DESC)。 */
+/** `list_chapter_workflow_results` 杩斿洖:鏌愭簮绔犺妭鍦ㄦ墍鏈夊伐浣滄祦閲岀殑缁撴灉(鎸?batch_id DESC)銆?*/
 export interface ChapterWorkflowResultRow {
   batch_id: number;
   batch_label: string | null;
@@ -278,14 +278,14 @@ export interface ChapterWorkflowResultRow {
   status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
 }
 
-/** `create_workflow` 入参:后端 snake_case DTO,所有字段必填(spec §5.1)。 */
+/** `create_workflow` 鍏ュ弬:鍚庣 snake_case DTO,鎵€鏈夊瓧娈靛繀濉?spec 搂5.1)銆?*/
 /**
- * `create_workflow` 入参:后端 snake_case DTO,所有字段必填(spec §5.1)。
+ * `create_workflow` 鍏ュ弬:鍚庣 snake_case DTO,鎵€鏈夊瓧娈靛繀濉?spec 搂5.1)銆?
  *
- * `on_failure_policy` 是章节失败时的处理策略:
- * - `pause_and_review`: 失败时 batch 转 Paused,等用户在 modal 里手动决策(重试/跳过/终止)
- * - `terminate`:        失败时同 batch 后续章节 cancelled + batch 转 Terminated
- * - `skip_failed`:      失败时该章标 Skipped,继续派下一章(batch 留 Running)
+ * `on_failure_policy` 鏄珷鑺傚け璐ユ椂鐨勫鐞嗙瓥鐣?
+ * - `pause_and_review`: 澶辫触鏃?batch 杞?Paused,绛夌敤鎴峰湪 modal 閲屾墜鍔ㄥ喅绛?閲嶈瘯/璺宠繃/缁堟)
+ * - `terminate`:        澶辫触鏃跺悓 batch 鍚庣画绔犺妭 cancelled + batch 杞?Terminated
+ * - `skip_failed`:      澶辫触鏃惰绔犳爣 Skipped,缁х画娲句笅涓€绔?batch 鐣?Running)
  */
 export interface CreateWorkflowInput {
   tn_id: number;
@@ -301,16 +301,16 @@ export interface CreateWorkflowInput {
 }
 
 /**
- * `transformation_chapters.status` 状态机:
- * `pending` → `running` → (`done` | `failed` | `cancelled`)
- * 失败不自动重试 — 用户手动调 `enqueue_transformation_chapters` 重排队。
+ * `transformation_chapters.status` 鐘舵€佹満:
+ * `pending` 鈫?`running` 鈫?(`done` | `failed` | `cancelled`)
+ * 澶辫触涓嶈嚜鍔ㄩ噸璇?鈥?鐢ㄦ埛鎵嬪姩璋?`enqueue_transformation_chapters` 閲嶆帓闃熴€?
  */
 export type TransformStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'cancelled';
 
 /**
- * `list_transformation_chapters` / `list_transformation_chapters_for_chapter` 返回:
- * 一次转换任务的完整状态。`chapter_idx` / `chapter_title` 是 join `chapters` 表拼上的,
- * 方便 Transform 页直接展示,无需二次请求。
+ * `list_transformation_chapters` / `list_transformation_chapters_for_chapter` 杩斿洖:
+ * 涓€娆¤浆鎹换鍔＄殑瀹屾暣鐘舵€併€俙chapter_idx` / `chapter_title` 鏄?join `chapters` 琛ㄦ嫾涓婄殑,
+ * 鏂逛究 Transform 椤电洿鎺ュ睍绀?鏃犻渶浜屾璇锋眰銆?
  */
 export interface TransformationChapterRow {
   id: number;
@@ -333,12 +333,12 @@ export interface TransformationChapterRow {
 }
 
 /**
- * `enqueue_transformation_chapters` 入参。三个上下文数:
- * - `ctx_prev_original` —— 模板 `{{prev_original}}` 占位的前文原文章数
- * - `ctx_prev_transformed` —— 模板 `{{prev_transformed}}` 占位的前文已转换章数
- * (画风参考,不污染原文上下文;若前面没有已转换结果则渲染为 `(暂无已转换参考)`)
- * - `ctx_next_original` —— 模板 `{{next_original}}` 占位的后文原文章数
- * 后端按 (chapter_id, prompt_id, model_config_id) 同时匹配才视为画风参考。
+ * `enqueue_transformation_chapters` 鍏ュ弬銆備笁涓笂涓嬫枃鏁?
+ * - `ctx_prev_original` 鈥斺€?妯℃澘 `{{prev_original}}` 鍗犱綅鐨勫墠鏂囧師鏂囩珷鏁?
+ * - `ctx_prev_transformed` 鈥斺€?妯℃澘 `{{prev_transformed}}` 鍗犱綅鐨勫墠鏂囧凡杞崲绔犳暟
+ * (鐢婚鍙傝€?涓嶆薄鏌撳師鏂囦笂涓嬫枃;鑻ュ墠闈㈡病鏈夊凡杞崲缁撴灉鍒欐覆鏌撲负 `(鏆傛棤宸茶浆鎹㈠弬鑰?`)
+ * - `ctx_next_original` 鈥斺€?妯℃澘 `{{next_original}}` 鍗犱綅鐨勫悗鏂囧師鏂囩珷鏁?
+ * 鍚庣鎸?(chapter_id, prompt_id, model_config_id) 鍚屾椂鍖归厤鎵嶈涓虹敾椋庡弬鑰冦€?
  */
 export type EnqueuePayload = {
   transformation_novel_id: number;
@@ -351,16 +351,16 @@ export type EnqueuePayload = {
 };
 
 /**
- * `enqueue_all_chapters` 入参:对 `transformation_novel` 下全部 chapter 入队
- * (后端从 `chapters` 表按 `data_asset_id` 拉全量 chapter_id)。
+ * `enqueue_all_chapters` 鍏ュ弬:瀵?`transformation_novel` 涓嬪叏閮?chapter 鍏ラ槦
+ * (鍚庣浠?`chapters` 琛ㄦ寜 `data_asset_id` 鎷夊叏閲?chapter_id)銆?
  */
 export type EnqueueAllPayload = Omit<EnqueuePayload, 'chapter_ids'>;
 
-/** `JobQueue` 内部的 job 状态(与 `TransformStatus` 同字面量,但语义层面有别:
- * `TransformStatus` 是 DB 行的持久状态;`JobStatus` 是 worker pool 的内存快照) */
+/** `JobQueue` 鍐呴儴鐨?job 鐘舵€?涓?`TransformStatus` 鍚屽瓧闈㈤噺,浣嗚涔夊眰闈㈡湁鍒?
+ * `TransformStatus` 鏄?DB 琛岀殑鎸佷箙鐘舵€?`JobStatus` 鏄?worker pool 鐨勫唴瀛樺揩鐓? */
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
-/** 单个 job 的实时快照。锁争用时该 job 可能不出现在 snapshot 中。 */
+/** 鍗曚釜 job 鐨勫疄鏃跺揩鐓с€傞攣浜夌敤鏃惰 job 鍙兘涓嶅嚭鐜板湪 snapshot 涓€?*/
 export interface JobInfo {
   transformation_id: number;
   chapter_title: string;
@@ -371,8 +371,8 @@ export interface JobInfo {
   tokens_out: number | null;
 }
 
-/** `JobQueue.snapshot()` 一次拉回的全量队列快照,按状态分四组。
- *  锁争用时返回空(字段都为空数组),前端 1s 轮询可不处理。 */
+/** `JobQueue.snapshot()` 涓€娆℃媺鍥炵殑鍏ㄩ噺闃熷垪蹇収,鎸夌姸鎬佸垎鍥涚粍銆?
+ *  閿佷簤鐢ㄦ椂杩斿洖绌?瀛楁閮戒负绌烘暟缁?,鍓嶇 1s 杞鍙笉澶勭悊銆?*/
 export interface QueueSnapshot {
   pending: JobInfo[];
   running: JobInfo[];
@@ -380,9 +380,9 @@ export interface QueueSnapshot {
   failed: JobInfo[];
 }
 
-/// 清洗预览结果。cleaned_text 给前端展示;lines_delta 为输出与输入的行数差
-/// (规则折叠/合并短段 → 负数;加缩进不改行数 → 0;现有实现下几乎不会正)。
-/// chars_delta 为字符数差(加缩进时为正,合并/折叠时可能为负)。
+/// 娓呮礂棰勮缁撴灉銆俢leaned_text 缁欏墠绔睍绀?lines_delta 涓鸿緭鍑轰笌杈撳叆鐨勮鏁板樊
+/// (瑙勫垯鎶樺彔/鍚堝苟鐭 鈫?璐熸暟;鍔犵缉杩涗笉鏀硅鏁?鈫?0;鐜版湁瀹炵幇涓嬪嚑涔庝笉浼氭)銆?
+/// chars_delta 涓哄瓧绗︽暟宸?鍔犵缉杩涙椂涓烘,鍚堝苟/鎶樺彔鏃跺彲鑳戒负璐?銆?
 export interface CleaningPreview {
   cleaned_text: string;
   lines_delta: number;
@@ -390,12 +390,12 @@ export interface CleaningPreview {
 }
 
 /**
- * 后端 `prompts` 表行的前端镜像(取自 `nsc_core::models::Prompt`)。
- * `kind` 来自后端 `PromptKind` 枚举(`#[serde(rename_all = "snake_case")]`)
- * —— 前端拿到 / 发回 `"compress"` / `"style"`。
- * - `is_builtin` 为 true 的行在 UI 上不可编辑 / 不可删除,可"复制"成用户版。
- * - `archived = 1` 表示软删 —— 行仍保留供 `transformation_chapters.prompt_id` 反查历史 prompt 名称 / 模板。
- *   默认 list 不返回,需走 `list_prompts_including_archived`。
+ * 鍚庣 `prompts` 琛ㄨ鐨勫墠绔暅鍍?鍙栬嚜 `nsc_core::models::Prompt`)銆?
+ * `kind` 鏉ヨ嚜鍚庣 `PromptKind` 鏋氫妇(`#[serde(rename_all = "snake_case")]`)
+ * 鈥斺€?鍓嶇鎷垮埌 / 鍙戝洖 `"compress"` / `"style"`銆?
+ * - `is_builtin` 涓?true 鐨勮鍦?UI 涓婁笉鍙紪杈?/ 涓嶅彲鍒犻櫎,鍙?澶嶅埗"鎴愮敤鎴风増銆?
+ * - `archived = 1` 琛ㄧず杞垹 鈥斺€?琛屼粛淇濈暀渚?`transformation_chapters.prompt_id` 鍙嶆煡鍘嗗彶 prompt 鍚嶇О / 妯℃澘銆?
+ *   榛樿 list 涓嶈繑鍥?闇€璧?`list_prompts_including_archived`銆?
  */
 export interface Prompt {
   id: number;
@@ -403,23 +403,23 @@ export interface Prompt {
   kind: 'compress' | 'style';
   template: string;
   is_builtin: boolean;
-  /** 0 = 正常,1 = 已归档(软删)。后端 INTEGER 列,前端用 number 收。 */
+  /** 0 = 姝ｅ父,1 = 宸插綊妗?杞垹)銆傚悗绔?INTEGER 鍒?鍓嶇鐢?number 鏀躲€?*/
   archived: number;
 }
 
 /**
- * `upsert_prompt` 入参。`id === 0` 表示新建(走 insert);>0 表示更新(走 update)。
- * 字段保持 snake_case-by-default —— `kind` / `name` / `template` 都是单词,
- * 没有 `#[serde(rename_all)]` 在这层 DTO 上,所以前端按字段名原样发。
- * - 排除 `is_builtin` —— 后端不通过此 DTO 改 builtin 标记。
- * - 排除 `archived` —— 软删走 `delete_prompt` / `restore_prompt` 专用命令。
+ * `upsert_prompt` 鍏ュ弬銆俙id === 0` 琛ㄧず鏂板缓(璧?insert);>0 琛ㄧず鏇存柊(璧?update)銆?
+ * 瀛楁淇濇寔 snake_case-by-default 鈥斺€?`kind` / `name` / `template` 閮芥槸鍗曡瘝,
+ * 娌℃湁 `#[serde(rename_all)]` 鍦ㄨ繖灞?DTO 涓?鎵€浠ュ墠绔寜瀛楁鍚嶅師鏍峰彂銆?
+ * - 鎺掗櫎 `is_builtin` 鈥斺€?鍚庣涓嶉€氳繃姝?DTO 鏀?builtin 鏍囪銆?
+ * - 鎺掗櫎 `archived` 鈥斺€?杞垹璧?`delete_prompt` / `restore_prompt` 涓撶敤鍛戒护銆?
  */
 export type PromptInput = Omit<Prompt, 'id' | 'is_builtin' | 'archived'> & { id: number };
 
-/// ai_call_logs 表前端镜像,详见 migrations/0018_ai_call_logs.sql。
-/// - business = transform_chapter | test_model(看两条 AI调用 路径)
-/// - preview 字段是前 10KB,完整内容看 transformation_chapters.result_content / 调用方上下文
-/// - estimated_tokens_in 用 chars/2 启发式(zh-aware 粗估),UI 标注粗估
+/// ai_call_logs 琛ㄥ墠绔暅鍍?璇﹁ migrations/0018_ai_call_logs.sql銆?
+/// - business = transform_chapter | test_model(鐪嬩袱鏉?AI璋冪敤 璺緞)
+/// - preview 瀛楁鏄墠 10KB,瀹屾暣鍐呭鐪?transformation_chapters.result_content / 璋冪敤鏂逛笂涓嬫枃
+/// - estimated_tokens_in 鐢?chars/2 鍚彂寮?zh-aware 绮椾及),UI 鏍囨敞绮椾及
 export type AiCallBusiness = "transform_chapter" | "test_model";
 export type AiCallStatus = "success" | "failed";
 
@@ -448,7 +448,7 @@ export interface AiCallLog {
   error: string | null;
 }
 
-/** list_ai_call_logs 入参 —— 后端 snake_case DTO,字段保持 Rust 原名。 */
+/** list_ai_call_logs 鍏ュ弬 鈥斺€?鍚庣 snake_case DTO,瀛楁淇濇寔 Rust 鍘熷悕銆?*/
 export type AiCallLogFilter = {
   business?: AiCallBusiness | null;
   model_config_id?: number | null;
@@ -456,7 +456,7 @@ export type AiCallLogFilter = {
   limit?: number | null;
 };
 
-/** 上传删除前的确认信息。删 upload 不联动删 data_asset，仅提示以供用户另行去处理。 */
+/** 涓婁紶鍒犻櫎鍓嶇殑纭淇℃伅銆傚垹 upload 涓嶈仈鍔ㄥ垹 data_asset锛屼粎鎻愮ず浠ヤ緵鐢ㄦ埛鍙﹁鍘诲鐞嗐€?*/
 export interface UploadDeletePreviewItem {
   id: number;
   title: string;
@@ -468,4 +468,65 @@ export interface UploadDeletePreview {
   filename: string;
   source_filename: string;
   derived_data_assets: UploadDeletePreviewItem[];
+}
+
+
+/**
+ * 总览页(Overview.vue)单次拉取的整张关系图。
+ * 严格只画 4 类正向边(OverviewEdgeKind);`source_data_asset_id` 这种回溯字段不进图,
+ * 只在节点 `subtitle` 里展示。
+ */
+export type OverviewNodeKind =
+  | 'upload'
+  | 'source_data_asset'
+  | 'promoted_data_asset'
+  | 'transformation_novel'
+  | 'batch';
+
+export interface OverviewNode {
+  id: number;
+  /** 前端 vue-flow `id` 字段:形如 `upload:1` / `da:7` / `tn:3` / `batch:42`。 */
+  key: string;
+  kind: OverviewNodeKind;
+  title: string;
+  word_count: number | null;
+  chapter_count: number | null;
+  child_count: number | null;
+  /** 仅 `batch` 有:pending/running/paused/stopped/completed/terminated/cancelled。 */
+  status: string | null;
+  /** 仅 `upload` 有:文件字节数(原始 i64),前端 formatSize 渲染成 B/KB/MB。 */
+  byte_size: number | null;
+  /** DA:回溯来源("由 batch 42 生成")。 */
+  subtitle: string | null;
+}
+
+export type OverviewEdgeKind =
+  | 'upload_to_source_da'
+  | 'da_to_tn'
+  | 'tn_to_batch'
+  | 'batch_to_promoted_da';
+
+export interface OverviewEdge {
+  source: string;
+  target: string;
+  kind: OverviewEdgeKind;
+}
+
+export interface OverviewStats {
+  upload_count: number;
+  data_asset_count: number;
+  transformation_novel_count: number;
+  /** running + paused 计数。 */
+  running_batch_count: number;
+  /** 最近 24h 失败的 batch 数。 */
+  failed_recent_count: number;
+}
+
+export interface OverviewGraph {
+  nodes: OverviewNode[];
+  edges: OverviewEdge[];
+  stats: OverviewStats;
+  /** 当前节点总数(未截断)。 */
+  total_nodes_raw: number;
+  truncated: boolean;
 }

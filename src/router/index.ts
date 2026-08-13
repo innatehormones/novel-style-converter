@@ -7,6 +7,7 @@ import ParseWizard from '../views/parse.vue';
 import Transform from '../views/Transform.vue';
 import Prompts from '../views/Prompts.vue';
 import AiCalls from '../views/AiCalls.vue';
+import Overview from '../views/Overview.vue';
 import { findDataAssetByUpload } from '../ipc/commands';
 
 const router = createRouter({
@@ -43,17 +44,15 @@ const router = createRouter({
       component: () => import('../views/TransformationNovelDetail.vue'),
       props: true,
     },
+    { path: '/overview', component: Overview },
     { path: '/prompts', component: Prompts },
     { path: '/ai-calls', component: AiCalls },
     { path: '/models', component: Models },
   ],
 });
 
-/// 旧路由 `/library/:uploadId/clean` `/library/:uploadId/chapters` `/library/:uploadId/preview` 重定向。
-/// 以及新路由 `/library/upload/:uploadId/parse` 的 guard:
-/// 若该 upload 已有 data_asset → 跳到 DataAsset 页;否则跳到 Upload 页 / 放行。
-/// 已有 data_asset 重新解析要走 DataAsset.vue 的 delete_data_asset 路径,
-/// 不能再从 parse wizard 直接 commit(后端 guard 会拒绝,前端文案误导)。
+/// Old /library/:uploadId/{clean,chapters,preview} paths are routed to the right page
+/// depending on whether a data_asset already exists for that upload.
 router.beforeEach(async (to) => {
   const oldMatch = to.path.match(/^\/library\/(\d+)\/(clean|chapters|preview)$/);
   if (oldMatch) {

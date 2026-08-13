@@ -35,6 +35,7 @@ import IconRepeat from '~icons/lucide/repeat';
 import IconFileText from '~icons/lucide/file-text';
 import IconBox from '~icons/lucide/box';
 import IconActivity from '~icons/lucide/activity';
+import IconNetwork from '~icons/lucide/network';
 import IconSun from '~icons/lucide/sun';
 import IconMoon from '~icons/lucide/moon';
 import { useThemeStore } from '../stores/theme';
@@ -42,6 +43,7 @@ import { useThemeStore } from '../stores/theme';
 interface Item { to: string; label: string; icon: Component }
 
 const topItems: Item[] = [
+  { to: '/overview', label: '总览', icon: markRaw(IconNetwork) },
   { to: '/uploads', label: '上传原文', icon: markRaw(IconUpload) },
   { to: '/data-assets', label: '数据资产', icon: markRaw(IconDatabase) },
   { to: '/transformations', label: '转换工程', icon: markRaw(IconRepeat) },
@@ -58,6 +60,7 @@ function isActive(to: string): boolean {
   if (to === '/uploads') return route.path.startsWith('/library/upload/');
   if (to === '/data-assets') return route.path.startsWith('/library/data/');
   if (to === '/transformations') return route.path.startsWith('/library/transformation');
+  if (to === '/overview') return route.path === '/overview';
   return false;
 }
 </script>
@@ -75,7 +78,6 @@ function isActive(to: string): boolean {
   height: 100vh;
 }
 .sidebar::before {
-  /* 左侧 1 道细红印条 — 跟内容区的红线呼应 */
   content: '';
   position: absolute;
   left: 219px;
@@ -118,7 +120,6 @@ function isActive(to: string): boolean {
   color: var(--text-primary);
 }
 .nav-item.active {
-  /* 朱砂印章 active: 浅朱底 + 朱字 + 左侧一道窄红条 */
   background: var(--color-cinnabar-light);
   color: var(--color-cinnabar-deep);
   font-weight: var(--font-weight-medium);

@@ -260,7 +260,13 @@ export function clearAiCallLogs(): Promise<number> {
   return invoke<number>('clear_ai_call_logs');
 }
 
+
 // upload deletion preview: list derived data_assets without cascading.
 export function previewUploadDeletion(uploadId: number): Promise<UploadDeletePreview> {
   return invoke<UploadDeletePreview>("preview_upload_deletion", { uploadId });
+}
+
+// === Overview ===
+export function getOverviewGraph(): Promise<import("./types").OverviewGraph> {
+  return invoke<import("./types").OverviewGraph>("get_overview_graph");
 }
