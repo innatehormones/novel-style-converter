@@ -4,11 +4,13 @@
     <main class="app">
       <router-view />
     </main>
+    <TooltipHost />
   </div>
 </template>
 
 <script setup lang="ts">
 import Sidebar from './components/Sidebar.vue';
+import TooltipHost from './components/ui/TooltipHost.vue';
 </script>
 
 <style scoped>

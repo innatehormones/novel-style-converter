@@ -12,26 +12,31 @@
       <div v-if="!store.loading && store.uploads.length === 0" class="empty">
         还没有文件,点击右上"上传 .txt"添加一个。
       </div>
-      <Table
+      <DataTable
         v-else
         :columns="uploadColumns"
         :data="store.uploads"
         :row-key="(row) => row.id"
+        :widths="uploadWidths"
+        :numeric-columns="['size', 'words', 'assets']"
+        :truncate-columns="['filename']"
+        frozen-column="actions"
       >
-        <template #cell-filename="{ row }">{{ row.filename }}</template>
-        <template #cell-size="{ row }">{{ formatSize(row.byte_size) }}</template>
-        <template #cell-words="{ row }">{{ formatWordCount(row.word_count) }}</template>
-        <template #cell-uploaded="{ row }">{{ formatTime(row.uploaded_at) }}</template>
+        <template #cell-filename="{ row }">
+          <Tooltip :text="row.filename"><span class="cell-truncate">{{ row.filename }}</span></Tooltip>
+        </template>
         <template #cell-assets="{ row }">
           <Tag v-if="daCount(row.id) > 0" kind="success">{{ daCount(row.id) }} 个</Tag>
           <span v-else class="muted">—</span>
         </template>
         <template #cell-actions="{ row }">
-          <Button size="small" @click="goUpload(row.id)">查看</Button>
-          <Button size="small" @click="goParse(row.id)">解析章节</Button>
-          <Button size="small" kind="danger" @click="onDeleteUpload(row.id, row.filename)">删除</Button>
+          <button type="button" class="row-link" @click="goUpload(row.id)">查看</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <button type="button" class="row-link" @click="goParse(row.id)">解析章节</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <button type="button" class="row-link danger" @click="onDeleteUpload(row.id, row.filename)">删除</button>
         </template>
-      </Table>
+      </DataTable>
     </template>
 
     <template v-else-if="page === 'data-assets'">
@@ -156,7 +161,9 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Button from '../components/ui/Button.vue';
+import DataTable from '../components/ui/DataTable.vue';
 import Input from '../components/ui/Input.vue';
+import Tooltip from '../components/ui/Tooltip.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
 import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
@@ -166,6 +173,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import { useLibraryStore } from '../stores/library';
 import { formatSize, formatTime, formatWordCount } from '../utils/format';
+import type { UploadSummary } from '../ipc/types';
 
 const route = useRoute();
 const router = useRouter();
@@ -225,13 +233,39 @@ function showAlert(title: string, message: string) {
 }
 
 const uploadColumns = [
-  { key: 'filename', title: '文件名', width: '260px' },
-  { key: 'size', title: '大小', width: '100px' },
-  { key: 'words', title: '字数', width: '100px' },
-  { key: 'uploaded', title: '上传时间', width: '180px' },
-  { key: 'assets', title: '数据资产', width: '100px' },
-  { key: 'actions', title: '操作', width: '260px', type: 'actions' as const },
+  { accessorKey: 'filename', header: '文件名', enableSorting: true },
+  {
+    accessorKey: 'byte_size',
+    id: 'size',
+    header: '大小',
+    enableSorting: true,
+    cell: (info: any) => formatSize(info.getValue() as number),
+  },
+  {
+    accessorKey: 'word_count',
+    id: 'words',
+    header: '字数',
+    enableSorting: true,
+    cell: (info: any) => formatWordCount(info.getValue() as number),
+  },
+  {
+    accessorKey: 'uploaded_at',
+    id: 'uploaded',
+    header: '上传时间',
+    enableSorting: true,
+    cell: (info: any) => formatTime(info.getValue() as string),
+  },
+  { id: 'assets', header: '数据资产', enableSorting: false },
+  { id: 'actions', header: '操作', enableSorting: false },
 ];
+const uploadWidths: Record<string, number> = {
+  filename: 260,
+  size: 100,
+  words: 100,
+  uploaded: 180,
+  assets: 100,
+  actions: 200,
+};
 
 const daColumns = [
   { key: 'title', title: '标题', width: '220px' },
@@ -403,5 +437,38 @@ function goDetail(tnId: number) {
 .muted {
   color: var(--text-secondary);
   font-size: 12px;
+}
+.cell-truncate {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-slate);
+  cursor: pointer;
+  text-decoration: underline transparent;
+  text-underline-offset: 3px;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+.row-link:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+.row-link.danger:hover {
+  color: var(--color-cinnabar-darker);
+  text-decoration-color: currentColor;
+}
+.row-sep {
+  display: inline-block;
+  margin: 0 8px;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 </style>

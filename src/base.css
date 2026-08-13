@@ -28,6 +28,7 @@
   /* Accent — 朱砂红 */
   --color-cinnabar: #c73a1d;         /* 主朱(印章/border/primary) */
   --color-cinnabar-deep: #8a2715;    /* 深朱(active/hover) */
+  --color-cinnabar-darker: #5e1a0d;   /* 更深朱(危险/destructive) */
   --color-cinnabar-light: #f5e4dc;   /* 极浅朱(soft bg/active) */
 
   /* Status tints — 弱化,围绕朱红家族 */
