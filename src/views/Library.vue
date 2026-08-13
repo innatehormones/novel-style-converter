@@ -1,6 +1,6 @@
 <template>
   <section>
-    <PageHeader :title="pageTitle" subtitle="在这里管理上传原文、解析后的数据资产与转换工程">
+    <PageHeader :title="pageTitle" :subtitle="pageSubtitle">
       <template #actions>
         <Button v-if="page === 'uploads'" kind="primary" :loading="store.uploading" @click="uploadDialogOpen = true">上传 .txt</Button>
       </template>
@@ -188,6 +188,12 @@ const pageTitle = computed(() => ({
   uploads: '上传原文',
   'data-assets': '数据资产',
   transformations: '转换工程',
+})[page.value]);
+
+const pageSubtitle = computed(() => ({
+  uploads: '导入 .txt 原文 · 解析章节 · 生成数据资产',
+  'data-assets': '浏览 / 编辑 / 删除已解析的章节数据 · 转换工程的输入',
+  transformations: '对数据资产应用 prompt · 派生新的转换数据',
 })[page.value]);
 
 const uploadDialogOpen = ref(false);
