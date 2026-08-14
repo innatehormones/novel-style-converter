@@ -451,6 +451,42 @@ export type AiCallLogFilter = {
   limit?: number | null;
 };
 
+/// 单章节预览草稿状态(spec §4 / §5.3)。后端 serde snake_case。
+export type PreviewStatus = 'generating' | 'done' | 'failed';
+
+/// 单章节预览行(spec §5.3)—— 后端 nsc_core::models::ChapterPreviewRow,IPC 直接复用。
+/// `created_at` / `updated_at` 是 RFC3339 字符串(DateTime<Utc> serde 自动转)。
+export interface ChapterPreviewRow {
+  id: number;
+  batch_id: number;
+  chapter_id: number;
+  custom_input: string | null;
+  preview_content: string | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  error: string | null;
+  status: PreviewStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+/// 提交预览入参(spec §4.2 / §5.2)—— 后端 `CommitPreviewInput`,snake_case DTO。
+export interface CommitPreviewInput {
+  batch_id: number;
+  chapter_id: number;
+  draft_content: string;
+  source_preview_id: number | null;
+}
+
+/// 发起预览生成入参(spec §5.2) —— 注意是 IPC 参数,后端命令签名是直接展开的
+/// (regenerate_chapter_preview(batch_id, chapter_id, custom_input)),
+/// 所以 wrapper 里要用展开式 invoke 而非内嵌 payload。
+export interface RegeneratePreviewInput {
+  batch_id: number;
+  chapter_id: number;
+  custom_input: string | null;
+}
+
 /** 涓婁紶鍒犻櫎鍓嶇殑纭淇℃伅銆傚垹 upload 涓嶈仈鍔ㄥ垹 data_asset锛屼粎鎻愮ず浠ヤ緵鐢ㄦ埛鍙﹁鍘诲鐞嗐€?*/
 export interface UploadDeletePreviewItem {
   id: number;

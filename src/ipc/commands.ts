@@ -20,6 +20,7 @@ import type {
   SourceChapterRow, ChapterWorkflowResultRow,
   UploadDeletePreview,
   AiCallLog, AiCallLogFilter,
+  ChapterPreviewRow, CommitPreviewInput, RegeneratePreviewInput,
 } from './types';
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -293,4 +294,32 @@ export function previewUploadDeletion(uploadId: number): Promise<UploadDeletePre
 // === Overview ===
 export function getOverviewGraph(): Promise<import("./types").OverviewGraph> {
   return invoke<import("./types").OverviewGraph>("get_overview_graph");
+}
+// ─── Chapter previews (RegeneratePreview dialog) ──────────────────────────
+/// 发起预览生成。返回 preview.id;实际 AI 调用在后台进行。
+/// 前端通过轮询 listChapterPreviews 直到 status != 'generating' 反映进度。
+export function regenerateChapterPreview(
+  payload: RegeneratePreviewInput,
+): Promise<number> {
+  return invoke<number>('regenerate_chapter_preview', {
+    batchId: payload.batch_id,
+    chapterId: payload.chapter_id,
+    customInput: payload.custom_input,
+  });
+}
+
+/// 提交预览(spec §4.2) —— 用草稿区内容覆盖 wrc.content,清空所有 preview 行。
+/// 返回更新后的 WorkflowSummary(状态/计数可能变化)。
+export function commitChapterPreview(payload: CommitPreviewInput): Promise<WorkflowSummary> {
+  return invoke<WorkflowSummary>('commit_chapter_preview', { input: payload });
+}
+
+/// 列出某章节的 preview 行,按 id DESC。
+export function listChapterPreviews(batchId: number, chapterId: number): Promise<ChapterPreviewRow[]> {
+  return invoke<ChapterPreviewRow[]>('list_chapter_previews', { batchId, chapterId });
+}
+
+/// 放弃某个 preview 行。
+export function discardChapterPreview(previewId: number): Promise<void> {
+  return invoke<void>('discard_chapter_preview', { previewId });
 }
