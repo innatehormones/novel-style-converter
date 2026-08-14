@@ -719,6 +719,11 @@ watch(() => sources.value, (list) => {
       >
         <template #cell-status="{ row }">
           <span class="status" :class="row.status">{{ formatWorkflowStatus(row.status) }}</span>
+          <span
+            v-if="row.promoted_count > 0"
+            class="promoted-tag"
+            :title="`已基于此工作流转正 ${row.promoted_count} 份数据资产`"
+          >转正 × {{ row.promoted_count }}</span>
         </template>
         <template #cell-created="{ row }">
           {{ fmtTime(row.created_at) }}
@@ -727,12 +732,7 @@ watch(() => sources.value, (list) => {
           {{ fmtTime(row.ended_at) }}
         </template>
         <template #cell-actions="{ row }">
-          <span
-            v-if="row.promoted_count > 0"
-            class="promoted-tag"
-            :title="`已转正 ${row.promoted_count} 份`"
-          >转正 × {{ row.promoted_count }}</span>
-          <Button size="small" @click="openWorkflowPanel(row)">详情</Button>
+          <button type="button" class="row-link" @click="openWorkflowPanel(row)">详情</button>
         </template>
       </DataTable>
       <div v-if="createBatchError" class="error-banner">
@@ -852,8 +852,9 @@ watch(() => sources.value, (list) => {
           <span class="status" :class="row.status">{{ formatWorkflowStatus(row.status) }}</span>
         </template>
         <template #cell-actions="{ row }">
-          <Button size="small" @click="openChapterDetail(row)">详情</Button>
-          <Button size="small" @click="reconvertSingle(row)">重新转换</Button>
+          <button type="button" class="row-link" @click="openChapterDetail(row)">详情</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <button type="button" class="row-link" @click="reconvertSingle(row)">重新转换</button>
         </template>
       </DataTable>
       <div v-else class="empty">暂无章节</div>

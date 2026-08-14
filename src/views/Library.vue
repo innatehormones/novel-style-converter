@@ -590,42 +590,4 @@ function goDetail(tnId: number) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.row-link {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  font-size: 13px;
-  color: var(--color-slate);
-  cursor: pointer;
-  text-decoration: underline transparent;
-  text-underline-offset: 3px;
-  transition: color 120ms ease, text-decoration-color 120ms ease;
-}
-.row-link:disabled,
-.row-link[disabled] {
-  cursor: not-allowed;
-  opacity: 0.45;
-  color: var(--text-muted);
-}
-.row-link:disabled:hover,
-.row-link[disabled]:hover {
-  color: var(--text-muted);
-  text-decoration-color: transparent;
-}
-.row-link:hover {
-  color: var(--accent);
-  text-decoration-color: currentColor;
-}
-.row-link.danger:hover {
-  color: var(--color-cinnabar-darker);
-  text-decoration-color: currentColor;
-}
-.row-sep {
-  display: inline-block;
-  margin: 0 8px;
-  color: var(--text-muted);
-  font-size: 13px;
-}
 </style>
