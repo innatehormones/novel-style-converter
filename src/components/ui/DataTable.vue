@@ -1,5 +1,10 @@
 <template>
-  <div ref="wrapEl" class="dt-wrap" :class="{ 'is-end': isAtEnd }">
+  <div
+    ref="wrapEl"
+    class="dt-wrap"
+    :class="{ 'is-end': isAtEnd, 'has-max': maxHeight != null }"
+    :style="maxHeight != null ? { maxHeight } : undefined"
+  >
     <table class="dt">
       <thead>
         <tr v-for="hg in table.getHeaderGroups()" :key="hg.id">
@@ -75,6 +80,9 @@ const props = withDefaults(
     numericColumns?: string[];
     truncateColumns?: string[];
     frozenColumn?: string | null;
+    /// wrap 元素最大高度(例如 "400px")。超出会出现垂直滚动条,
+    /// 不传则让表格自然撑开。
+    maxHeight?: string;
   }>(),
   {
     emptyText: '暂无数据',
@@ -192,7 +200,8 @@ function onThClick(column: any) {
      高度仍被 border-radius 裁出圆角。点击 tooltip 被 body 里的 host
      接住，不受表格滑动器影响。 */
   overflow-x: auto;
-  overflow-y: hidden;
+  /* maxHeight 不传时自然撑开;传了就允许垂直滚动,跟 x 一起走 auto */
+  overflow-y: auto;
   box-shadow: var(--shadow);
 }
 .dt {
@@ -207,6 +216,12 @@ function onThClick(column: any) {
   border-bottom: 1px solid var(--border-soft);
   text-align: left;
   vertical-align: middle;
+}
+.has-max .dt th {
+  position: sticky;
+  top: 0;
+  background: var(--color-sheet);
+  z-index: 1;
 }
 .dt th {
   background: transparent;

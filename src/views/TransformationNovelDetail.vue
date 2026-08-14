@@ -13,6 +13,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import CreateBatchDialog from '../components/CreateBatchDialog.vue';
 import PromoteWorkflowDialog from '../components/PromoteWorkflowDialog.vue';
 import Dialog from '../components/ui/Dialog.vue';
+import DataTable from '../components/ui/DataTable.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -23,6 +24,64 @@ const tnTitle = computed(() => `数据资产 #${tnId.value}`);
 const store = useWorkflowsStore();
 
 const activeTab = ref<'chapters' | 'workflows'>('chapters');
+
+/// 章节来源 tab 表格列(TanStack format)
+const sourceColumns = [
+  { id: 'pick', header: '', enableSorting: false },
+  { accessorKey: 'idx', id: 'idx', header: '#', enableSorting: true },
+  { accessorKey: 'title', header: '标题', enableSorting: true },
+  { accessorKey: 'word_count', id: 'words', header: '字数', enableSorting: true },
+  { accessorKey: 'non_empty_result_count', id: 'result_count', header: '已有结果数', enableSorting: true },
+];
+const sourceWidths: Record<string, number> = {
+  pick: 40,
+  idx: 60,
+  title: 280,
+  words: 100,
+  result_count: 120,
+};
+
+/// 工作流 tab 表格列
+const workflowColumns = [
+  { accessorKey: 'label', header: '标签', enableSorting: true },
+  { id: 'status', header: '状态', enableSorting: true },
+  { accessorKey: 'total_count', id: 'total', header: '总章数', enableSorting: true },
+  { accessorKey: 'done_count', id: 'done', header: '已完成', enableSorting: true },
+  { accessorKey: 'failed_count', id: 'failed', header: '失败', enableSorting: true },
+  { accessorKey: 'skipped_count', id: 'skipped', header: '已跳过', enableSorting: true },
+  { accessorKey: 'created_at', id: 'created', header: '创建时间', enableSorting: true },
+  { accessorKey: 'ended_at', id: 'ended', header: '结束时间', enableSorting: true },
+  { id: 'actions', header: '操作', enableSorting: false },
+];
+const workflowWidths: Record<string, number> = {
+  label: 180,
+  status: 100,
+  total: 80,
+  done: 80,
+  failed: 80,
+  skipped: 80,
+  created: 160,
+  ended: 160,
+  actions: 140,
+};
+
+/// 工作流详情表格列
+const workflowChapterColumns = [
+  { id: 'pick', header: '', enableSorting: false },
+  { accessorKey: 'chapter_title', id: 'title', header: '标题', enableSorting: true },
+  { id: 'status', header: '状态', enableSorting: true },
+  { accessorKey: 'content_preview', id: 'preview', header: '结果预览', enableSorting: false },
+  { accessorKey: 'error', header: '错误', enableSorting: false },
+  { id: 'actions', header: '操作', enableSorting: false },
+];
+const workflowChapterWidths: Record<string, number> = {
+  pick: 40,
+  title: 200,
+  status: 100,
+  preview: 240,
+  error: 200,
+  actions: 200,
+};
 
 // 章节来源 tab
 const selectedChapterIds = ref<Set<number>>(new Set());
@@ -406,76 +465,60 @@ watch(() => sources.value, (list) => {
           + New Workflow ({{ selectedCount }} 章）
         </Button>
       </div>
-      <table v-if="sources.length > 0" class="chapter-table">
-        <thead>
-          <tr>
-            <th style="width: 40px">勾选</th>
-            <th style="width: 60px">#</th>
-            <th>标题</th>
-            <th style="width: 100px">字数</th>
-            <th style="width: 120px">已有结果数</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="s in sources" :key="s.chapter_id">
-            <td>
-              <input
-                type="checkbox"
-                :checked="selectedChapterIds.has(s.chapter_id)"
-                @change="(e) => toggleSelect(s.chapter_id, (e.target as HTMLInputElement).checked)"
-              />
-            </td>
-            <td>{{ s.idx }}</td>
-            <td>
-              <button class="link-btn" @click="openChapterPanel(s.chapter_id)">{{ s.title }}</button>
-            </td>
-            <td>{{ s.word_count }}</td>
-            <td>{{ s.non_empty_result_count }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <DataTable
+        v-if="sources.length > 0"
+        :columns="sourceColumns"
+        :data="sources"
+        :row-key="(row: SourceChapterRow) => row.chapter_id"
+        :widths="sourceWidths"
+        :numeric-columns="['idx', 'words', 'result_count']"
+        max-height="420px"
+        empty-text="暂无章节"
+      >
+        <template #cell-pick="{ row }">
+          <input
+            type="checkbox"
+            :checked="selectedChapterIds.has(row.chapter_id)"
+            @change="(e) => toggleSelect(row.chapter_id, (e.target as HTMLInputElement).checked)"
+          />
+        </template>
+        <template #cell-title="{ row }">
+          <button class="link-btn" @click="openChapterPanel(row.chapter_id)">{{ row.title }}</button>
+        </template>
+      </DataTable>
       <div v-else class="empty">暂无章节</div>
     </template>
 
     <!-- 工作流 tab -->
     <template v-else>
-      <table v-if="workflows.length > 0" class="batch-table">
-        <thead>
-          <tr>
-            <th>标签</th>
-            <th style="width: 100px">状态</th>
-            <th style="width: 80px">总章数</th>
-            <th style="width: 80px">已完成</th>
-            <th style="width: 80px">失败</th>
-            <th style="width: 80px">已跳过</th>
-            <th style="width: 160px">创建时间</th>
-            <th style="width: 160px">结束时间</th>
-            <th style="width: 140px">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="w in workflows" :key="w.id">
-            <td>{{ w.label ?? '—' }}</td>
-            <td>
-              <span class="status" :class="w.status">{{ formatWorkflowStatus(w.status) }}</span>
-            </td>
-            <td>{{ w.total_count }}</td>
-            <td>{{ w.done_count }}</td>
-            <td>{{ w.failed_count }}</td>
-            <td>{{ w.skipped_count }}</td>
-            <td>{{ fmtTime(w.created_at) }}</td>
-            <td>{{ fmtTime(w.ended_at) }}</td>
-            <td class="workflow-actions" @click.stop>
-              <span
-                v-if="w.promoted_count > 0"
-                class="promoted-tag"
-                :title="`已转正 ${w.promoted_count} 份`"
-              >转正 × {{ w.promoted_count }}</span>
-              <Button size="small" @click="openWorkflowPanel(w)">详情</Button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <DataTable
+        v-if="workflows.length > 0"
+        :columns="workflowColumns"
+        :data="workflows"
+        :row-key="(row: WorkflowSummary) => row.id"
+        :widths="workflowWidths"
+        :numeric-columns="['total', 'done', 'failed', 'skipped']"
+        frozen-column="actions"
+        empty-text="尚无工作流"
+      >
+        <template #cell-status="{ row }">
+          <span class="status" :class="row.status">{{ formatWorkflowStatus(row.status) }}</span>
+        </template>
+        <template #cell-created="{ row }">
+          {{ fmtTime(row.created_at) }}
+        </template>
+        <template #cell-ended="{ row }">
+          {{ fmtTime(row.ended_at) }}
+        </template>
+        <template #cell-actions="{ row }">
+          <span
+            v-if="row.promoted_count > 0"
+            class="promoted-tag"
+            :title="`已转正 ${row.promoted_count} 份`"
+          >转正 × {{ row.promoted_count }}</span>
+          <Button size="small" @click="openWorkflowPanel(row)">详情</Button>
+        </template>
+      </DataTable>
       <div v-if="createBatchError" class="error-banner">
         <span>新建工作流失败：{{ createBatchError }}</span>
         <button type="button" class="dismiss" aria-label="关闭" @click="createBatchError = null">×</button>
@@ -557,43 +600,35 @@ watch(() => sources.value, (list) => {
         <span>重新转换失败：{{ reconvertError }}</span>
         <button type="button" class="dismiss" aria-label="关闭" @click="reconvertError = null">×</button>
       </div>
-      <table v-if="selectedWorkflowChapters.length > 0" class="chapter-table">
-        <thead>
-          <tr>
-            <th style="width: 40px">选择</th>
-            <th>标题</th>
-            <th style="width: 100px">状态</th>
-            <th>结果预览</th>
-            <th style="width: 200px">错误</th>
-            <th style="width: 200px">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="c in selectedWorkflowChapters" :key="c.tc_id" :class="{ 'chapter-row': true, running: c.status === 'running' }">
-            <td>
-              <input
-                v-if="canRetryChapter(c)"
-                type="checkbox"
-                :disabled="!c.is_empty_slot"
-                :checked="retrySelectedIds.has(c.tc_id)"
-                @change="(e) => toggleRetrySelection(c.tc_id, (e.target as HTMLInputElement).checked)"
-              />
-            </td>
-            <td>{{ c.chapter_title }}</td>
-            <td>
-              <span v-if="c.status === 'running'" class="dot dot-running" />
-              <span v-else-if="c.status === 'pending'" class="dot dot-pending" />
-              <span class="status" :class="c.status">{{ formatWorkflowStatus(c.status) }}</span>
-            </td>
-            <td class="preview">{{ c.content_preview ?? '—' }}</td>
-            <td class="error">{{ c.error ?? '' }}</td>
-            <td class="row-actions" @click.stop>
-              <Button size="small" @click="openChapterDetail(c)">详情</Button>
-              <Button size="small" @click="reconvertSingle(c)">重新转换</Button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <DataTable
+        v-if="selectedWorkflowChapters.length > 0"
+        :columns="workflowChapterColumns"
+        :data="selectedWorkflowChapters"
+        :row-key="(row: WorkflowChapterRow) => row.tc_id"
+        :widths="workflowChapterWidths"
+        :truncate-columns="['title', 'preview', 'error']"
+        frozen-column="actions"
+        empty-text="暂无章节"
+      >
+        <template #cell-pick="{ row }">
+          <input
+            v-if="canRetryChapter(row)"
+            type="checkbox"
+            :disabled="!row.is_empty_slot"
+            :checked="retrySelectedIds.has(row.tc_id)"
+            @change="(e) => toggleRetrySelection(row.tc_id, (e.target as HTMLInputElement).checked)"
+          />
+        </template>
+        <template #cell-status="{ row }">
+          <span v-if="row.status === 'running'" class="dot dot-running" />
+          <span v-else-if="row.status === 'pending'" class="dot dot-pending" />
+          <span class="status" :class="row.status">{{ formatWorkflowStatus(row.status) }}</span>
+        </template>
+        <template #cell-actions="{ row }">
+          <Button size="small" @click="openChapterDetail(row)">详情</Button>
+          <Button size="small" @click="reconvertSingle(row)">重新转换</Button>
+        </template>
+      </DataTable>
       <div v-else class="empty">暂无章节</div>
     </Dialog>
 
@@ -692,25 +727,7 @@ watch(() => sources.value, (list) => {
   margin-bottom: 12px;
   align-items: center;
 }
-.chapter-table, .batch-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-.chapter-table th, .chapter-table td,
-.batch-table th, .batch-table td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  text-align: left;
-  color: var(--text-primary);
-}
-.chapter-table th, .batch-table th {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-weight: var(--font-weight-regular);
-}
-.batch-table tbody tr { cursor: pointer; }
-.batch-table tbody tr:hover td { background: var(--bg-hover); }
+.chapter-table, 
 .link-btn {
   background: none;
   border: none;

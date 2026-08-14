@@ -98,21 +98,18 @@
       <div v-if="!store.loading && store.transformationNovels.length === 0" class="empty">
         还没有转换工程。请到“数据资产”页面选择资产并新建工程。
       </div>
-      <Table
+      <DataTable
         v-else
         :columns="tnColumns"
         :data="store.transformationNovels"
-        :row-key="(row) => row.id"
+        :row-key="(row: TransformationNovelSummary) => row.id"
+        :widths="tnWidths"
+        frozen-column="actions"
       >
-        <template #cell-id="{ row }">{{ row.id }}</template>
         <template #cell-title="{ row }">
           <Input v-if="renamingId === row.id" v-model="renameDraft" />
           <template v-else>{{ row.title }}</template>
         </template>
-        <template #cell-source="{ row }">
-          <span class="muted">data_asset #{{ row.data_asset_id }} · {{ row.chapters_count }} 章</span>
-        </template>
-        <template #cell-created="{ row }">{{ formatTime(row.created_at) }}</template>
         <template #cell-actions="{ row }">
           <template v-if="renamingId === row.id">
             <Button size="small" kind="primary" @click="onSaveRename(row.id)">保存</Button>
@@ -124,7 +121,7 @@
             <Button size="small" kind="danger" @click="onDeleteTn(row.id, row.title)">删除</Button>
           </template>
         </template>
-      </Table>
+      </DataTable>
     </template>
 
     <UploadDialog v-model:open="uploadDialogOpen" @submit="onUpload" />
@@ -178,7 +175,6 @@ import DataTable from '../components/ui/DataTable.vue';
 import Input from '../components/ui/Input.vue';
 import Tooltip from '../components/ui/Tooltip.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
-import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
 import UploadDialog from '../components/UploadDialog.vue';
 import TransformationNovelDialog from '../components/TransformationNovelDialog.vue';
@@ -186,7 +182,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import { useLibraryStore } from '../stores/library';
 import { formatSize, formatTime, formatWordCount } from '../utils/format';
-import type { UploadSummary } from '../ipc/types';
+import type { UploadSummary, TransformationNovelSummary } from '../ipc/types';
 
 const route = useRoute();
 const router = useRouter();
@@ -315,13 +311,33 @@ const daWidths: Record<string, number> = {
   actions: 240,
 };
 
+/// 转换工程列表(TanStack format)
 const tnColumns = [
-  { key: 'id', title: 'id', width: '60px' },
-  { key: 'title', title: '标题', width: '220px' },
-  { key: 'source', title: '源', width: '240px' },
-  { key: 'created', title: '创建时间', width: '180px' },
-  { key: 'actions', title: '操作', width: '280px', type: 'actions' as const },
+  { accessorKey: 'id', header: 'id', enableSorting: true },
+  { accessorKey: 'title', header: '标题', enableSorting: true },
+  {
+    accessorKey: 'data_asset_id',
+    id: 'source',
+    header: '源',
+    enableSorting: true,
+    cell: (info: any) => `data_asset #${info.getValue() as number} · ${info.row.original.chapters_count ?? 0} 章`,
+  },
+  {
+    accessorKey: 'created_at',
+    id: 'created',
+    header: '创建时间',
+    enableSorting: true,
+    cell: (info: any) => formatTime(info.getValue() as string),
+  },
+  { id: 'actions', header: '操作', enableSorting: false },
 ];
+const tnWidths: Record<string, number> = {
+  id: 60,
+  title: 220,
+  source: 240,
+  created: 180,
+  actions: 280,
+};
 
 onMounted(() => store.load());
 /// Library 同一组件实例服务 3 个 tab(uploads / data-assets / transformations),
