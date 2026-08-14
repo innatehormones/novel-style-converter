@@ -264,7 +264,7 @@ async fn run_job(
 
 /// 同步读所有 job 上下文:从 uploads.original_text 切片 chapter / 邻章正文。
 /// 通过 tid 反查 transformation_novel_id(避免 caller 多传字段)。
-fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
+pub fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
     let cid = job.chapter.id;
     let idx = job.chapter.idx;
     let data_asset_id = job.chapter.data_asset_id;

@@ -14,11 +14,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
+use rusqlite::OptionalExtension;
 
 use crate::db::Db;
 use crate::error::{Error, Result};
 use crate::models::{
-    Batch, BatchStatus, Chapter, ModelConfig, OnFailurePolicy, Prompt,
+    Batch, BatchStatus, Chapter, ChapterPreviewRow, ModelConfig, OnFailurePolicy, Prompt,
     PromptKind, ResumeAction, TransformationNovel,
 };
 use crate::transformer::{JobQueue, JobSpec};
@@ -521,6 +522,92 @@ impl BatchScheduler {
         let b = db.batches().get(batch_id)?
             .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
         Ok(b.status)
+    }
+
+    /// 列出 (batch_id, chapter_id) 下的全部 preview 行,按 id DESC —— spec §5.1。
+    pub fn list_chapter_previews(&self, batch_id: i64, chapter_id: i64) -> Result<Vec<ChapterPreviewRow>> {
+        let db = Db::open(&self.db_path)?;
+        db.chapter_previews().list_by_chapter(batch_id, chapter_id)
+    }
+
+    /// 放弃某个 preview 行(直接删除,不管 status;generating 也允许)—— spec §5.1。
+    pub fn discard_preview(&self, preview_id: i64) -> Result<()> {
+        let db = Db::open(&self.db_path)?;
+        db.chapter_previews().delete(preview_id)
+    }
+
+    /// 用草稿区内容覆写 wrc.content(spec §4.2):单事务里写 wrc.content +
+    /// tc.status='done' + 更新 tc.tokens(优先 source_preview_id,fallback 最新一条 done,都没有则 NULL)
+    /// + 清空该章节所有 preview 行。不修改 batch 状态(spec §7.1)。
+    pub fn commit_preview(
+        &self,
+        batch_id: i64,
+        chapter_id: i64,
+        draft_content: String,
+        source_preview_id: Option<i64>,
+    ) -> Result<Batch> {
+        let db = Db::connect(&self.db_path)?;
+        let now = Utc::now().to_rfc3339();
+        {
+            let tx = db.conn.unchecked_transaction()?;
+            let tc_id: i64 = tx.query_row(
+                "SELECT id FROM transformation_chapters                  WHERE batch_id=?1 AND chapter_id=?2",
+                rusqlite::params![batch_id, chapter_id],
+                |r| r.get(0),
+            ).optional()?.ok_or_else(|| Error::NotFound(format!(
+                "transformation_chapter not found for batch={batch_id} chapter={chapter_id}"
+            )))?;
+            let wr_id: i64 = tx.query_row(
+                "SELECT id FROM workflow_results WHERE batch_id=?1",
+                rusqlite::params![batch_id],
+                |r| r.get(0),
+            ).optional()?.ok_or_else(|| Error::NotFound(format!(
+                "workflow_result not found for batch={batch_id}"
+            )))?;
+            let updated = tx.execute(
+                "UPDATE workflow_result_chapters                  SET content=?3, updated_at=?4                  WHERE workflow_result_id=?1 AND chapter_id=?2",
+                rusqlite::params![wr_id, chapter_id, draft_content, now],
+            )?;
+            if updated == 0 {
+                return Err(Error::NotFound("workflow_result_chapter slot missing".into()));
+            }
+            tx.execute(
+                "UPDATE transformation_chapters                  SET status='done', error=NULL, result_content=NULL, completed_at=?2                  WHERE id=?1",
+                rusqlite::params![tc_id, now],
+            )?;
+            let mut tokens: (Option<i32>, Option<i32>) = (None, None);
+            let mut source_used = false;
+            if let Some(pid) = source_preview_id {
+                let mut stmt = tx.prepare(
+                    "SELECT tokens_in, tokens_out FROM chapter_previews WHERE id=?1",
+                )?;
+                let mut rows = stmt.query(rusqlite::params![pid])?;
+                if let Some(row) = rows.next()? {
+                    tokens = (row.get(0)?, row.get(1)?);
+                    source_used = true;
+                }
+            }
+            if !source_used {
+                let mut stmt = tx.prepare(
+                    "SELECT tokens_in, tokens_out FROM chapter_previews                  WHERE batch_id=?1 AND chapter_id=?2 AND status='done'                  ORDER BY id DESC LIMIT 1",
+                )?;
+                let mut rows = stmt.query(rusqlite::params![batch_id, chapter_id])?;
+                if let Some(row) = rows.next()? {
+                    tokens = (row.get(0)?, row.get(1)?);
+                }
+            }
+            tx.execute(
+                "UPDATE transformation_chapters                  SET tokens_in=?2, tokens_out=?3                  WHERE id=?1",
+                rusqlite::params![tc_id, tokens.0, tokens.1],
+            )?;
+            tx.execute(
+                "DELETE FROM chapter_previews WHERE batch_id=?1 AND chapter_id=?2",
+                rusqlite::params![batch_id, chapter_id],
+            )?;
+            tx.commit()?;
+        }
+        db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))
     }
 }
 
