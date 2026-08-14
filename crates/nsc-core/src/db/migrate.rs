@@ -22,4 +22,5 @@ pub const SCHEMAS: &[(&str, &str)] = &[
     ("0021_data_asset_kind", include_str!("../../../../migrations/0021_data_asset_kind.sql")),
     ("0022_chapter_edited_at", include_str!("../../../../migrations/0022_chapter_edited_at.sql")),
     ("0023_chapters_idx_one_based", include_str!("../../../../migrations/0023_chapters_idx_one_based.sql")),
+    ("0024_chapter_previews", include_str!("../../../../migrations/0024_chapter_previews.sql")),
 ];
