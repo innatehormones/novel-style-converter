@@ -53,6 +53,16 @@ impl CreateWorkflowPayload {
     }
 }
 
+/// 单章节预览提交入参(spec §4.2) —— 必传 batch_id / chapter_id / draft_content;可选 source_preview_id 用于透传 tokens。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommitPreviewInput {
+    pub batch_id: i64,
+    pub chapter_id: i64,
+    pub draft_content: String,
+    pub source_preview_id: Option<i64>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct WorkflowSummary {
     pub id: i64,
@@ -351,4 +361,58 @@ pub fn list_chapter_workflow_results(
     let collected: Vec<ChapterWorkflowResultRow> = rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
     Ok(collected)
+}
+
+#[tauri::command]
+pub async fn regenerate_chapter_preview(
+    scheduler: State<'_, Arc<BatchScheduler>>,
+    batch_id: i64,
+    chapter_id: i64,
+    custom_input: Option<String>,
+) -> Result<i64, String> {
+    let sched = scheduler.inner().clone();
+    let res = tokio::task::spawn_blocking(move || {
+        sched.regenerate_preview(batch_id, chapter_id, custom_input)
+    })
+    .await
+    .map_err(|e| format!("regenerate_chapter_preview join: {e}"))?
+    .map_err(|e| e.to_string())?;
+    Ok(res)
+}
+
+#[tauri::command]
+pub fn commit_chapter_preview(
+    db: State<'_, Arc<Mutex<Db>>>,
+    scheduler: State<'_, Arc<BatchScheduler>>,
+    input: CommitPreviewInput,
+) -> Result<WorkflowSummary, String> {
+    let sched = scheduler.inner().clone();
+    let res = sched.commit_preview(
+        input.batch_id,
+        input.chapter_id,
+        input.draft_content,
+        input.source_preview_id,
+    ).map_err(|e| e.to_string())?;
+    let db = db.lock().map_err(|e| e.to_string())?;
+    Ok(to_summary(&db, &res))
+}
+
+#[tauri::command]
+pub fn list_chapter_previews(
+    scheduler: State<'_, Arc<BatchScheduler>>,
+    batch_id: i64,
+    chapter_id: i64,
+) -> Result<Vec<nsc_core::models::ChapterPreviewRow>, String> {
+    let sched = scheduler.inner().clone();
+    sched.list_chapter_previews(batch_id, chapter_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn discard_chapter_preview(
+    scheduler: State<'_, Arc<BatchScheduler>>,
+    preview_id: i64,
+) -> Result<(), String> {
+    let sched = scheduler.inner().clone();
+    sched.discard_preview(preview_id).map_err(|e| e.to_string())
 }
