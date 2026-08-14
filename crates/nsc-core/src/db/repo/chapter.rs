@@ -15,6 +15,7 @@ fn chapter_from_row(row: &Row<'_>) -> rusqlite::Result<Chapter> {
         word_count: row.get(5)?,
         source_chapter_id: row.get(6)?,
         source_kind: row.get(7)?,
+        edited_at: row.get(8)?,
     })
 }
 
@@ -53,16 +54,17 @@ impl<'a> ChapterRepo<'a> {
     /// 不动 idx / title / source_kind / source_chapter_id —— 这些是结构字段。
     pub fn update_body(&self, id: i64, new_body: &str) -> Result<()> {
         let wc = crate::text::word_count(new_body) as i64;
+        let now = chrono::Utc::now().to_rfc3339();
         self.conn.execute(
-            "UPDATE chapters SET body = ?2, word_count = ?3 WHERE id = ?1",
-            params![id, new_body, wc],
+            "UPDATE chapters SET body = ?2, word_count = ?3, edited_at = ?4 WHERE id = ?1",
+            params![id, new_body, wc, now],
         )?;
         Ok(())
     }
 
     pub fn get(&self, id: i64) -> Result<Option<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind              FROM chapters WHERE id = ?1",
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind, edited_at              FROM chapters WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {

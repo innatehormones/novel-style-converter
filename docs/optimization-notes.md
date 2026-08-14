@@ -199,6 +199,66 @@ A single upload can produce many data assets, and the data assets survive the up
 - "数据资产" tab 显示"已删除 upload"标记:da 的 `source_filename` 已持久化,但 UI 未做"upload 缺失" 警告
 - Chapter title 编辑没限制 —— 用户可改成任何字符串,后续可能要做去重校验
 
+## DataAsset module (post-refactor)
+
+### 核心设计原则:数据资产是独立的数据实体
+
+- **upload = 原始材料**(mutable,可清洗、可多次提交)
+- **data_asset = 数据**(独立,无论来源是 upload 还是 workflow result,自身就是一份完整数据)
+- **workflow = 处理过程**(产出数据资产)
+- **三者互相独立**:改 data_asset 某章节正文,不影响 upload.original_text / workflow_result_chapters.content / workflow 状态
+
+**为什么 promoted da 也能编辑?** promote 时章节 body 是**字符串值拷贝**(不是引用),改 promoted da 的 chapter.body 不影响:
+- 原 source da 的 chapter.body
+- workflow_result_chapters.content
+- transformation_chapters.result_content
+- workflow batch 状态/进度
+
+字段记号:
+- `data_assets.kind` = `source` / `promoted`(数据来源)
+- `chapters.source_kind` = `transformed` / `original`(章节内容来源)
+- `chapters.edited_at` = NULL / RFC3339(用户是否编辑过;跟 source_kind 正交)
+- `chapters.source_chapter_id` = 派生时指源 chapter.id(只在派生 da 里有值)
+
+### Data
+- data_assets 表: id / upload_id(软引用,无 FK) / title / parsed_at / source_filename / kind / source_workflow_id / source_data_asset_id / note
+- chapters 表: id / data_asset_id / idx / title / body TEXT(自包含) / word_count / source_kind / source_chapter_id / edited_at
+
+### UI / flow
+
+#### 1. DataAsset.vue `/library/data/:id`(查看页)
+- PageHeader: 标题 + 删除资产按钮(被 tn 引用时 disabled)
+- meta-strip: 左 tags(派生资产 / 源资产 / 有 N 个工程 / 已解析),右 meta-text(解析时间 · 来自工作流 #X)
+- 左侧章节列表(RecycleScroller):
+  - 行:序号 + 标题 + source_kind tag(转换/原文) + **edited tag**(edited_at 非空时显示"已编辑") + 字数
+  - 点击切选中章节;若当前 dirty 编辑 → 弹 dirtyGuard 拦截
+- 右侧"原文"面板:
+  - 顶 pane-header: 标题 + 上次编辑时间(edited_at 非空时显示)
+  - 浏览态: `<pre>` 只读 + 右上 [编辑] 按钮
+  - 编辑态: `<textarea>` + 朱砂红边框 + "编辑中"徽标 + 草稿字数 + [取消] [保存]
+  - 任意 kind 都可编辑;editable 仅受"有章节 + 已选中"两个条件约束
+
+#### 2. 编辑保存(`update_chapter_body` IPC)
+- Rust: `ChapterRepo::update_body(id, body)` 同时改 body + 按 word::count 重算 word_count + 设 edited_at = now()
+- 前端: store.saveEdit 本地同步 content / word_count / edited_at
+- 不动 idx / title / source_kind / source_chapter_id(结构字段)
+
+#### 3. 派生 da 可以再被转换
+- 用户在 promoted da 上 [新建工程] → create_transformation_novel(data_asset_id = promoted da.id)
+- chapter.body 是稳定输入,worker 照常读
+- chapter.source_chapter_id 是 informational,worker 不读
+
+#### 4. 删除 data_asset(在 Library "数据资产" tab)
+- 按钮 → ConfirmDialog + cascade 警告文字(有 N 个工程引用 → 删除会连带删工程及工作流结果)
+- 调 `delete_data_asset` → backend cascade 清 tn / tc / wr / wrc(参考 migration 0012/0013)
+- 不删 upload(就算 upload 不存在,da 仍可访问,data_assets.source_filename 持久化)
+
+### Design intent
+
+- **数据独立性 > "派生只读" 语义**:promoted da 既然是字符串值拷贝,就该可以独立演化(人工润色、修错字、格式调整)
+- **source_kind vs edited_at 是两个维度**:内容来源(transformed/original)和"是否被用户编辑过"正交 —— 一个 chapter 可以既是 AI 转换结果(transformed),又被用户编辑过(edited_at 非空)
+- **edited 标签显示原则**:edited_at 非空才显示,不改 source_kind(因为 AI 转换这一步确实发生过,只是用户后续又调整了)
+
 ## Workflows module (post-refactor)
 
 ### Data

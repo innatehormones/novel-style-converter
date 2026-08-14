@@ -20,4 +20,5 @@ pub const SCHEMAS: &[(&str, &str)] = &[
     ("v19", include_str!("../../../../migrations/0019_drop_tn_default_columns.sql")),
     ("v20", include_str!("../../../../migrations/0020_add_tn_note.sql")),
     ("0021_data_asset_kind", include_str!("../../../../migrations/0021_data_asset_kind.sql")),
+    ("0022_chapter_edited_at", include_str!("../../../../migrations/0022_chapter_edited_at.sql")),
 ];

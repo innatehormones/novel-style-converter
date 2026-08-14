@@ -121,6 +121,7 @@ export interface DataAssetChapter {
   word_count: number;
   /// 绔犺妭鏉ユ簮:transformed = 宸ヤ綔娴佽浆鎹㈢粨鏋?original = 鍘熸枃(娲剧敓 da 澶辫触绔犺妭鍥為€€)銆?
   source_kind: 'transformed' | 'original';
+  edited_at: string | null;
 }
 
 /// commit_data_asset 鍏ュ弬:title + 绔犺妭鍒楄〃(姣忎釜鍚?title + byte 鑼冨洿)銆?
@@ -136,6 +137,7 @@ export interface ChapterSegment {
   title: string;
   content: string;
   word_count: number;
+  edited_at?: string | null;
 }
 
 export interface ChapterMeta {
@@ -143,6 +145,7 @@ export interface ChapterMeta {
   idx: number;
   title: string;
   word_count: number;
+  edited_at?: string | null;
 }
 
 /**
@@ -167,6 +170,7 @@ export interface Chapter {
   source_kind: 'transformed' | 'original';
   /// 娲剧敓鏃舵寚鍚戞簮 chapter.id(鍙湪娲剧敓 da 閲屾湁鍊?銆?
   source_chapter_id: number | null;
+  edited_at: string | null;
 }
 
 /**

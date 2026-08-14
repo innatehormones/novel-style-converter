@@ -27,6 +27,8 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
   const saving = ref(false);
   /// 跟 chapters 数组对齐:每条对应章节的 source_kind(给 UI 标签用)。
   const sourceKinds = ref<('transformed' | 'original')[]>([]);
+  /// 跟 chapters 对齐:每章的 edited_at(null = 未编辑)。跟 sourceK  维度正交。
+  const editedAts = ref<(string | null)[]>([]);
   // 工作流转正相关元数据
   const kind = ref<'source' | 'promoted'>('source');
   const sourceWorkflowId = ref<number | null>(null);
@@ -41,6 +43,7 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
     chapters.value = [];
     chapterIds.value = [];
     sourceKinds.value = [];
+    editedAts.value = [];
     cancelEdit();
     title.value = '';
     filename.value = '';
@@ -64,6 +67,7 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
       }));
       chapterIds.value = chs.map((c: DataAssetChapter) => c.id);
       sourceKinds.value = chs.map((c: DataAssetChapter) => c.source_kind);
+      editedAts.value = chs.map((c: DataAssetChapter) => c.edited_at);
       const row: DataAssetRow | undefined = assets.find((a: DataAssetRow) => a.id === id);
       if (row) {
         title.value = row.title;
@@ -142,6 +146,8 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
         content: draftContent.value,
         word_count: countWords(draftContent.value),
       };
+      // 后端 update_body 同时写了 edited_at;本地同步保持一致
+      editedAts.value[idx] = new Date().toISOString();
       cancelEdit();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
@@ -152,7 +158,7 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
 
   return {
     dataAssetId, title, filename, parsedAt, tnCount,
-    chapters, chapterIds, sourceKinds, selectedIdx, selectedContent,
+    chapters, chapterIds, sourceKinds, editedAts, selectedIdx, selectedContent,
     loading, error,
     kind, sourceWorkflowId, note,
     editable, editing, draftContent, editingDirty, saving,

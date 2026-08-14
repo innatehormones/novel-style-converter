@@ -180,6 +180,7 @@ impl BatchScheduler {
                 word_count: chapter.word_count,
                 source_kind: chapter.source_kind.clone(),
                 source_chapter_id: chapter.source_chapter_id,
+                edited_at: chapter.edited_at.clone(),
             },
             prompt: prompt.clone(),
             model_config: model.clone(),

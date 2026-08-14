@@ -12,6 +12,9 @@ pub struct Chapter {
     pub source_kind: String,
     #[serde(default)]
     pub source_chapter_id: Option<i64>,
+    /// NULL = 从未用户编辑;Some = 上次编辑时间(RFC3339)。跟 source_kind 正交。
+    #[serde(default)]
+    pub edited_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]

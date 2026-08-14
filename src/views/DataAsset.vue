@@ -78,6 +78,7 @@
               <span class="title">{{ item.title }}</span>
               <span v-if="store.sourceKinds[index] === 'transformed'" class="kind-tag transformed" title="来自工作流转换结果">转换</span>
               <span v-else class="kind-tag original" title="原文(派生 da 失败章节)">原文</span>
+              <span v-if="store.editedAts[index]" class="kind-tag edited" title="用户编辑过">已编辑</span>
               <span class="size">{{ item.word_count }} 字</span>
             </div>
           </template>
@@ -87,6 +88,9 @@
       <div class="pane">
         <div class="pane-header">
           <div class="pane-title">原文</div>
+          <span v-if="!store.editing && selectedEditedAt" class="edited-meta">
+            上次编辑 {{ formatTime(selectedEditedAt) }}
+          </span>
           <div class="pane-actions">
             <template v-if="store.editing">
               <span class="editing-tag">编辑中</span>
@@ -157,15 +161,21 @@ const chaptersWithIdx = computed(() =>
 );
 
 /// 编辑按钮 title:派生资产 / 无章节两种状态
-/// 编辑按钮可点状态：源资产 + 已选章节
-const canEdit = computed(() => store.editable && store.selectedIdx !== null);
+/// 编辑按钮可点状态:仅看是否已选章节(任意 kind 都能编辑——数据资产是独立数据)
+const canEdit = computed(() => store.selectedIdx !== null);
 
-/// 编辑按钮 title：各种不可编辑原因的中文说明
+/// 编辑按钮 title:不可编辑原因(只剩两种)
 const editButtonTitle = computed(() => {
-  if (store.kind === 'promoted') return '派生资产不可编辑';
   if (store.chapters.length === 0) return '暂无章节';
   if (store.selectedIdx === null) return '请先选中章节';
   return '';
+});
+
+/// 当前选中章节的 edited_at:给右侧面板头展示用
+const selectedEditedAt = computed(() => {
+  const i = store.selectedIdx;
+  if (i == null) return null;
+  return store.editedAts[i] ?? null;
 });
 
 onMounted(async () => {
@@ -449,5 +459,16 @@ function onCancelDiscard() {
 .kind-tag.original {
   background: #f5f5f5;
   color: #757575;
+}
+.kind-tag.edited {
+  background: #fff3e0;
+  color: #e65100;
+}
+.edited-meta {
+  flex: 1;
+  margin-left: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 </style>
