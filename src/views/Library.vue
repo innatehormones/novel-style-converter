@@ -116,9 +116,11 @@
             <Button size="small" @click="cancelRename">取消</Button>
           </template>
           <template v-else>
-            <Button size="small" @click="goDetail(row.id)">查看</Button>
-            <Button size="small" @click="startRename(row.id, row.title)">重命名</Button>
-            <Button size="small" kind="danger" @click="onDeleteTn(row.id, row.title)">删除</Button>
+            <button type="button" class="row-link" @click="goDetail(row.id)">查看</button>
+            <span class="row-sep" aria-hidden="true">·</span>
+            <button type="button" class="row-link" @click="startRename(row.id, row.title)">重命名</button>
+            <span class="row-sep" aria-hidden="true">·</span>
+            <button type="button" class="row-link danger" @click="onDeleteTn(row.id, row.title)">删除</button>
           </template>
         </template>
       </DataTable>
@@ -336,7 +338,7 @@ const tnWidths: Record<string, number> = {
   title: 220,
   source: 240,
   created: 180,
-  actions: 280,
+  actions: 240,
 };
 
 onMounted(() => store.load());
