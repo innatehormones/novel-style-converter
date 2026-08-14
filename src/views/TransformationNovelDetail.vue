@@ -21,6 +21,7 @@ import PromoteWorkflowDialog from '../components/PromoteWorkflowDialog.vue';
 import Dialog from '../components/ui/Dialog.vue';
 import DataTable from '../components/ui/DataTable.vue';
 import Tag from '../components/ui/Tag.vue';
+import RegeneratePreviewDialog from '../components/RegeneratePreviewDialog.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -347,19 +348,40 @@ async function retryFromDetail() {
   }
 }
 
-const reconvertError = ref<string | null>(null);
-async function reconvertSingle(c: WorkflowChapterRow) {
-  if (selectedWorkflowId.value === null) return;
-  if (c.status === 'running' || c.status === 'pending') {
-    reconvertError.value = '该章节正在处理中，暂不可重新转换。';
-    return;
+// “重新生成”对话框的目标章节——null 表示对话框关闭
+const regenChapter = ref<WorkflowChapterRow | null>(null);
+const regenOpenProxy = computed<boolean>({
+  get: () => regenChapter.value !== null,
+  set: (v: boolean) => {
+    if (!v) regenChapter.value = null;
+  },
+});
+
+function openRegenerateDialog(row: WorkflowChapterRow) {
+  // 防御性校验：running/pending 不允许打开（与按钮 disabled 对齐）
+  if (row.status === 'running' || row.status === 'pending') return;
+  regenChapter.value = row;
+}
+
+async function onPreviewCommitted() {
+  // 提交后 wrc.content 变了 + tc.status 变了，刷新 workflow chapters 列表
+  if (selectedWorkflowId.value !== null) {
+    await store.loadChapters(selectedWorkflowId.value);
   }
-  reconvertError.value = null;
+}
+
+// 单章节重试（仅 failed/skipped + 空槽，与 canRetryChapter 一致）
+async function retrySingleChapter(c: WorkflowChapterRow) {
+  if (selectedWorkflowId.value === null) return;
+  if (!canRetryChapter(c)) return;
+  retrySubmitting.value = true;
   try {
     await store.retry(selectedWorkflowId.value, [c.chapter_id]);
     await store.loadChapters(selectedWorkflowId.value);
   } catch (e: unknown) {
-    reconvertError.value = e instanceof Error ? e.message : String(e);
+    console.error(e);
+  } finally {
+    retrySubmitting.value = false;
   }
 }
 
@@ -833,10 +855,6 @@ watch(() => sources.value, (list) => {
           >转为数据资产</Button>
         </div>
       </div>
-      <div v-if="reconvertError" class="error-banner">
-        <span>重新转换失败：{{ reconvertError }}</span>
-        <button type="button" class="dismiss" aria-label="关闭" @click="reconvertError = null">×</button>
-      </div>
       <DataTable
         v-if="selectedWorkflowChapters.length > 0"
         :columns="workflowChapterColumns"
@@ -875,7 +893,22 @@ watch(() => sources.value, (list) => {
         <template #cell-actions="{ row }">
           <button type="button" class="row-link" @click="openChapterDetail(row)">详情</button>
           <span class="row-sep" aria-hidden="true">·</span>
-          <button type="button" class="row-link" @click="reconvertSingle(row)">重新转换</button>
+          <!-- 重新生成：任意非 running/pending 状态都能点（包括 done/failed/skipped/cancelled） -->
+          <button
+            type="button"
+            class="row-link"
+            :disabled="row.status === 'running' || row.status === 'pending'"
+            :title="(row.status === 'running' || row.status === 'pending') ? '该章节正在处理中' : ''"
+            @click="openRegenerateDialog(row)"
+          >重新生成</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <!-- 重试：仅 failed/skipped + 空槽（与现有 canRetryChapter 一致） -->
+          <button
+            type="button"
+            class="row-link"
+            :disabled="!canRetryChapter(row)"
+            @click="retrySingleChapter(row)"
+          >重试</button>
         </template>
       </DataTable>
       <div v-else class="empty">暂无章节</div>
@@ -946,6 +979,17 @@ watch(() => sources.value, (list) => {
       kind="danger"
       confirm-text="停止"
       @confirm="confirmStopWorkflow"
+    />
+
+    <RegeneratePreviewDialog
+      v-if="regenChapter !== null"
+      v-model:open="regenOpenProxy"
+      :batch-id="selectedWorkflowId ?? 0"
+      :chapter-id="regenChapter.chapter_id"
+      :chapter-idx="regenChapter.chapter_idx"
+      :chapter-title="regenChapter.chapter_title"
+      :tn-id="tnId"
+      @committed="onPreviewCommitted"
     />
   </section>
 </template>
@@ -1196,9 +1240,8 @@ watch(() => sources.value, (list) => {
 }
 .wf-status-right {
   display: flex;
-  flex-direction: column;
   align-items: flex-end;
-  gap: 2px;
+  gap: 8px;
   font-size: 12px;
   flex-shrink: 0;
 }
