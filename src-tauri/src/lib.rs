@@ -23,6 +23,8 @@ pub fn run() {
     let db = Arc::new(Mutex::new(Db::open(&path).expect("failed to open db")));
     nsc_core::startup_recovery::run(&db.lock().expect("recovery lock").conn)
         .expect("startup safe-recovery failed");
+    nsc_core::startup_cleanup::run(&db.lock().expect("cleanup lock").conn)
+        .expect("startup cleanup failed");
 
     // 鈹€鈹€ AI 璋冪敤 recorder 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     // Channel 瀹归噺 4096;婊℃椂 drop new(涓嶉樆濉?hot path)銆俉riter 浠诲姟鎸?db_path 閲嶅紑
