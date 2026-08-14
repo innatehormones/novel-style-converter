@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -56,4 +58,45 @@ pub struct NewTransformationChapter {
     pub ctx_next_original: i32,
     pub batch_id: Option<i64>,
     pub style_ref_chapter_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewStatus {
+    Generating,
+    Done,
+    Failed,
+}
+
+fn parse_status(s: &str) -> Option<PreviewStatus> {
+    match s {
+        "generating" => Some(PreviewStatus::Generating),
+        "done" => Some(PreviewStatus::Done),
+        "failed" => Some(PreviewStatus::Failed),
+        _ => None,
+    }
+}
+
+impl FromStr for PreviewStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        parse_status(s).ok_or_else(|| format!("unknown preview status: {}", s))
+    }
+}
+
+/// 一次单章节预览尝试 —— 用户可以为一个 (batch_id, chapter_id) 多次生成,对比 / 编辑 / 提交。
+/// 提交(transformation_chapters.content 被覆写)后由 repo.delete_by_chapter 清空全部预览行。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChapterPreviewRow {
+    pub id: i64,
+    pub batch_id: i64,
+    pub chapter_id: i64,
+    pub custom_input: Option<String>,
+    pub preview_content: Option<String>,
+    pub tokens_in: Option<i32>,
+    pub tokens_out: Option<i32>,
+    pub error: Option<String>,
+    pub status: PreviewStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }

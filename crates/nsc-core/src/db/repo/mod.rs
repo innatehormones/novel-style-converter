@@ -1,6 +1,7 @@
 ﻿pub mod novel;
 pub mod chapter;
 pub mod transformation;
+pub mod chapter_preview;
 pub mod prompt;
 pub mod model_config;
 pub mod data_asset;
@@ -12,6 +13,7 @@ pub mod overview;
 
 pub use novel::{TransformationNovelRepo, UploadRepo};
 pub use chapter::ChapterRepo;
+pub use chapter_preview::ChapterPreviewRepo;
 pub use transformation::TransformationChapterRepo;
 pub use prompt::PromptRepo;
 pub use model_config::ModelConfigRepo;

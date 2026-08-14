@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 pub enum AiCallBusiness {
     TransformChapter,
     TestModel,
+    /// 重新生成单章节预览 —— DefaultTransformer::transform_with_business(req, RegeneratePreview) 路径;与 TransformChapter 共享 prompt 模板上下文,仅业务类型不同。
+    RegeneratePreview,
 }
 
 /// AI 调用结果。

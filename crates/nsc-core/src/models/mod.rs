@@ -11,7 +11,7 @@ pub mod ai_call_log;
 
 pub use novel::{NewTransformationNovel, NewUpload, TransformationNovel, Upload};
 pub use chapter::{Chapter, NewChapter};
-pub use transformation::{NewTransformationChapter, TransformationChapter, TransformStatus};
+pub use transformation::{ChapterPreviewRow, NewTransformationChapter, PreviewStatus, TransformationChapter, TransformStatus};
 pub use prompt::{Prompt, PromptKind};
 pub use model_config::{ModelConfig, NewModelConfig};
 pub use data_asset::{DataAsset, NewDataAsset};

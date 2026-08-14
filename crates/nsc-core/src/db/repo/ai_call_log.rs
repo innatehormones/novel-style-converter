@@ -45,6 +45,7 @@ impl<'a> AiCallLogRepo<'a> {
         let business = match n.business {
             AiCallBusiness::TransformChapter => "transform_chapter",
             AiCallBusiness::TestModel => "test_model",
+            AiCallBusiness::RegeneratePreview => "regenerate_preview",
         };
         let status = match n.status {
             AiCallStatus::Success => "success",
@@ -109,6 +110,7 @@ impl<'a> AiCallLogRepo<'a> {
             binds.push(Box::new(match b {
                 AiCallBusiness::TransformChapter => "transform_chapter",
                 AiCallBusiness::TestModel => "test_model",
+                AiCallBusiness::RegeneratePreview => "regenerate_preview",
             }));
         }
         if let Some(mc) = filter.model_config_id {
@@ -168,6 +170,7 @@ fn from_row(row: &Row) -> rusqlite::Result<AiCallLog> {
     let business_s: String = row.get(2)?;
     let business = match business_s.as_str() {
         "transform_chapter" => AiCallBusiness::TransformChapter,
+        "regenerate_preview" => AiCallBusiness::RegeneratePreview,
         _ => AiCallBusiness::TestModel,
     };
     let status_s: String = row.get(17)?;

@@ -5,9 +5,9 @@ use crate::error::Result;
 
 use super::migrate::SCHEMAS;
 use super::repo::{
-    AiCallLogRepo, BatchRepo, ChapterRepo, DataAssetRepo, ModelConfigRepo, OverviewRepo,
-    PromptRepo, TransformationChapterRepo, TransformationNovelRepo, UploadRepo,
-    WorkflowResultRepo,
+    AiCallLogRepo, BatchRepo, ChapterPreviewRepo, ChapterRepo, DataAssetRepo,
+    ModelConfigRepo, OverviewRepo, PromptRepo, TransformationChapterRepo,
+    TransformationNovelRepo, UploadRepo, WorkflowResultRepo,
 };
 
 #[derive(Debug)]
@@ -65,6 +65,9 @@ impl Db {
     pub fn overview(&self) -> OverviewRepo<'_> { OverviewRepo { conn: &self.conn } }
     pub fn ai_call_logs(&self) -> AiCallLogRepo<'_> {
         AiCallLogRepo { conn: &self.conn }
+    }
+    pub fn chapter_previews(&self) -> ChapterPreviewRepo<'_> {
+        ChapterPreviewRepo { conn: &self.conn }
     }
 
     pub fn seed_builtin_prompts(&self) -> Result<()> {
