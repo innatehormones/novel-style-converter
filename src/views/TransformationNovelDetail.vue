@@ -105,7 +105,7 @@ const workflowColumns = [
 ];
 const workflowWidths: Record<string, number> = {
   label: 180,
-  status: 100,
+  status: 140,
   total: 80,
   done: 80,
   failed: 80,
@@ -718,12 +718,14 @@ watch(() => sources.value, (list) => {
         empty-text="尚无工作流"
       >
         <template #cell-status="{ row }">
-          <span class="status" :class="row.status">{{ formatWorkflowStatus(row.status) }}</span>
-          <span
-            v-if="row.promoted_count > 0"
-            class="promoted-tag"
-            :title="`已基于此工作流转正 ${row.promoted_count} 份数据资产`"
-          >转正 × {{ row.promoted_count }}</span>
+          <div class="cell-status">
+            <span class="status" :class="row.status">{{ formatWorkflowStatus(row.status) }}</span>
+            <span
+              v-if="row.promoted_count > 0"
+              class="promoted-tag"
+              :title="`已基于此工作流转正 ${row.promoted_count} 份数据资产`"
+            >转正 × {{ row.promoted_count }}</span>
+          </div>
         </template>
         <template #cell-created="{ row }">
           {{ fmtTime(row.created_at) }}
@@ -1061,6 +1063,12 @@ watch(() => sources.value, (list) => {
   border: 1px dashed var(--border-color);
   border-radius: var(--radius-pin);
   background: var(--color-sheet);
+}
+.cell-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 .status {
   display: inline-block;
