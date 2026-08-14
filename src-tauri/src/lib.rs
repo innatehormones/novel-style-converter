@@ -1,4 +1,4 @@
-﻿use std::path::PathBuf;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use nsc_core::ai::{AiProvider, OpenAiProvider};
@@ -38,23 +38,29 @@ pub fn run() {
     let _writer_handle = spawn_writer(path.clone(), recorder.clone(), rx);
     let recorder: Arc<dyn AiCallRecorder> = Arc::new(recorder);
 
+    fn make_provider(cfg: &nsc_core::models::ModelConfig) -> Box<dyn AiProvider> {
+        Box::new(
+            OpenAiProvider::new(cfg.base_url.clone(), cfg.api_key.clone())
+                .unwrap_or_else(|_| {
+                    OpenAiProvider::new(cfg.base_url.clone(), String::new())
+                        .expect("fallback openai")
+                }),
+        )
+    }
 
     let db_path_for_workers = path.clone();
     let job_queue = Arc::new(JobQueue::new(
         2,
         move || Ok(Db::connect(&db_path_for_workers).expect("worker db open")),
-        |cfg: &nsc_core::models::ModelConfig| -> Box<dyn AiProvider> {
-            Box::new(
-                OpenAiProvider::new(cfg.base_url.clone(), cfg.api_key.clone())
-                    .unwrap_or_else(|_| {
-                        OpenAiProvider::new(cfg.base_url.clone(), String::new())
-                            .expect("fallback openai")
-                    }),
-            )
-        },
+        make_provider,
         recorder.clone(),
     ));
-    let scheduler = Arc::new(BatchScheduler::new(path.clone(), job_queue.clone()));
+    let scheduler = Arc::new(BatchScheduler::new(
+        path.clone(),
+        job_queue.clone(),
+        Arc::new(make_provider),
+        recorder.clone(),
+    ));
     {
         let sched = scheduler.clone();
         let notify: Notifier = Arc::new(move |tid, success, error, content| {

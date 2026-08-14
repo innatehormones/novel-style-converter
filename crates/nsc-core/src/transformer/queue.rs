@@ -159,7 +159,7 @@ impl JobQueue {
     }
 }
 
-struct Prep {
+pub struct Prep {
     transformation_novel: TransformationNovel,
     chapter: crate::models::Chapter,
     chapter_content: String,
@@ -224,6 +224,8 @@ async fn run_job(
         },
         prompt: job.prompt.clone(),
         model_config: job.model_config.clone(),
+        custom_input: None,
+        preview_id: None,
     };
     // per-model 并发限流:同一 model 的多个 job 共享一个 semaphore,
     // 超过 `model_config.concurrency` 时本 job 在 await 处排队,permit drop 时自动释放。

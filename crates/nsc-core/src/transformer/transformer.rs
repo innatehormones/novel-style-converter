@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::ai::{AiProvider, ChatMessage, ChatRequest, Role};
 use crate::error::{Error, Result};
-use crate::models::{AiCallStatus, Chapter, ModelConfig, Prompt, TransformationNovel};
+use crate::models::{AiCallBusiness, AiCallStatus, Chapter, ModelConfig, Prompt, TransformationNovel};
 use crate::prompts::{render, PromptContext};
 use crate::recorder::{AiCallEvent, AiCallRecorder};
 
@@ -17,6 +17,10 @@ pub struct TransformRequest {
     pub novel_context: TransformationNovelContext,
     pub prompt: Prompt,
     pub model_config: ModelConfig,
+    /// 附加指令(可选,非空时拼到 system prompt 文末)。仅 preview 路径用 —— transform 路径任意传 None。
+    pub custom_input: Option<String>,
+    /// preview id(仅 RegeneratePreview 业务需要,recorder 写 ai_call_logs 时用)。TransformChapter 业务传 None。
+    pub preview_id: Option<i64>,
 }
 
 pub struct TransformationNovelContext {
@@ -55,9 +59,14 @@ pub struct DefaultTransformer {
     pub recorder: Arc<dyn AiCallRecorder>,
 }
 
-#[async_trait]
-impl Transformer for DefaultTransformer {
-    async fn transform(&self, req: TransformRequest) -> Result<TransformOutcome> {
+impl DefaultTransformer {
+    /// ä¸ `transform` ç­ä»·,ä½åè®¸æå®ä¸å¡æ è¯ ââ recorder å `ai_call_logs` æ¶æ `business` åºåä¸ä¸æ / context_type / context_idã
+    /// `custom_input` éç©ºæ¶æ¼å° system prompt ææ«(spec Â§3.3)ââ ä¸ºç©ºæ¶ä¸å transform è·¯å¾ byte-equalã
+    pub async fn transform_with_business(
+        &self,
+        req: TransformRequest,
+        business: AiCallBusiness,
+    ) -> Result<TransformOutcome> {
         let ctx = PromptContext {
             transformation_novel: &req.novel_context.transformation_novel,
             chapter: &req.chapter,
@@ -68,9 +77,16 @@ impl Transformer for DefaultTransformer {
             kind: req.prompt.kind,
         };
         let rendered = render(&req.prompt.template, &ctx);
-        let system_full = rendered.system.clone().unwrap_or_default();
+        let mut system_full = rendered.system.clone().unwrap_or_default();
         let user_full = rendered.user.clone();
-        let estimated_tokens_in = ((system_full.chars().count() + user_full.chars().count()) / 2) as i32;
+        if let Some(extra) = req.custom_input.as_deref() {
+            if !extra.trim().is_empty() {
+                system_full.push_str("\n\n---\n\n附加指令：\n");
+                system_full.push_str(extra);
+            }
+        }
+        let estimated_tokens_in =
+            ((system_full.chars().count() + user_full.chars().count()) / 2) as i32;
         let mut messages = Vec::with_capacity(if !system_full.is_empty() { 2 } else { 1 });
         if !system_full.is_empty() {
             messages.push(ChatMessage { role: Role::System, content: system_full.clone() });
@@ -87,8 +103,17 @@ impl Transformer for DefaultTransformer {
         let ai_result = self.ai.chat(chat_req).await;
         let latency_ms = started.elapsed().as_millis() as i64;
 
-        // Recorder event 拼装 —— 不管 ai_result 成功失败,始终 record 一次。
-        // 注意:这里不能 `?` 提前返回(否则失败路径不会 record)。
+        // Recorder event æ¼è£ ââ ä¸ç®¡ ai_result æåå¤±è´¥,æ¸å§ç» record ä¸æ¬¡ã
+        // æ³¨æ:è¿éä¸è½ `?` æåè¿å(å¦åå¤±è´¥è·¯å¾ä¸ä¼ record)ã
+        let (context_type, context_id): (Option<String>, Option<i64>) = match business {
+            AiCallBusiness::TransformChapter => {
+                (Some("transformation_chapter".into()), Some(req.transformation_id))
+            }
+            AiCallBusiness::RegeneratePreview => {
+                (Some("chapter_preview".into()), req.preview_id)
+            }
+            AiCallBusiness::TestModel => (None, None),
+        };
         let (status, response_full, actual_in, actual_out, error_msg, outcome) = match &ai_result {
             Ok(r) => (
                 AiCallStatus::Success,
@@ -112,9 +137,9 @@ impl Transformer for DefaultTransformer {
             ),
         };
         self.recorder.record(AiCallEvent {
-            business: crate::models::AiCallBusiness::TransformChapter,
-            context_type: Some("transformation_chapter".into()),
-            context_id: Some(req.transformation_id),
+            business,
+            context_type,
+            context_id,
             model_config_id: Some(req.model_config.id),
             model_name: req.model_config.model.clone(),
             base_url: req.model_config.base_url.clone(),
@@ -132,5 +157,17 @@ impl Transformer for DefaultTransformer {
         });
 
         outcome
+    }
+
+    /// Wrapper:ç­ä»·äº `transform_with_business(req, TransformChapter)` ââ `queue.rs` éè¿ `Box<dyn Transformer>` è°ç¨æ¶ä½¿ç¨ã
+    pub async fn transform(&self, req: TransformRequest) -> Result<TransformOutcome> {
+        self.transform_with_business(req, AiCallBusiness::TransformChapter).await
+    }
+}
+
+#[async_trait]
+impl Transformer for DefaultTransformer {
+    async fn transform(&self, req: TransformRequest) -> Result<TransformOutcome> {
+        self.transform_with_business(req, AiCallBusiness::TransformChapter).await
     }
 }

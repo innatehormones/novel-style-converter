@@ -22,11 +22,21 @@ use crate::models::{
     Batch, BatchStatus, Chapter, ChapterPreviewRow, ModelConfig, OnFailurePolicy, Prompt,
     PromptKind, ResumeAction, TransformationNovel,
 };
-use crate::transformer::{JobQueue, JobSpec};
+use crate::models::AiCallBusiness;
+use crate::recorder::AiCallRecorder;
+use crate::transformer::{
+    DefaultTransformer, JobQueue, JobSpec, ProviderFactory, TransformRequest,
+    TransformationNovelContext,
+};
 
 pub struct BatchScheduler {
     db_path: PathBuf,
     job_queue: Arc<JobQueue>,
+    provider_factory: ProviderFactory,
+    recorder: Arc<dyn AiCallRecorder>,
+    /// 后台 tokio runtime —— regenerate_preview 的 AI 任务在这里跑
+    /// (主线程没 tokio reactor,见 src-tauri/src/lib.rs:51 注释)。
+    runtime: Arc<tokio::runtime::Runtime>,
 }
 
 /// `create_workflow` 入参 —— 字段全是必填,不走任何 TN 默认覆盖。
@@ -49,8 +59,20 @@ pub struct WorkflowCreate {
 }
 
 impl BatchScheduler {
-    pub fn new(db_path: PathBuf, job_queue: Arc<JobQueue>) -> Self {
-        Self { db_path, job_queue }
+    pub fn new(
+        db_path: PathBuf,
+        job_queue: Arc<JobQueue>,
+        provider_factory: ProviderFactory,
+        recorder: Arc<dyn AiCallRecorder>,
+    ) -> Self {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .worker_threads(2)
+                .build()
+                .expect("BatchScheduler runtime build"),
+        );
+        Self { db_path, job_queue, provider_factory, recorder, runtime }
     }
 
     /// 原子创建并启动工作流(spec §5.1,§12):单事务里写 batches(status='running',started_at=now) +
@@ -522,6 +544,82 @@ impl BatchScheduler {
         let b = db.batches().get(batch_id)?
             .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
         Ok(b.status)
+    }
+
+    /// 异步发起一次预览生成(spec §5.1)。返回新插入的 preview id。
+    /// AI 调用在 self.runtime 上跑 —— 调用方立即拿到 preview_id,
+    /// 实际生成在后台进行,完成后由 chapter_previews 行 status 反映。
+    pub fn regenerate_preview(
+        &self,
+        batch_id: i64,
+        chapter_id: i64,
+        custom_input: Option<String>,
+    ) -> Result<i64> {
+        let db = Db::connect(&self.db_path)?;
+        let batch = db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
+        let chapter = db.chapters().get(chapter_id)?
+            .ok_or_else(|| Error::NotFound(format!("chapter {chapter_id} 不存在")))?;
+        let tn = db.transformation_novels().get(batch.transformation_novel_id)?
+            .ok_or_else(|| Error::NotFound(format!("tn {} 不存在", batch.transformation_novel_id)))?;
+        let (prompt_id, model_config_id): (i64, i64) = db.conn.query_row(
+            "SELECT prompt_id, model_config_id FROM transformation_chapters \
+             WHERE batch_id=?1 AND chapter_id=?2",
+            rusqlite::params![batch_id, chapter_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let prompt = db.prompts().get(prompt_id)?
+            .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
+        let model = db.model_configs().get(model_config_id)?
+            .ok_or_else(|| Error::NotFound(format!("model {model_config_id} 不存在")))?;
+        if chapter.data_asset_id != tn.data_asset_id {
+            return Err(Error::Validation(format!(
+                "chapter {chapter_id} 不属于 tn 的 data_asset {}",
+                tn.data_asset_id
+            )));
+        }
+
+        let preview_id = db.chapter_previews()
+            .insert_generating(batch_id, chapter_id, custom_input.as_deref())?;
+
+        let req = TransformRequest {
+            transformation_id: batch.transformation_novel_id,
+            chapter: chapter.clone(),
+            chapter_content: chapter.body.clone(),
+            novel_context: TransformationNovelContext {
+                transformation_novel: tn.clone(),
+                prev_original: Vec::new(),
+                prev_transformed: Vec::new(),
+                next_original: Vec::new(),
+            },
+            prompt: prompt.clone(),
+            model_config: model.clone(),
+            custom_input: custom_input.clone(),
+            preview_id: Some(preview_id),
+        };
+
+        let provider = (self.provider_factory)(&model);
+        let recorder = self.recorder.clone();
+        let db_path = self.db_path.clone();
+        self.runtime.spawn(async move {
+            let tx = DefaultTransformer { ai: provider.into(), recorder: recorder.clone() };
+            let result = tx.transform_with_business(req, AiCallBusiness::RegeneratePreview).await;
+            let update_result = (|| -> Result<()> {
+                let db = Db::connect(&db_path)?;
+                match &result {
+                    Ok(out) => db.chapter_previews().update_done(
+                        preview_id, &out.result_content, out.tokens_in, out.tokens_out,
+                    )?,
+                    Err(e) => db.chapter_previews().update_failed(preview_id, &e.to_string())?,
+                }
+                Ok(())
+            })();
+            if let Err(e) = update_result {
+                eprintln!("[regenerate_preview] 更新 preview {preview_id} 失败: {e}");
+            }
+        });
+
+        Ok(preview_id)
     }
 
     /// 列出 (batch_id, chapter_id) 下的全部 preview 行,按 id DESC —— spec §5.1。
