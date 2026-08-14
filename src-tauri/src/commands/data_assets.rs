@@ -74,9 +74,12 @@ pub fn commit_data_asset(
 
     let new_chapters: Vec<NewChapter> = chapters.into_iter().enumerate().map(|(i, c)| {
         let wc = nsc_core::text::word_count(&c.content);
+        // idx 用 (i + 1):与 parse_chapters 路径(replace_all 末尾重编号为 (i+1) as i32)
+        // 统一成 1-based,UI 列表里 #N 对应 idx=N,心智模型一致;此前 0-based
+        // 让 range picker 没法选 idx=0 的章节(选 1..N 会跳过第一行)。
         NewChapter {
             data_asset_id: da_id,
-            idx: i as i32,
+            idx: (i + 1) as i32,
             title: c.title,
             body: c.content,
             word_count: wc,

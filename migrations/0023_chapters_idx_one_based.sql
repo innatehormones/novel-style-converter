@@ -1,0 +1,17 @@
+﻿-- Migration 0023: chapters.idx 统一为 1-based
+--
+-- 背景:
+-- - parse_chapters 路径(parse.vue 用户手动分段)写入 idx=0,然后
+--   ChapterRepo::replace_all_for_data_asset 末尾重新编号成 (i+1) as i32,
+--   最终 idx = 1, 2, 3, ...
+-- - commit_data_asset 路径(上传自动解析)直接写 idx = i as i32,0-based。
+--   两条路径不一致 → UI 上 idx=0 对应"第1章",但 range picker (1..N)
+--   选不到第1章。
+--
+-- 修正:
+-- 1. 把 commit_data_asset 改成 (i + 1) as i32,跟 parse 路径对齐。
+-- 2. 本 migration 把现存的 0-based 数据整体 +1,转成 1-based:
+--    idx=0 → 1, idx=1 → 2, ..., idx=N-1 → N。
+--    chapters.idx 是纯显示用冗余列(唯一外键关联都走 chapter_id),
+--    +1 不影响 workflow_results / transformation_chapters 任何逻辑。
+UPDATE chapters SET idx = idx + 1;
