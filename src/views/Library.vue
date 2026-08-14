@@ -310,7 +310,7 @@ const daWidths: Record<string, number> = {
   derived: 90,
   status: 120,
   parsed: 180,
-  actions: 240,
+  actions: 200,
 };
 
 /// 转换工程列表(TanStack format)
@@ -338,7 +338,7 @@ const tnWidths: Record<string, number> = {
   title: 220,
   source: 240,
   created: 180,
-  actions: 240,
+  actions: 200,
 };
 
 onMounted(() => store.load());

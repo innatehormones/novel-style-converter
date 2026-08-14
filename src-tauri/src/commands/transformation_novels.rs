@@ -77,6 +77,22 @@ pub fn list_transformation_novels(
     Ok(all.iter().map(|n| to_summary(&db, n)).collect())
 }
 
+/// 单条 tn 详情(与 summary 同形),由前端进入转换工程详情页时拉取用于标题。
+/// 找不到时返回 Err(让前端直接报错,不要静默 fallback)。
+#[tauri::command]
+pub fn get_transformation_novel(
+    db: State<'_, Arc<Mutex<Db>>>,
+    id: i64,
+) -> Result<TransformationNovelSummary, String> {
+    let db = db.lock().map_err(|e| e.to_string())?;
+    let n = db
+        .transformation_novels()
+        .get(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("transformation_novel {} 不存在", id))?;
+    Ok(to_summary(&db, &n))
+}
+
 /// 新建 transformation_novel。先校验 `data_asset_id` 存在 + title 非空;
 /// 同 data_asset 允许多本 transformation_novel(每本独立 prompt / model / 上下文)。
 /// 返回新 `transformation_novel.id`。

@@ -2,24 +2,53 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useWorkflowsStore } from '../stores/workflows';
-import { getChapter as ipcGetChapter } from '../ipc/commands';
+import {
+  getChapter as ipcGetChapter,
+  getTransformationNovel,
+  listDataAssets,
+} from '../ipc/commands';
 import type {
   SourceChapterRow, WorkflowSummary, WorkflowChapterRow, ChapterWorkflowResultRow,
-  CreateWorkflowInput, Chapter,
+  CreateWorkflowInput, Chapter, TransformationNovelSummary, DataAssetRow,
 } from '../ipc/types';
 import Button from '../components/ui/Button.vue';
+import PageHeader from '../components/ui/PageHeader.vue';
+import IconArrowLeft from '~icons/lucide/arrow-left';
 import { countWords, formatTime, formatWordCount } from '../utils/format';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import CreateBatchDialog from '../components/CreateBatchDialog.vue';
 import PromoteWorkflowDialog from '../components/PromoteWorkflowDialog.vue';
 import Dialog from '../components/ui/Dialog.vue';
 import DataTable from '../components/ui/DataTable.vue';
+import Tag from '../components/ui/Tag.vue';
 
 const route = useRoute();
 const router = useRouter();
 const tnId = computed(() => Number(route.params.tnId));
-/// 用 tnId 作为默认 title 后缀(暂无 transformation 元数据加载,够用)。
-const tnTitle = computed(() => `数据资产 #${tnId.value}`);
+/// 当前 tn 摘要:onMounted 里拉一次,详情页生命周期内不会变(没编辑入口)。
+/// 拉不到时不静默 fallback,直接报错让用户看到。
+const tnSummary = ref<TransformationNovelSummary | null>(null);
+const tnError = ref<string | null>(null);
+const tnTitle = computed(() => tnSummary.value?.title ?? '');
+/// 源数据资产(从 listDataAssets 里按 tnSummary.data_asset_id 查)给 meta-strip 用。
+const sourceAssets = ref<DataAssetRow[]>([]);
+const sourceAsset = computed<DataAssetRow | null>(() => {
+  if (tnSummary.value === null) return null;
+  return sourceAssets.value.find((a) => a.id === tnSummary.value!.data_asset_id) ?? null;
+});
+async function loadTn() {
+  tnError.value = null;
+  try {
+    const [tn, assets] = await Promise.all([
+      getTransformationNovel(tnId.value),
+      listDataAssets(),
+    ]);
+    tnSummary.value = tn;
+    sourceAssets.value = assets;
+  } catch (e: unknown) {
+    tnError.value = e instanceof Error ? e.message : String(e);
+  }
+}
 
 const store = useWorkflowsStore();
 
@@ -402,7 +431,33 @@ async function onCreateBatch(payload: CreateWorkflowInput) {
 }
 
 async function loadAll() {
-  await Promise.all([store.loadSources(tnId.value), store.loadByTn(tnId.value)]);
+  await Promise.all([
+    store.loadSources(tnId.value),
+    store.loadByTn(tnId.value),
+    loadTn(),
+  ]);
+}
+
+/// 章节来源表格表头全选/全不选。
+function onToggleAll(e: Event) {
+  const checked = (e.target as HTMLInputElement).checked;
+  if (checked) selectAll();
+  else selectNone();
+}
+
+/// 工作流章节:只勾选"可重试"且"空槽位"的行,这样按钮才有效。
+const retryableCount = computed<number>(() =>
+  selectedWorkflowChapters.value.filter((c) => canRetryChapter(c) && c.is_empty_slot).length,
+);
+function onToggleAllRetry(e: Event) {
+  const checked = (e.target as HTMLInputElement).checked;
+  const next = new Set<number>();
+  if (checked) {
+    for (const c of selectedWorkflowChapters.value) {
+      if (canRetryChapter(c) && c.is_empty_slot) next.add(c.tc_id);
+    }
+  }
+  retrySelectedIds.value = next;
 }
 
 let pollHandle: number | null = null;
@@ -435,11 +490,30 @@ watch(() => sources.value, (list) => {
 
 <template>
   <section class="tn-detail">
-    <header class="header">
-      <h1>转换小说详情</h1>
-      <p class="subtitle">TN #{{ tnId }}</p>
-      <Button @click="router.back()"><- Back</Button>
-    </header>
+    <PageHeader :title="tnTitle || '加载中...'" size="small">
+      <template #back>
+        <Button aria-label="返回" @click="router.back()">
+          <IconArrowLeft :size="16" :stroke-width="1.5" />
+        </Button>
+      </template>
+      <template #actions>
+        <!-- 占位:未来若加"重命名"等动作放这里 -->
+      </template>
+    </PageHeader>
+
+    <div v-if="tnError" class="alert">{{ tnError }}</div>
+
+    <div v-if="tnSummary" class="meta-strip">
+      <div class="tags">
+        <Tag>转换工程</Tag>
+        <span v-if="sourceAsset" class="badge">来自「{{ sourceAsset.title }}」</span>
+      </div>
+      <div class="meta-text">
+        <span>{{ formatTime(tnSummary.created_at) }}</span>
+        <span v-if="tnSummary.chapters_count > 0" class="src">共 {{ tnSummary.chapters_count }} 章</span>
+        <span v-if="tnSummary.note" class="src" :title="tnSummary.note">备注:{{ tnSummary.note }}</span>
+      </div>
+    </div>
 
     <div class="tabs">
       <button :class="{ active: activeTab === 'chapters' }" @click="activeTab = 'chapters'">
@@ -462,7 +536,7 @@ watch(() => sources.value, (list) => {
           :disabled="selectedCount === 0"
           @click="openCreateBatch"
         >
-          + New Workflow ({{ selectedCount }} 章）
+          新建工作流 ({{ selectedCount }} 章）
         </Button>
       </div>
       <DataTable
@@ -475,6 +549,16 @@ watch(() => sources.value, (list) => {
         max-height="420px"
         empty-text="暂无章节"
       >
+        <template #header-pick>
+          <input
+            type="checkbox"
+            :checked="selectedChapterIds.size === sources.length && sources.length > 0"
+            :indeterminate.prop="selectedChapterIds.size > 0 && selectedChapterIds.size < sources.length"
+            aria-label="全选章节"
+            @click.stop
+            @change="onToggleAll($event)"
+          />
+        </template>
         <template #cell-pick="{ row }">
           <input
             type="checkbox"
@@ -610,6 +694,17 @@ watch(() => sources.value, (list) => {
         frozen-column="actions"
         empty-text="暂无章节"
       >
+        <template #header-pick>
+          <input
+            type="checkbox"
+            :checked="retrySelectedIds.size === retryableCount && retryableCount > 0"
+            :indeterminate.prop="retrySelectedIds.size > 0 && retrySelectedIds.size < retryableCount"
+            aria-label="全选可重试章节"
+            :disabled="retryableCount === 0"
+            @click.stop
+            @change="onToggleAllRetry($event)"
+          />
+        </template>
         <template #cell-pick="{ row }">
           <input
             v-if="canRetryChapter(row)"
@@ -703,9 +798,43 @@ watch(() => sources.value, (list) => {
 
 <style scoped>
 .tn-detail { padding: 16px; }
-.header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.header h1 { margin: 0; font-size: 20px; }
-.subtitle { margin: 0; color: var(--text-muted); }
+.meta-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  margin-bottom: 8px;
+}
+.tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.badge {
+  padding: 2px 8px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-pin);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.meta-text {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.meta-text .src {
+  color: var(--text-secondary);
+}
+.alert {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--color-paper-mist);
+  color: var(--color-cinnabar-deep);
+  border-radius: var(--radius-pin);
+  font-size: 13px;
+}
 .tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color); }
 .tabs button {
   padding: 8px 16px;
@@ -727,7 +856,6 @@ watch(() => sources.value, (list) => {
   margin-bottom: 12px;
   align-items: center;
 }
-.chapter-table, 
 .link-btn {
   background: none;
   border: none;

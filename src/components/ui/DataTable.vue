@@ -15,11 +15,17 @@
             :style="thStyle(header)"
             @click="onThClick(header.column)"
           >
-            <FlexRender
+            <slot
               v-if="!header.isPlaceholder"
-              :render="header.column.columnDef.header"
-              :props="header.getContext()"
-            />
+              :name="`header-${header.column.id}`"
+              :header="header"
+              :column="header.column"
+            >
+              <FlexRender
+                :render="header.column.columnDef.header"
+                :props="header.getContext()"
+              />
+            </slot>
             <span v-if="isSortable(header.column)" class="sort-mark" aria-hidden="true">
               <svg width="9" height="9" viewBox="0 0 9 9">
                 <path d="M2 4 L4.5 1.5 L7 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />

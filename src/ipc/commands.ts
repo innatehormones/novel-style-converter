@@ -161,6 +161,9 @@ export function listTransformationNovels(dataAssetId?: number): Promise<Transfor
   return invoke<TransformationNovelSummary[]>('list_transformation_novels', { dataAssetId });
 }
 
+export function getTransformationNovel(id: number): Promise<TransformationNovelSummary> {
+  return invoke<TransformationNovelSummary>('get_transformation_novel', { id });
+}
 export function createTransformationNovel(payload: CreateTransformationNovelInput): Promise<number> {
   return invoke<number>('create_transformation_novel', { payload });
 }

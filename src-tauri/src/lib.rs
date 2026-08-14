@@ -111,6 +111,7 @@ pub fn run() {
             commands::data_assets::list_promoted_data_assets_for_workflow,
             commands::data_assets::list_data_assets_by_upload,
             commands::transformation_novels::list_transformation_novels,
+            commands::transformation_novels::get_transformation_novel,
             commands::transformation_novels::create_transformation_novel,
             commands::transformation_novels::update_transformation_novel,
             commands::transformation_novels::delete_transformation_novel,
