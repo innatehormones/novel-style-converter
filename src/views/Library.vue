@@ -6,6 +6,14 @@
       </template>
     </PageHeader>
 
+    <Transition name="toast">
+      <div v-if="toast" class="toast">
+        <span class="toast-msg">{{ toast.text }}</span>
+        <button v-if="toast.action" type="button" class="toast-action" @click="onToastAction">{{ toast.actionLabel }}</button>
+        <button type="button" class="toast-close" aria-label="关闭" @click="dismissToast">×</button>
+      </div>
+    </Transition>
+
     <div v-if="store.error" class="alert">{{ store.error }}</div>
 
     <template v-if="page === 'uploads'">
@@ -43,42 +51,47 @@
       <div v-if="!store.loading && store.dataAssets.length === 0" class="empty">
         还没有数据资产。请到“上传原文”页面选择文件并解析章节。
       </div>
-      <Table
+      <DataTable
         v-else
         :columns="daColumns"
         :data="store.dataAssets"
         :row-key="(row) => row.id"
+        :widths="daWidths"
+        :numeric-columns="['words', 'derived']"
+        :truncate-columns="['title', 'source']"
+        frozen-column="actions"
       >
-        <template #cell-title="{ row }">{{ row.title }}</template>
+        <template #cell-title="{ row }">
+          <Tooltip :text="row.title"><span class="cell-truncate">{{ row.title }}</span></Tooltip>
+        </template>
         <template #cell-kind="{ row }">
           <Tag v-if="row.kind === 'promoted'" kind="success">派生</Tag>
           <Tag v-else>源</Tag>
         </template>
         <template #cell-source="{ row }">
-          <span class="muted">{{ row.filename }}</span>
+          <Tooltip :text="row.filename"><span class="cell-truncate">{{ row.filename }}</span></Tooltip>
         </template>
         <template #cell-derived="{ row }">
           <Tag v-if="row.promoted_count > 0" kind="success">{{ row.promoted_count }} 个</Tag>
           <span v-else class="muted">—</span>
         </template>
-        <template #cell-words="{ row }">{{ formatWordCount(row.word_count) }}</template>
         <template #cell-status="{ row }">
           <Tag v-if="row.tn_count > 0" kind="warn">有 {{ row.tn_count }} 个工程</Tag>
           <Tag v-else kind="success">无引用</Tag>
         </template>
-        <template #cell-parsed="{ row }">{{ formatTime(row.parsed_at) }}</template>
         <template #cell-actions="{ row }">
-          <Button size="small" @click="goDataAsset(row.id)">打开</Button>
-          <Button size="small" @click="openCreateTn(row.id)">新建工程</Button>
-          <Button
-            size="small"
-            kind="danger"
-            :disabled="row.tn_count > 0"
-            :title="row.tn_count > 0 ? `有 ${row.tn_count }} 个工程引用,请先删除工程` : ''"
-            @click="onDeleteDa(row.id, row.title)"
-          >删除</Button>
+          <button type="button" class="row-link" @click="goDataAsset(row.id)">打开</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <button type="button" class="row-link" @click="openCreateTn(row.id)">新建工程</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <button
+            type="button"
+            class="row-link danger"
+            :title="row.tn_count > 0 ? `有 ${row.tn_count } 个工程引用` : ''"
+            @click="onDeleteDa(row.id, row.title, row.tn_count)"
+          >删除</button>
         </template>
-      </Table>
+      </DataTable>
     </template>
 
     <template v-else>
@@ -267,16 +280,40 @@ const uploadWidths: Record<string, number> = {
   actions: 200,
 };
 
+/// DataTable(TanStack)列定义:accessorKey 直接读 DataAssetRow 字段,
+/// 需要自定义渲染的列(kind/derived/status)留空 cell 走 <template #cell-*> 插槽。
 const daColumns = [
-  { key: 'title', title: '标题', width: '220px' },
-  { key: 'kind', title: '类型', width: '100px' },
-  { key: 'source', title: '来源', width: '260px' },
-  { key: 'words', title: '字数', width: '100px' },
-  { key: 'derived', title: '派生数', width: '100px' },
-  { key: 'status', title: '状态', width: '120px' },
-  { key: 'parsed', title: '解析时间', width: '180px' },
-  { key: 'actions', title: '操作', width: '200px', type: 'actions' as const },
+  { accessorKey: 'title', header: '标题', enableSorting: true },
+  { accessorKey: 'kind', header: '类型', enableSorting: true },
+  { accessorKey: 'filename', id: 'source', header: '来源', enableSorting: true },
+  {
+    accessorKey: 'word_count',
+    id: 'words',
+    header: '字数',
+    enableSorting: true,
+    cell: (info: any) => formatWordCount(info.getValue() as number),
+  },
+  { accessorKey: 'promoted_count', id: 'derived', header: '派生数', enableSorting: true },
+  { accessorKey: 'tn_count', id: 'status', header: '状态', enableSorting: true },
+  {
+    accessorKey: 'parsed_at',
+    id: 'parsed',
+    header: '解析时间',
+    enableSorting: true,
+    cell: (info: any) => formatTime(info.getValue() as string),
+  },
+  { id: 'actions', header: '操作', enableSorting: false },
 ];
+const daWidths: Record<string, number> = {
+  title: 220,
+  kind: 90,
+  source: 240,
+  words: 100,
+  derived: 90,
+  status: 120,
+  parsed: 180,
+  actions: 240,
+};
 
 const tnColumns = [
   { key: 'id', title: 'id', width: '60px' },
@@ -338,9 +375,39 @@ async function doDeleteUpload() {
   }
 }
 
+const toast = ref<{ text: string; action: (() => void) | null; actionLabel: string } | null>(null);
+let toastTimer: number | null = null;
+
+function showToast(text: string, action: (() => void) | null = null, actionLabel = '查看') {
+  if (toastTimer !== null) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  toast.value = { text, action, actionLabel };
+  toastTimer = window.setTimeout(() => {
+    toast.value = null;
+    toastTimer = null;
+  }, 5000);
+}
+
+function dismissToast() {
+  if (toastTimer !== null) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  toast.value = null;
+}
+
+function onToastAction() {
+  const a = toast.value?.action;
+  dismissToast();
+  if (a) a();
+}
+
 async function onCreateTn(input: { data_asset_id: number; title: string }) {
   try {
-    await store.createTransformationNovel(input);
+    const newId = await store.createTransformationNovel(input);
+    showToast(`已创建转换工程 "${input.title}"`, () => goDetail(newId));
   } catch (e: unknown) {
     showAlert('提示', e instanceof Error ? e.message : String(e));
   }
@@ -385,9 +452,15 @@ async function doDeleteTn() {
   }
 }
 
-async function onDeleteDa(id: number, title: string) {
+async function onDeleteDa(id: number, title: string, tnCount: number) {
   deleteDaId.value = id;
-  deleteDaMessage.value = `确认删除数据资产 "${title}"?解析出的章节将一并删除。`;
+  if (tnCount > 0) {
+    deleteDaMessage.value = `确认删除数据资产 "${title}"?
+
+该资产被 ${tnCount} 个转换工程引用,删除将会连带删除这些工程及其全部工作流结果。为避免误删,请先去转换工程页删除。`;
+  } else {
+    deleteDaMessage.value = `确认删除数据资产 "${title}"?解析出的章节将一并删除。`;
+  }
   deleteDaConfirmOpen.value = true;
 }
 
@@ -426,6 +499,61 @@ function goDetail(tnId: number) {
   border-radius: var(--radius-pin);
   margin-bottom: 16px;
 }
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--color-paper);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--color-cinnabar);
+  border-radius: var(--radius-pin);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+.toast-msg {
+  flex: 1;
+  color: var(--text-primary);
+}
+.toast-action {
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-slate);
+  cursor: pointer;
+  text-decoration: underline transparent;
+  text-underline-offset: 3px;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+.toast-action:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+.toast-close {
+  background: transparent;
+  border: 0;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.toast-close:hover {
+  color: var(--text-primary);
+}
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
 .empty {
   text-align: center;
   padding: 56px 0;
@@ -456,6 +584,17 @@ function goDetail(tnId: number) {
   text-decoration: underline transparent;
   text-underline-offset: 3px;
   transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+.row-link:disabled,
+.row-link[disabled] {
+  cursor: not-allowed;
+  opacity: 0.45;
+  color: var(--text-muted);
+}
+.row-link:disabled:hover,
+.row-link[disabled]:hover {
+  color: var(--text-muted);
+  text-decoration-color: transparent;
 }
 .row-link:hover {
   color: var(--accent);

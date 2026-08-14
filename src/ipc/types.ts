@@ -189,9 +189,6 @@ export interface TransformationNovelSummary {
   title: string;
   created_at: string;
   chapters_count: number;
-  default_model_config_id: number | null;
-  default_prompt_id: number | null;
-  default_mode: 'compress' | 'style' | null;
 }
 
 /**
@@ -202,9 +199,6 @@ export interface TransformationNovelSummary {
 export interface CreateTransformationNovelInput {
   data_asset_id: number;
   title: string;
-  default_model_config_id?: number | null;
-  default_prompt_id?: number | null;
-  default_mode?: 'compress' | 'style' | null;
 }
 
 /**
@@ -214,9 +208,6 @@ export interface CreateTransformationNovelInput {
 export interface UpdateTransformationNovelInput {
   id: number;
   title: string;
-  default_model_config_id?: number | null;
-  default_prompt_id?: number | null;
-  default_mode?: 'compress' | 'style' | null;
 }
 
 // === Workflow 宸ヤ綔娴?===
