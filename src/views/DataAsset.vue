@@ -6,14 +6,6 @@
           <IconArrowLeft :size="16" :stroke-width="1.5" />
         </Button>
       </template>
-      <template #meta>
-        <span v-if="store.kind === 'promoted'" class="badge derived">派生资产</span>
-        <span v-else class="badge">源资产</span>
-        <span v-if="store.tnCount > 0" class="badge locked">有 {{ store.tnCount }} 个工程</span>
-        <span v-else-if="store.kind === 'source'" class="badge">已解析</span>
-        <span v-if="store.parsedAt" class="src">{{ formatTime(store.parsedAt) }}</span>
-        <span v-if="store.sourceWorkflowId !== null" class="src">来自工作流 #{{ store.sourceWorkflowId }}</span>
-      </template>
       <template #actions>
         <Button
           kind="danger"
@@ -25,6 +17,19 @@
     </PageHeader>
 
     <div v-if="store.error" class="alert">{{ store.error }}</div>
+
+    <div class="meta-strip">
+      <div class="tags">
+        <span v-if="store.kind === 'promoted'" class="badge derived">派生资产</span>
+        <span v-else class="badge">源资产</span>
+        <span v-if="store.tnCount > 0" class="badge locked">有 {{ store.tnCount }} 个工程</span>
+        <span v-else-if="store.kind === 'source'" class="badge">已解析</span>
+      </div>
+      <div class="meta-text">
+        <span v-if="store.parsedAt">{{ formatTime(store.parsedAt) }}</span>
+        <span v-if="store.sourceWorkflowId !== null" class="src">来自工作流 #{{ store.sourceWorkflowId }}</span>
+      </div>
+    </div>
 
     <ConfirmDialog
       v-model:open="confirmOpen"
@@ -156,6 +161,25 @@ function onBack() {
 .src {
   font-size: 12px;
   color: var(--text-secondary);
+}
+.meta-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+}
+.tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.meta-text {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 .alert {
   margin-top: 12px;

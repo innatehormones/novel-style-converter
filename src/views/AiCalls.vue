@@ -86,7 +86,7 @@
         <span v-else class="muted">—</span>
       </template>
       <template #cell-actions="{ row }">
-        <Button size="small" @click="openDetail(row.id)">详情</Button>
+        <Button size="small" @click="openDetail(row.id)">查看</Button>
       </template>
     </Table>
 

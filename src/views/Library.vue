@@ -80,7 +80,7 @@
           <Tag v-else kind="success">无引用</Tag>
         </template>
         <template #cell-actions="{ row }">
-          <button type="button" class="row-link" @click="goDataAsset(row.id)">打开</button>
+          <button type="button" class="row-link" @click="goDataAsset(row.id)">查看</button>
           <span class="row-sep" aria-hidden="true">·</span>
           <button type="button" class="row-link" @click="openCreateTn(row.id)">新建工程</button>
           <span class="row-sep" aria-hidden="true">·</span>
@@ -119,7 +119,7 @@
             <Button size="small" @click="cancelRename">取消</Button>
           </template>
           <template v-else>
-            <Button size="small" @click="goDetail(row.id)">详情</Button>
+            <Button size="small" @click="goDetail(row.id)">查看</Button>
             <Button size="small" @click="startRename(row.id, row.title)">重命名</Button>
             <Button size="small" kind="danger" @click="onDeleteTn(row.id, row.title)">删除</Button>
           </template>
