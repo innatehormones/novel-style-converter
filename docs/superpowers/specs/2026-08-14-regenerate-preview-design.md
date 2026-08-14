@@ -50,9 +50,16 @@
 
 不允许：preview 自动同步到 wrc（用户没点头之前一切都是草稿）；不允许：transformer 直接读 preview（preview 是草稿空间，不参与正常转换链路）
 
-### 3.3 中间输入框语义
+### 3.3 中间区域语义（双区）
 
-中间输入框的文本作为**附加指令**拼到 system prompt 后面，原 prompt 模板不变。规则：
+中间区域分为两个独立的子区，语义不同：
+
+| 子区 | 位置 | 用途 | 何时使用 |
+|---|---|---|---|
+| **附加指令** | 顶部 textarea | 影响下次 AI 生成的内容 | 用户点击 [生成] 时读取；空 = 不拼接额外指令 |
+| **草稿区** | 中部 editable area | 最终提交到 `wrc.content` 的内容 | 用户点击 [确认替换] 时读取 |
+
+**附加指令规则**：
 
 - 用户输入为空 → 不拼接，与原转换行为完全一致
 - 用户输入非空 → 在 system prompt 文末追加：
@@ -67,7 +74,24 @@
 - 渲染走现有 `prompts::render` 流水线，不引入新模板变量
 - 长度上限 2000 字（前端硬限制），避免 prompt 爆模型 context window
 
-### 3.4 AI 调用业务类型
+**草稿区规则**：
+
+- 初始为空
+- 用户点预览 tab 的 [使用此预览填充草稿] → 该 preview.preview_content 拷贝到草稿区
+- 用户可自由编辑、跨预览拼接段落、手写修改
+- 提交 = 草稿区文本 → `wrc.content`（**不是** preview 行内容）
+- 长度无硬上限（DB TEXT 不限制；UI 层让 textarea 自适应滚动）
+
+### 3.5 preview 的角色：原材料，不是终选
+
+preview 不再是"用户选哪个覆盖"的简单选择模型。preview 是**原材料**，草稿区才是用户最终提交的产物。具体含义：
+
+- 用户可以点 [使用此预览填充草稿] 把任意 preview 内容拷入草稿区，多次操作可叠加（先填预览 1，再从预览 2 复制段落粘到草稿）
+- 草稿区是单一真源：commit_preview 用的是草稿区内容，不是某个 preview 行
+- preview 行在提交后**全部删除**（包括被填入草稿的那个），因为草稿一旦提交，preview 的存在意义就没了
+- 这避免了"我先选了预览 1，又改主意改用预览 2"的二选一焦虑
+
+### 3.6 AI 调用业务类型
 
 扩展 `AiCallBusiness` enum：
 
@@ -115,14 +139,19 @@ CREATE INDEX idx_chapter_previews_chap ON chapter_previews(batch_id, chapter_id,
     → 成功: UPDATE preview_content + tokens, status='done'
     → 失败: UPDATE error + status='failed'
 
-用户点"确认此预览" (preview X)
+用户点"确认替换" (草稿区有内容)
   → BEGIN
-    UPDATE workflow_result_chapters SET content = X.preview_content WHERE (batch_id, chapter_id) = (...)
-    UPDATE transformation_chapters SET status='done', error=NULL, result_content=NULL, tokens_in=X.tokens_in, tokens_out=X.tokens_out, completed_at=now WHERE id=(...)
-    DELETE FROM chapter_previews WHERE (batch_id, chapter_id) = (...) AND id != X.id
-    -- X 自己这一行也删（提交后无意义）
-    DELETE FROM chapter_previews WHERE id = X.id
+    UPDATE workflow_result_chapters SET content = :draft_content WHERE (batch_id, chapter_id) = (...)
+    UPDATE transformation_chapters SET status='done', error=NULL, result_content=NULL, completed_at=now WHERE id=(...)
+    -- tokens 来自最后填入草稿的那个 preview（前端透传 preview_id；找不到则用最新一条 done 的 preview）
+    UPDATE transformation_chapters SET tokens_in=:tokens_in, tokens_out=:tokens_out WHERE id=(...)
+    DELETE FROM chapter_previews WHERE (batch_id, chapter_id) = (...)
   → COMMIT
+
+注意：commit 不接受某个 preview id 作为输入，**只接受 draft_content + (可选) source_preview_id**。
+- 必传：`batch_id` / `chapter_id` / `draft_content`
+- 可选：`source_preview_id`（用于透传 tokens；前端记录"草稿最后从哪个预览填充的"）
+- 找不到 source_preview 时，tokens 设为 NULL（不阻塞提交）
 ```
 
 ### 4.3 不做版本快照
@@ -144,10 +173,14 @@ pub async fn regenerate_preview(
     custom_input: Option<String>,
 ) -> Result<i64>; // 返回 preview.id
 
-/// 同步：用指定 preview 覆盖 wrc.content，并清理同章节其他 preview。
+/// 同步：用草稿区内容覆盖 wrc.content，并清理该章节所有 preview 行。
+/// tokens 优先取自 source_preview_id 指向的 preview；为 NULL 时置 NULL。
 pub fn commit_preview(
     &self,
-    preview_id: i64,
+    batch_id: i64,
+    chapter_id: i64,
+    draft_content: String,
+    source_preview_id: Option<i64>,
 ) -> Result<WorkflowSummary>;
 
 /// 同步：列出某章节的所有 preview（按 id DESC）。
@@ -180,7 +213,10 @@ pub async fn regenerate_chapter_preview(
 pub fn commit_chapter_preview(
     db: State<'_, Arc<Mutex<Db>>>,
     scheduler: State<'_, Arc<BatchScheduler>>,
-    preview_id: i64,
+    batch_id: i64,
+    chapter_id: i64,
+    draft_content: String,
+    source_preview_id: Option<i64>,
 ) -> Result<WorkflowSummary, String>;
 
 #[tauri::command]
@@ -247,44 +283,63 @@ pub struct ChapterPreviewRow {
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ 重新生成章节 #X                                  [×]            │
-├─────────────────────┬───────────────┬───────────────────────────┤
-│ 原文 (3 tabs)       │ 附加指令      │ 预览 (N tabs)             │
-│                     │               │                           │
-│ [上一章] [当前] [下一章] │ ┌─────────┐ │ [预览 1 12:34] [预览 2 12:36] [+]│
-│                     │ │         │ │                           │
-│ ┌─────────────────┐ │ │         │ │ ┌───────────────────────┐ │
-│ │                 │ │ │  textarea│ │ │                       │ │
-│ │   章节正文     │ │ │  0/2000  │ │ │   预览正文          │ │
-│ │                 │ │ │         │ │ │                       │ │
-│ └─────────────────┘ │ │         │ │ └───────────────────────┘ │
-│                     │ └─────────┘ │                           │
-│                     │ [生成]      │ [确认此预览] [放弃]        │
-└─────────────────────┴───────────────┴───────────────────────────┘
+├─────────────────────┬───────────────────────┬───────────────────┤
+│ 原文 (3 tabs)       │ 中间 (双区)           │ 预览 (N tabs)       │
+│                     │                       │                   │
+│ [上一章][当前][下一章] │ ┌─附加指令─────────┐ │ [预览1][预览2][预览3] │
+│                     │ │ 0/2000           │ │                   │
+│ ┌─────────────────┐ │ └──────────────────┘ │ ┌───────────────┐ │
+│ │                 │ │                       │ │               │ │
+│ │   章节正文     │ │ ┌─草稿(可编辑)──────┐ │ │  预览正文  │ │
+│ │                 │ │ │                 │ │ │               │ │
+│ │                 │ │ │                 │ │ └───────────────┘ │
+│ │                 │ │ │                 │ │ [使用此预览填充草稿]  │
+│ │                 │ │ │                 │ │ [放弃]            │
+│ └─────────────────┘ │ └──────────────────┘ │                   │
+│                     │                       │                   │
+│                     │ [生成(读附加指令)]    │                   │
+│                     │                       │                   │
+│                     │ [确认替换(读草稿)]    │                   │
+└─────────────────────┴───────────────────────┴───────────────────┘
 ```
 
-- 左栏：tabs = 上一章 / 当前章 / 下一章；不存在则不显示对应 tab（如 idx=1 无上一章）。tabs 间互斥切换，正文占左侧 1/3 宽度
-- 中栏：textarea（高度约 12 行），空时不拼接指令。`[生成]` 按钮：textarea 空时禁用，提示"附加指令为空将按原 prompt 生成"
-- 右栏：tabs 按 preview id DESC 排列。`[+]` = 触发中栏 `[生成]`。选中 tab 显示正文 + 元数据（tokens / 生成时间 / 自定义输入）
-- 提交按钮 = 强确认 modal：
+- 左栏：tabs = 上一章 / 当前章 / 下一章；不存在则不显示对应 tab。tabs 间互斥切换，正文占左侧 1/3 宽度
+- 中栏分两区：
+  - **附加指令**（顶部 textarea）：影响下次 AI 生成；空 = 不拼接额外指令，与原转换一致。长度上限 2000 字
+  - **草稿区**（中部 editable area）：最终提交到 `wrc.content` 的内容；初始为空，可手动输入或点预览 tabs 的 [使用此预览填充草稿] 拷贝
+- 中栏按钮：
+  - `[生成]`：读附加指令 → 调 AI → 在右栏追加一个 preview tab
+  - `[确认替换]`：读草稿区内容 → 弹强确认 modal → commit
+- 右栏：preview tabs 按 id DESC 排列。选中 tab 显示正文 + 元数据（tokens / 生成时间 / 自定义输入）
+  - `[使用此预览填充草稿]`：preview.preview_content 拷入草稿区（追加模式：提示用户"将追加到草稿末尾"或"替换草稿内容"，二选一）
+  - `[放弃]`：删除该 preview 行
+- 提交强确认 modal：
 
 ```
 确认替换章节 #X 的结果？
-预览 #N（生成于 HH:MM:SS）
-[预览文本 100 字截断...]
+草稿区字数：NNNN
+[草稿文本 100 字截断...]
 
 ⚠ 此操作：
-  · 用此预览替换原 wrc.content（不可恢复）
-  · 删除此章节下其他 N-1 条预览
-  · tc 行 status → done，tokens 更新
+  · 用草稿区内容替换原 wrc.content（不可恢复）
+  · 删除此章节下所有 N 条预览
+  · tc 行 status → done，tokens 取自草稿来源预览
 
 [取消]  [确认替换]
 ```
 
+**追加 vs 替换策略**：
+- 草稿区为空时点 [使用此预览填充草稿] → 直接替换（草稿本来就是空的）
+- 草稿区非空时点 [使用此预览填充草稿] → 弹小确认："将预览 #N 追加到草稿末尾（保留现有内容）还是替换？"
+  - [追加]：preview.preview_content 追加到草稿末尾（用 `\n\n` 分隔）
+  - [替换]：preview.preview_content 直接覆盖草稿
+
 ### 6.3 状态联动
 
 - preview `status=generating` 时，右栏对应 tab 显示转圈 + "生成中..." + 实时更新
-- preview `status=failed` 时，tab 显示错误信息，禁用"确认此预览"按钮
+- preview `status=failed` 时，tab 显示错误信息，禁用 [使用此预览填充草稿] 按钮
 - 用户关闭对话框：preview 行保留在 DB，下次打开对话框时通过 `list_chapter_previews` 拉回
+- 中栏 [确认替换] 按钮：草稿区为空时禁用，提示"草稿区为空，请先填充或编辑"
 
 ### 6.4 边界情况
 
