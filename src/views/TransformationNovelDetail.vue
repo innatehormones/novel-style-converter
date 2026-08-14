@@ -60,7 +60,10 @@ const activeTab = ref<'chapters' | 'workflows'>('chapters');
 const chaptersTableEl = ref<HTMLElement | null>(null);
 const chaptersTableMaxHeight = ref('420px');
 const CHAPTERS_TABLE_MIN_HEIGHT = 300;
-const CHAPTERS_TABLE_BOTTOM_PADDING = 16;
+const CHAPTERS_TABLE_BOTTOM_PADDING = 36;
+/// 调试时实测:横向滚动条(~17px) + 表格 border/padding/box-shadow(~10px)
+/// 加起来约 26~36px。从 16 提到 36 给一个更稳的容错,避免 main.app
+/// 因为表格占用溢出而出现滚动条。
 
 function recalcChaptersTableHeight() {
   const main = document.querySelector('main.app') as HTMLElement | null;
