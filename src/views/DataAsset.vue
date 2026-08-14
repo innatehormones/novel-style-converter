@@ -182,7 +182,6 @@ function onBack() {
 }
 .meta-text span + span::before {
   content: ' · ';
-  margin-right: 12px;
 }
 .alert {
   margin-top: 12px;
