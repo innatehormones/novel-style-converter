@@ -103,7 +103,7 @@ impl<'a> ChapterRepo<'a> {
 
     pub fn prev_n(&self, data_asset_id: i64, before_idx: i32, n: i32) -> Result<Vec<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind              FROM chapters WHERE data_asset_id = ?1 AND idx < ?2              ORDER BY idx DESC LIMIT ?3",
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind, edited_at              FROM chapters WHERE data_asset_id = ?1 AND idx < ?2              ORDER BY idx DESC LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![data_asset_id, before_idx, n], chapter_from_row)?;
         let mut v: Vec<Chapter> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
@@ -113,7 +113,7 @@ impl<'a> ChapterRepo<'a> {
 
     pub fn next_n(&self, data_asset_id: i64, after_idx: i32, n: i32) -> Result<Vec<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind              FROM chapters WHERE data_asset_id = ?1 AND idx > ?2              ORDER BY idx ASC LIMIT ?3",
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind, edited_at              FROM chapters WHERE data_asset_id = ?1 AND idx > ?2              ORDER BY idx ASC LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![data_asset_id, after_idx, n], chapter_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
