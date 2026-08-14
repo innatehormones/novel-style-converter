@@ -60,7 +60,7 @@ const activeTab = ref<'chapters' | 'workflows'>('chapters');
 const chaptersTableEl = ref<HTMLElement | null>(null);
 const chaptersTableMaxHeight = ref('420px');
 const CHAPTERS_TABLE_MIN_HEIGHT = 300;
-const CHAPTERS_TABLE_BOTTOM_PADDING = 36;
+const CHAPTERS_TABLE_BOTTOM_PADDING = 48;
 /// 调试时实测:横向滚动条(~17px) + 表格 border/padding/box-shadow(~10px)
 /// 加起来约 26~36px。从 16 提到 36 给一个更稳的容错,避免 main.app
 /// 因为表格占用溢出而出现滚动条。
@@ -146,19 +146,29 @@ function toggleSelect(chapterId: number, on: boolean) {
   selectedChapterIds.value = next;
 }
 
+/// 自定义范围选择:按 idx(#列序号)勾选 [from, to] 区间的章节。
+/// 用户视角就是 "#N 到 #M",内部映射回 chapter_id 写回 selectedChapterIds。
+const rangeFrom = ref<number | null>(null);
+const rangeTo = ref<number | null>(null);
+function applyRange() {
+  const list = sources.value;
+  if (list.length === 0) return;
+  if (rangeFrom.value === null || rangeTo.value === null) return;
+  // clamp 到 [1, list.length];to < from 自动交换。
+  const lo = Math.max(1, Math.min(rangeFrom.value, rangeTo.value, list.length));
+  const hi = Math.min(list.length, Math.max(rangeFrom.value, rangeTo.value, 1));
+  selectedChapterIds.value = new Set(
+    list.filter((s) => s.idx >= lo && s.idx <= hi).map((s) => s.chapter_id),
+  );
+}
+
 function selectAll() {
   selectedChapterIds.value = new Set(sources.value.map((s) => s.chapter_id));
 }
 function selectNone() {
   selectedChapterIds.value = new Set();
 }
-function invertSelection() {
-  const next = new Set<number>();
-  for (const s of sources.value) {
-    if (!selectedChapterIds.value.has(s.chapter_id)) next.add(s.chapter_id);
-  }
-  selectedChapterIds.value = next;
-}
+
 
 // 工作流 tab
 const workflows = computed<WorkflowSummary[]>(() => store.byTn.get(tnId.value) ?? []);
@@ -569,9 +579,33 @@ watch(() => sources.value, (list) => {
     <!-- 章节来源 tab -->
     <template v-if="activeTab === 'chapters'">
       <div class="actions">
-        <Button size="small" @click="selectAll">全选</Button>
-        <Button size="small" @click="selectNone">全不选</Button>
-        <Button size="small" @click="invertSelection">反选</Button>
+        <div class="range-pick">
+          <span class="range-label">按 # 选</span>
+          <input
+            type="number"
+            class="range-input"
+            v-model.number="rangeFrom"
+            :min="1"
+            :max="sources.length"
+            placeholder="起"
+            :disabled="sources.length === 0"
+            @keydown.enter="applyRange"
+          />
+          <span class="range-sep">—</span>
+          <input
+            type="number"
+            class="range-input"
+            v-model.number="rangeTo"
+            :min="1"
+            :max="sources.length"
+            placeholder="止"
+            :disabled="sources.length === 0"
+            @keydown.enter="applyRange"
+          />
+          <Button size="small" :disabled="rangeFrom === null || rangeTo === null" @click="applyRange">
+            应用
+          </Button>
+        </div>
         <Button
           kind="primary"
           size="small"
@@ -899,6 +933,38 @@ watch(() => sources.value, (list) => {
   gap: 8px;
   margin-bottom: 12px;
   align-items: center;
+}
+.range-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.range-label {
+  white-space: nowrap;
+}
+.range-sep {
+  color: var(--text-muted);
+}
+.range-input {
+  width: 64px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  text-align: center;
+  background: var(--color-sheet);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pin);
+  color: var(--text-primary);
+  outline: none;
+}
+.range-input:focus {
+  border-color: var(--border-strong);
+}
+.range-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .link-btn {
   background: none;
