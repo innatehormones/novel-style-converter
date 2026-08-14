@@ -146,20 +146,51 @@ function toggleSelect(chapterId: number, on: boolean) {
   selectedChapterIds.value = next;
 }
 
-/// 自定义范围选择:按 idx(#列序号)勾选 [from, to] 区间的章节。
+/// 自定义范围选择:按 idx(#列序号)对一段章节做"覆盖"或"累加/取反"。
 /// 用户视角就是 "#N 到 #M",内部映射回 chapter_id 写回 selectedChapterIds。
+/// - replace:把选中集合直接替换为范围内的章节(经典覆盖)。
+/// - toggle  :把范围内的每个 chapter 在当前选中集合中取反,范围外的不变
+///            → 多次应用可累加:先 1~100,再 200~300,得到 1~300;再 50~150,
+///            得到 1~49 + 151~300。这是用户实际选长篇小说的常用模式。
+type RangeMode = 'replace' | 'toggle';
+const rangeMode = ref<RangeMode>('toggle');
 const rangeFrom = ref<number | null>(null);
 const rangeTo = ref<number | null>(null);
+/// 输入合法性:不能 < 1,不能 > list.length,任一不满足给错误样式并禁用"应用"。
+const rangeError = computed<string | null>(() => {
+  const list = sources.value;
+  if (list.length === 0) return null;
+  if (rangeFrom.value === null || rangeTo.value === null) return null;
+  if (rangeFrom.value < 1 || rangeTo.value < 1) return '序号需 ≥ 1';
+  if (rangeFrom.value > list.length || rangeTo.value > list.length) {
+    return `序号需 ≤ ${list.length}`;
+  }
+  return null;
+});
 function applyRange() {
   const list = sources.value;
   if (list.length === 0) return;
+  if (rangeError.value !== null) return;
   if (rangeFrom.value === null || rangeTo.value === null) return;
-  // clamp 到 [1, list.length];to < from 自动交换。
-  const lo = Math.max(1, Math.min(rangeFrom.value, rangeTo.value, list.length));
-  const hi = Math.min(list.length, Math.max(rangeFrom.value, rangeTo.value, 1));
-  selectedChapterIds.value = new Set(
+  // to < from 自动交换,idx 单调。
+  const lo = Math.min(rangeFrom.value, rangeTo.value);
+  const hi = Math.max(rangeFrom.value, rangeTo.value);
+  const targetIds = new Set<number>(
     list.filter((s) => s.idx >= lo && s.idx <= hi).map((s) => s.chapter_id),
   );
+  if (rangeMode.value === 'replace') {
+    selectedChapterIds.value = targetIds;
+  } else {
+    // toggle:范围内每个 id 在当前集合里 add/delete 翻转,范围外不动。
+    const next = new Set(selectedChapterIds.value);
+    for (const id of targetIds) {
+      if (next.has(id)) next.delete(id); else next.add(id);
+    }
+    selectedChapterIds.value = next;
+  }
+}
+function clearSelection() {
+  selectedChapterIds.value = new Set();
 }
 
 function selectAll() {
@@ -584,6 +615,7 @@ watch(() => sources.value, (list) => {
           <input
             type="number"
             class="range-input"
+            :class="{ 'has-error': rangeError !== null }"
             v-model.number="rangeFrom"
             :min="1"
             :max="sources.length"
@@ -595,6 +627,7 @@ watch(() => sources.value, (list) => {
           <input
             type="number"
             class="range-input"
+            :class="{ 'has-error': rangeError !== null }"
             v-model.number="rangeTo"
             :min="1"
             :max="sources.length"
@@ -602,8 +635,29 @@ watch(() => sources.value, (list) => {
             :disabled="sources.length === 0"
             @keydown.enter="applyRange"
           />
-          <Button size="small" :disabled="rangeFrom === null || rangeTo === null" @click="applyRange">
+          <select
+            v-model="rangeMode"
+            class="range-mode"
+            :disabled="sources.length === 0"
+            :title="rangeMode === 'toggle' ? '范围内每项取反选中状态,范围外不变 — 多次应用可累加' : '直接把选中集合替换为范围内的章节'"
+          >
+            <option value="toggle">累加/取反</option>
+            <option value="replace">覆盖</option>
+          </select>
+          <Button
+            size="small"
+            :disabled="rangeFrom === null || rangeTo === null || rangeError !== null"
+            :title="rangeError ?? ''"
+            @click="applyRange"
+          >
             应用
+          </Button>
+          <Button
+            size="small"
+            :disabled="selectedCount === 0"
+            @click="clearSelection"
+          >
+            清空
           </Button>
         </div>
         <Button
@@ -963,6 +1017,29 @@ watch(() => sources.value, (list) => {
   border-color: var(--border-strong);
 }
 .range-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.range-input.has-error {
+  border-color: var(--danger, #d64545);
+  background: var(--danger-bg, rgba(214, 69, 69, 0.06));
+}
+.range-mode {
+  height: 28px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--color-sheet);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pin);
+  color: var(--text-primary);
+  outline: none;
+  cursor: pointer;
+}
+.range-mode:focus {
+  border-color: var(--border-strong);
+}
+.range-mode:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
