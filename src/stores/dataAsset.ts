@@ -104,7 +104,8 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
 
   /// 派生 da(promoted) 禁编辑:正文要么来自 workflow 转换结果,要么是失败回退的原文,
   /// 让用户改会破坏"派生 = workflow 整体可交付"语义。
-  const editable = computed(() => kind.value === 'source');
+  /// 数据资产是独立数据实体——任意 kind 都可编辑,语义上等同"已选章节"。
+const editable = computed(() => selectedIdx.value !== null);
 
   function enterEdit() {
     if (!editable.value) return;
