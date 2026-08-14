@@ -181,7 +181,8 @@ function onBack() {
   white-space: nowrap;
 }
 .meta-text span + span::before {
-  content: ' · ';
+  content: '·';
+  padding: 0 4px;
 }
 .alert {
   margin-top: 12px;
