@@ -771,48 +771,67 @@ watch(() => sources.value, (list) => {
       </section>
     </div>
 
-    <!-- Workflow Detail侧边面板 -->
-    <Dialog v-if="selectedWorkflow !== null" :open="true" title="工作流详情" :width="1100" @update:open="closeWorkflowPanel">
-      <div class="panel-header">
-        <h3>
-          工作流 #{{ selectedWorkflow.id }}{{ selectedWorkflow.label ? ' · ' + selectedWorkflow.label : '' }}
-        </h3>
-        <Button size="small" @click="closeWorkflowPanel">关闭</Button>
+    <!-- Workflow Detail 弹窗 -->
+    <Dialog
+      v-if="selectedWorkflow !== null"
+      :open="true"
+      :title="selectedWorkflow.label ? `工作流 #${selectedWorkflow.id} · ${selectedWorkflow.label}` : `工作流 #${selectedWorkflow.id}`"
+      :width="1100"
+      @update:open="closeWorkflowPanel"
+    >
+      <div class="wf-status-strip">
+        <div class="wf-status-left">
+          <span class="status" :class="selectedWorkflow.status">
+            <span v-if="selectedWorkflow.status === 'running'" class="dot dot-running" />
+            {{ formatWorkflowStatus(selectedWorkflow.status) }}
+          </span>
+          <span class="wf-counts">
+            共 <strong>{{ selectedWorkflow.total_count }}</strong> 章
+            <span class="dot-sep">·</span>
+            <span class="text-success">已完成 {{ selectedWorkflow.done_count }}</span>
+            <span class="dot-sep">·</span>
+            <span :class="{ 'has-failed': selectedWorkflow.failed_count > 0 }">失败 {{ selectedWorkflow.failed_count }}</span>
+            <span class="dot-sep">·</span>
+            <span>已跳过 {{ selectedWorkflow.skipped_count }}</span>
+          </span>
+          <span
+            v-if="selectedWorkflow.status === 'stopped' && selectedWorkflow.promoted_count > 0"
+            class="promoted-tag"
+            :title="`已基于此工作流转正 ${selectedWorkflow.promoted_count} 份数据资产`"
+          >已转正 × {{ selectedWorkflow.promoted_count }}</span>
+        </div>
+        <div class="wf-status-right">
+          <span class="wf-time">创建 {{ fmtTime(selectedWorkflow.created_at) }}</span>
+          <span v-if="selectedWorkflow.ended_at" class="wf-time">结束 {{ fmtTime(selectedWorkflow.ended_at) }}</span>
+          <span v-else class="wf-time muted">尚未结束</span>
+        </div>
       </div>
-      <div class="panel-actions">
-        <Button
-          v-if="selectedWorkflow.status === 'running'"
-          kind="danger"
-          size="small"
-          @click="askStopWorkflow(selectedWorkflow.id)"
-        >
-          ⏹ 停止工作流
-        </Button>
-        <Button
-          v-if="canRetrySelection"
-          kind="primary"
-          size="small"
-          :disabled="retrySelectedIds.size === 0 || retrySubmitting"
-          :loading="retrySubmitting"
-          @click="doRetry"
-        >
-          ↻ 重试所选 ({{ retrySelectedIds.size }})
-        </Button>
-        <Button
-          v-if="selectedWorkflow.status === 'stopped'"
-          size="small"
-          :loading="promoteSubmitting"
-          @click="openPromoteDialog"
-        >
-          ▶ 转为数据资产
-        </Button>
-        <span
-          v-if="selectedWorkflow.status === 'stopped' && selectedWorkflow.promoted_count > 0"
-          class="promoted-tag"
-          :title="`已基于此工作流转正 ${selectedWorkflow.promoted_count} 份数据资产`"
-        >
-          已转正 × {{ selectedWorkflow.promoted_count }}
-        </span>
+
+      <div class="wf-actions">
+        <div class="wf-actions-left">
+          <Button
+            v-if="selectedWorkflow.status === 'running'"
+            kind="danger"
+            size="small"
+            @click="askStopWorkflow(selectedWorkflow.id)"
+          >停止工作流</Button>
+          <Button
+            v-if="canRetrySelection"
+            kind="primary"
+            size="small"
+            :disabled="retrySelectedIds.size === 0 || retrySubmitting"
+            :loading="retrySubmitting"
+            @click="doRetry"
+          >重试所选 ({{ retrySelectedIds.size }})</Button>
+        </div>
+        <div class="wf-actions-right">
+          <Button
+            v-if="selectedWorkflow.status === 'stopped'"
+            size="small"
+            :loading="promoteSubmitting"
+            @click="openPromoteDialog"
+          >转为数据资产</Button>
+        </div>
       </div>
       <div v-if="reconvertError" class="error-banner">
         <span>重新转换失败：{{ reconvertError }}</span>
@@ -1158,10 +1177,59 @@ watch(() => sources.value, (list) => {
   margin-bottom: 12px;
 }
 .panel-header h3 { margin: 0; font-size: 16px; }
-.panel-actions {
+.wf-status-strip {
   display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-soft);
+  gap: 16px;
+}
+.wf-status-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+.wf-status-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.wf-time { color: var(--text-secondary); }
+.wf-time.muted { color: var(--text-muted); font-style: italic; }
+.wf-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.wf-counts strong {
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+.wf-counts .text-success { color: #2e7d32; }
+.wf-counts .has-failed { color: var(--danger, #d64545); }
+.wf-counts .dot-sep { color: var(--text-muted); opacity: 0.55; }
+.wf-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 8px;
   margin-bottom: 12px;
+}
+.wf-actions-left, .wf-actions-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 .preview {
   max-width: 320px;
