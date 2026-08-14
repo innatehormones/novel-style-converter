@@ -222,6 +222,10 @@ function onThClick(column: any) {
   border-bottom: 1px solid var(--border-soft);
   text-align: left;
   vertical-align: middle;
+  /* table-layout: fixed 下 width 默认是 content-box,会让 12px 左右 padding 把 cell
+     撑大 24px(列宽 ≠ 设定值)。改成 border-box 后,widths 真正就是 cell 总宽,
+     pick 这种窄列(checkbox + 大 padding)也不会被撑宽。 */
+  box-sizing: border-box;
 }
 .has-max .dt th {
   position: sticky;
