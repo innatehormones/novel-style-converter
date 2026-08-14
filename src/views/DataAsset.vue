@@ -176,10 +176,13 @@ function onBack() {
 .meta-text {
   display: flex;
   align-items: center;
-  gap: 12px;
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+.meta-text span + span::before {
+  content: ' · ';
+  margin-right: 12px;
 }
 .alert {
   margin-top: 12px;
