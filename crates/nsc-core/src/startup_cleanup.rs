@@ -22,6 +22,16 @@ const CLEANUPS: &[(&str, &str)] = &[
         // data_assets CASCADE æ¸ chaptersã
         "DELETE FROM transformation_chapters;DELETE FROM workflow_result_chapters;DELETE FROM workflow_results;DELETE FROM batches;DELETE FROM transformation_novels;DELETE FROM data_assets;DELETE FROM ai_call_logs;",
     ),
+    (
+        // 老版 migration 0023 写的是 `UPDATE chapters SET idx = idx + 1`,
+        // 触发 UNIQUE(data_asset_id, idx) 约束失败、Db::open panic 退出,
+        // 所以迁移修复必须放到 startup_cleanup(在 Db::open 之后跑)。
+        // 两步法:先整体偏移到无冲突区间(10亿),再回退 -999_999_999,等价于 +1。
+        // 偏移值 10亿 + idx 都 < i32::MAX(21.47亿),安全。
+        // 新数据由 commit_data_asset 用 (i + 1) as i32 保证 1-based,无需再迁。
+        "fix_chapter_idx_to_one_based",
+        "UPDATE chapters SET idx = idx + 1000000000;UPDATE chapters SET idx = idx - 999999999;",
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<()> {
