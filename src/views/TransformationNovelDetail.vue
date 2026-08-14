@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useWorkflowsStore } from '../stores/workflows';
 import {
@@ -53,6 +53,24 @@ async function loadTn() {
 const store = useWorkflowsStore();
 
 const activeTab = ref<'chapters' | 'workflows'>('chapters');
+
+/// 章节来源 tab 表格自适应高度:监听 `main.app` 的尺寸变化,实时算出
+/// `main 可用高度 - 表格 div 顶部偏移 - 底部留白`,下限 300px。
+/// 表格内部垂直滚动仍然由 DataTable 的 maxHeight 触发,与此无关。
+const chaptersTableEl = ref<HTMLElement | null>(null);
+const chaptersTableMaxHeight = ref('420px');
+const CHAPTERS_TABLE_MIN_HEIGHT = 300;
+const CHAPTERS_TABLE_BOTTOM_PADDING = 16;
+
+function recalcChaptersTableHeight() {
+  const main = document.querySelector('main.app') as HTMLElement | null;
+  const tableEl = chaptersTableEl.value;
+  if (main === null || tableEl === null) return;
+  const mainRect = main.getBoundingClientRect();
+  const tableRect = tableEl.getBoundingClientRect();
+  const available = main.clientHeight - (tableRect.top - mainRect.top);
+  chaptersTableMaxHeight.value = `${Math.max(CHAPTERS_TABLE_MIN_HEIGHT, available - CHAPTERS_TABLE_BOTTOM_PADDING)}px`;
+}
 
 /// 章节来源 tab 表格列(TanStack format)
 const sourceColumns = [
@@ -438,6 +456,9 @@ async function loadAll() {
   ]);
 }
 
+/// main.app 尺寸变化 → 重算章节来源表格高度。
+let mainResizeObserver: ResizeObserver | null = null;
+
 /// 章节来源表格表头全选/全不选。
 function onToggleAll(e: Event) {
   const checked = (e.target as HTMLInputElement).checked;
@@ -465,10 +486,28 @@ let pollHandle: number | null = null;
 onMounted(async () => {
   await loadAll();
   pollHandle = window.setInterval(() => { void store.loadByTn(tnId.value); }, 5000);
+  // 等 sources 首次渲染到 DOM,再算一次;之后由 ResizeObserver 跟踪 main 尺寸变化。
+  await nextTick();
+  recalcChaptersTableHeight();
+  const main = document.querySelector('main.app');
+  if (main !== null) {
+    mainResizeObserver = new ResizeObserver(() => recalcChaptersTableHeight());
+    mainResizeObserver.observe(main);
+  }
 });
 
 onUnmounted(() => {
   if (pollHandle !== null) window.clearInterval(pollHandle);
+  if (mainResizeObserver !== null) {
+    mainResizeObserver.disconnect();
+    mainResizeObserver = null;
+  }
+});
+
+/// sources 数量变化(数据加载完 / 切 tab 后重新显示)也会影响表格 div 在 main 内的位置,
+/// 等 DOM 更新后重算一次。
+watch([() => sources.value.length, activeTab], () => {
+  void nextTick(() => recalcChaptersTableHeight());
 });
 
 watch(() => workflows.value, (list) => {
@@ -539,16 +578,17 @@ watch(() => sources.value, (list) => {
           新建工作流 ({{ selectedCount }} 章）
         </Button>
       </div>
-      <DataTable
-        v-if="sources.length > 0"
-        :columns="sourceColumns"
-        :data="sources"
-        :row-key="(row: SourceChapterRow) => row.chapter_id"
-        :widths="sourceWidths"
-        :numeric-columns="['idx', 'words', 'result_count']"
-        max-height="420px"
-        empty-text="暂无章节"
-      >
+      <div ref="chaptersTableEl" class="chapters-table-wrap">
+        <DataTable
+          v-if="sources.length > 0"
+          :columns="sourceColumns"
+          :data="sources"
+          :row-key="(row: SourceChapterRow) => row.chapter_id"
+          :widths="sourceWidths"
+          :numeric-columns="['idx', 'words', 'result_count']"
+          :max-height="chaptersTableMaxHeight"
+          empty-text="暂无章节"
+        >
         <template #header-pick>
           <input
             type="checkbox"
@@ -569,8 +609,9 @@ watch(() => sources.value, (list) => {
         <template #cell-title="{ row }">
           <button class="link-btn" @click="openChapterPanel(row.chapter_id)">{{ row.title }}</button>
         </template>
-      </DataTable>
-      <div v-else class="empty">暂无章节</div>
+        </DataTable>
+        <div v-else class="empty">暂无章节</div>
+      </div>
     </template>
 
     <!-- 工作流 tab -->
