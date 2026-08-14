@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
-import { listDataAssetChapters, listDataAssets as ipcListDataAssets } from '../ipc/commands';
+import { computed, ref, shallowRef } from 'vue';
+import { listDataAssetChapters, listDataAssets as ipcListDataAssets, updateChapterBody } from '../ipc/commands';
 import type { DataAssetChapter } from '../ipc/types';
 import type { ChapterSegment } from '../ipc/types';
 import type { DataAssetRow } from '../ipc/types';
@@ -12,9 +12,19 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
   const parsedAt = ref<string | null>(null);
   const tnCount = ref<number>(0);
   const chapters = ref<ChapterSegment[]>([]);
+  /// 跟 chapters 对齐:章节 db id,update_chapter_body 要用
+  const chapterIds = ref<(number | null)[]>([]);
   const selectedIdx = ref<number | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  /// 编辑态:editing=false 时右侧只读;editing=true 时右侧 textarea,draftContent 是草稿。
+  /// draftContent 用 shallowRef:可能十几 MB,跳过 deep proxy,赋值/读取走原生 string。
+  const editing = ref(false);
+  const draftContent = shallowRef<string>('');
+  /// 进入编辑时锁定的原文,用于 dirty 判断和取消时还原。
+  const editingOriginal = shallowRef<string>('');
+  const editingDirty = ref(false);
+  const saving = ref(false);
   /// 跟 chapters 数组对齐:每条对应章节的 source_kind(给 UI 标签用)。
   const sourceKinds = ref<('transformed' | 'original')[]>([]);
   // 工作流转正相关元数据
@@ -29,7 +39,9 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
     loading.value = true;
     error.value = null;
     chapters.value = [];
+    chapterIds.value = [];
     sourceKinds.value = [];
+    cancelEdit();
     title.value = '';
     filename.value = '';
     parsedAt.value = null;
@@ -50,6 +62,7 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
         content: c.body,
         word_count: c.word_count,
       }));
+      chapterIds.value = chs.map((c: DataAssetChapter) => c.id);
       sourceKinds.value = chs.map((c: DataAssetChapter) => c.source_kind);
       const row: DataAssetRow | undefined = assets.find((a: DataAssetRow) => a.id === id);
       if (row) {
@@ -85,11 +98,72 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
     return chapters.value[i]?.content ?? '';
   });
 
+  /// 派生 da(promoted) 禁编辑:正文要么来自 workflow 转换结果,要么是失败回退的原文,
+  /// 让用户改会破坏"派生 = workflow 整体可交付"语义。
+  const editable = computed(() => kind.value === 'source');
+
+  function enterEdit() {
+    if (!editable.value) return;
+    const c = chapters.value[selectedIdx.value ?? -1];
+    if (!c) return;
+    editingOriginal.value = c.content;
+    draftContent.value = c.content;
+    editingDirty.value = false;
+    editing.value = true;
+  }
+
+  function cancelEdit() {
+    editing.value = false;
+    editingDirty.value = false;
+    draftContent.value = '';
+    editingOriginal.value = '';
+  }
+
+  /// textarea 双向绑定入口:Vue v-model 直接 assign shallowRef 即可,
+  /// 这里顺手更新 dirty(避免模板里再写 computed)。
+  function onDraftInput(next: string) {
+    draftContent.value = next;
+    editingDirty.value = next !== editingOriginal.value;
+  }
+
+  async function saveEdit(): Promise<void> {
+    if (!editing.value || !editable.value) return;
+    const idx = selectedIdx.value;
+    if (idx == null) return;
+    const cid = chapterIds.value[idx];
+    if (cid == null) return;
+    saving.value = true;
+    error.value = null;
+    try {
+      await updateChapterBody(cid, draftContent.value);
+      // 本地同步:按统一口径重算字数,跟后端落库值保持一致
+      chapters.value[idx] = {
+        ...chapters.value[idx],
+        content: draftContent.value,
+        word_count: countWords(draftContent.value),
+      };
+      cancelEdit();
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+    } finally {
+      saving.value = false;
+    }
+  }
+
   return {
     dataAssetId, title, filename, parsedAt, tnCount,
-    chapters, sourceKinds, selectedIdx, selectedContent,
+    chapters, chapterIds, sourceKinds, selectedIdx, selectedContent,
     loading, error,
     kind, sourceWorkflowId, note,
+    editable, editing, draftContent, editingDirty, saving,
     load, selectChapter, selectFirstIfNone,
+    enterEdit, cancelEdit, onDraftInput, saveEdit,
   };
 });
+
+/// 前端兜底用的统一口径字数:跟后端 word::count 一致,saveEdit 落库前本地同步。
+/// word_count() 走 nsc-core 的 word 模块,前端没法直接 import Rust 函数,
+/// 覆盖 Rust is_whitespace 的所有空白字符(space/tab/LF/CR + Unicode 空白)。
+function countWords(text: string): number {
+  return text.replace(/\s/g, '').length;
+}

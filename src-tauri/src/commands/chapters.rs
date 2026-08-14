@@ -133,6 +133,21 @@ pub fn get_chapter(
         .ok_or_else(|| format!("chapter {chapter_id} 不存在"))
 }
 
+/// 单章正文编辑。改 body 同时按 word::count 重算 word_count 落库。
+/// 不动 idx / title / source_kind / source_chapter_id —— 这些是结构字段。
+/// 不校验是否被 workflow 引用：chapter_id 是 FK，引用方(workflow_result_chapters.content)
+/// 是独立 TEXT 列，改源 chapter 不会破坏已落库结果。
+#[tauri::command]
+pub fn update_chapter_body(
+    db: State<'_, Arc<Mutex<Db>>>,
+    chapter_id: i64,
+    body: String,
+) -> Result<(), String> {
+    let db = db.lock().map_err(|e| e.to_string())?;
+    db.chapters().update_body(chapter_id, &body)
+        .map_err(|e| e.to_string())
+}
+
 /// commit 时用：parse.vue 把编辑好的 segments 直接提交，每段是 title + content。
 #[tauri::command]
 pub fn parse_chapters(

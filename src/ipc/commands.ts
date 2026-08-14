@@ -151,6 +151,11 @@ export function parseChapters(dataAssetId: number, segments: ChapterInput[]): Pr
   return invoke<number>('parse_chapters', { dataAssetId, segments });
 }
 
+/** 编辑单章正文：后端同时按统一口径重算 word_count 落库。 */
+export function updateChapterBody(chapterId: number, body: string): Promise<void> {
+  return invoke<void>('update_chapter_body', { chapterId, body });
+}
+
 // ─── Transformation novels ─────────────────────────────────────────────────
 export function listTransformationNovels(dataAssetId?: number): Promise<TransformationNovelSummary[]> {
   return invoke<TransformationNovelSummary[]>('list_transformation_novels', { dataAssetId });

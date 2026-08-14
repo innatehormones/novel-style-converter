@@ -49,6 +49,17 @@ impl<'a> ChapterRepo<'a> {
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
+    /// 编辑单章正文:更新 body 并按统一口径(word::count)重算 word_count。
+    /// 不动 idx / title / source_kind / source_chapter_id —— 这些是结构字段。
+    pub fn update_body(&self, id: i64, new_body: &str) -> Result<()> {
+        let wc = crate::text::word_count(new_body) as i64;
+        self.conn.execute(
+            "UPDATE chapters SET body = ?2, word_count = ?3 WHERE id = ?1",
+            params![id, new_body, wc],
+        )?;
+        Ok(())
+    }
+
     pub fn get(&self, id: i64) -> Result<Option<Chapter>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind              FROM chapters WHERE id = ?1",

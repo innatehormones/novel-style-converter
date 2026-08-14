@@ -46,9 +46,21 @@
       :message="alertMessage"
     />
 
+    <ConfirmDialog
+      v-model:open="dirtyGuardOpen"
+      title="未保存的修改"
+      message="当前章节有未保存的修改,切换会丢弃。继续?"
+      confirm-text="丢弃修改"
+      kind="danger"
+      @confirm="onConfirmDiscard"
+      @cancel="onCancelDiscard"
+    />
+
     <div class="panes">
       <div class="pane">
-        <div class="pane-title">章节 ({{ store.chapters.length }})</div>
+        <div class="pane-header">
+          <div class="pane-title">章节 ({{ store.chapters.length }})</div>
+        </div>
         <RecycleScroller
           v-if="store.chapters.length > 0"
           class="scroller"
@@ -60,7 +72,7 @@
             <div
               class="chap-row"
               :class="{ active: store.selectedIdx === index }"
-              @click="store.selectChapter(index)"
+              @click="onChapterClick(index)"
             >
               <span class="idx">{{ index + 1 }}</span>
               <span class="title">{{ item.title }}</span>
@@ -73,8 +85,38 @@
         <div v-else class="empty">暂无章节</div>
       </div>
       <div class="pane">
-        <div class="pane-title">原文</div>
-        <pre class="content">{{ store.selectedContent }}</pre>
+        <div class="pane-header">
+          <div class="pane-title">原文</div>
+          <div class="pane-actions">
+            <template v-if="store.editing">
+              <span class="editing-tag">编辑中</span>
+              <span class="editing-draft-meta">{{ store.draftContent.length }} 字</span>
+              <Button size="small" :disabled="store.saving" @click="onCancelEdit">取消</Button>
+              <Button
+                size="small"
+                kind="primary"
+                :disabled="!store.editingDirty || store.saving"
+                :loading="store.saving"
+                @click="onSave"
+              >保存</Button>
+            </template>
+            <Button
+              v-else
+              size="small"
+              :disabled="!canEdit"
+              :title="editButtonTitle"
+              @click="onEnterEdit"
+            >编辑</Button>
+          </div>
+        </div>
+        <textarea
+          v-if="store.editing"
+          :value="store.draftContent"
+          class="content content-edit"
+          spellcheck="false"
+          @input="onDraftInput($event)"
+        />
+        <pre v-else class="content">{{ store.selectedContent }}</pre>
       </div>
     </div>
   </section>
@@ -104,9 +146,27 @@ const confirmMessage = computed(() => `确认删除数据资产 "${store.title}"
 const alertOpen = ref(false);
 const alertMessage = ref('');
 
+/// dirty 守卫:章节编辑后切换章节/返回前的拦截
+const dirtyGuardOpen = ref(false);
+const pendingSelectIdx = ref<number | null>(null);
+let pendingNavigation: (() => void) | null = null;
+/// 返回按钮触发的导航,在 beforeRouteLeave 里拦;路由组件卸载前如果 dirty 则走弹窗。
+
 const chaptersWithIdx = computed(() =>
   store.chapters.map((s, idx) => ({ ...s, idx })),
 );
+
+/// 编辑按钮 title:派生资产 / 无章节两种状态
+/// 编辑按钮可点状态：源资产 + 已选章节
+const canEdit = computed(() => store.editable && store.selectedIdx !== null);
+
+/// 编辑按钮 title：各种不可编辑原因的中文说明
+const editButtonTitle = computed(() => {
+  if (store.kind === 'promoted') return '派生资产不可编辑';
+  if (store.chapters.length === 0) return '暂无章节';
+  if (store.selectedIdx === null) return '请先选中章节';
+  return '';
+});
 
 onMounted(async () => {
   const raw = route.params.dataAssetId;
@@ -119,6 +179,19 @@ onMounted(async () => {
   store.selectFirstIfNone();
 });
 
+/// 离开页面前的全局守卫:有 dirty 编辑 → 弹 dirtyGuard,用户确认丢弃才放行
+function tryLeave(next: () => void): boolean {
+  if (!store.editing || !store.editingDirty) return true;
+  pendingNavigation = next;
+  dirtyGuardOpen.value = true;
+  return false;
+}
+
+function onBack() {
+  if (!tryLeave(() => void router.push('/data-assets'))) return;
+  void router.push('/data-assets');
+}
+
 async function onDelete() {
   if (store.tnCount > 0) return;
   confirmOpen.value = true;
@@ -127,6 +200,11 @@ async function onDelete() {
 async function doDelete() {
   const id = store.dataAssetId;
   if (id == null) return;
+  if (!tryLeave(() => void doDeleteActual(id))) return;
+  await doDeleteActual(id);
+}
+
+async function doDeleteActual(id: number) {
   try {
     await library.removeDataAsset(id);
     void router.push('/data-assets');
@@ -136,8 +214,44 @@ async function doDelete() {
   }
 }
 
-function onBack() {
-  void router.push('/data-assets');
+function onEnterEdit() { store.enterEdit(); }
+function onCancelEdit() { store.cancelEdit(); }
+async function onSave() { await store.saveEdit(); }
+function onDraftInput(e: Event) {
+  const t = (e.target as HTMLTextAreaElement).value;
+  store.onDraftInput(t);
+}
+
+function onChapterClick(idx: number) {
+  if (store.editing && store.editingDirty) {
+    pendingSelectIdx.value = idx;
+    dirtyGuardOpen.value = true;
+    return;
+  }
+  if (store.editing) store.cancelEdit();
+  store.selectChapter(idx);
+}
+
+function onConfirmDiscard() {
+  dirtyGuardOpen.value = false;
+  if (pendingSelectIdx.value !== null) {
+    store.cancelEdit();
+    store.selectChapter(pendingSelectIdx.value);
+    pendingSelectIdx.value = null;
+    return;
+  }
+  if (pendingNavigation) {
+    const nav = pendingNavigation;
+    pendingNavigation = null;
+    store.cancelEdit();
+    nav();
+  }
+}
+
+function onCancelDiscard() {
+  dirtyGuardOpen.value = false;
+  pendingSelectIdx.value = null;
+  pendingNavigation = null;
 }
 </script>
 
@@ -212,12 +326,43 @@ function onBack() {
   border-radius: var(--radius-pin);
   overflow: hidden;
 }
-.pane-title {
-  padding: 8px 12px;
+.pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 4px 4px 12px;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+.pane-title {
+  padding: 4px 0;
   font-size: 13px;
   color: var(--text-secondary);
-  flex-shrink: 0;
+}
+.pane-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 8px;
+}
+.editing-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  margin-right: 4px;
+  background: var(--color-cinnabar);
+  color: #faf6ee;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.02em;
+}
+.editing-draft-meta {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-right: 4px;
+  font-variant-numeric: tabular-nums;
 }
 .scroller {
   flex: 1;
@@ -267,6 +412,13 @@ function onBack() {
   word-break: break-word;
   overflow-y: auto;
   color: var(--text-primary);
+  background: var(--color-sheet);
+}
+.content-edit {
+  border: 1px solid var(--color-cinnabar);
+  outline: none;
+  resize: none;
+  border-radius: 4px;
 }
 .empty {
   flex: 1;
