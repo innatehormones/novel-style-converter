@@ -44,7 +44,7 @@ impl<'a> ChapterRepo<'a> {
 
     pub fn list_by_data_asset(&self, data_asset_id: i64) -> Result<Vec<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind              FROM chapters WHERE data_asset_id = ?1 ORDER BY idx ASC",
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind, edited_at              FROM chapters WHERE data_asset_id = ?1 ORDER BY idx ASC",
         )?;
         let rows = stmt.query_map(params![data_asset_id], chapter_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
