@@ -160,14 +160,14 @@ impl JobQueue {
 }
 
 pub struct Prep {
-    transformation_novel: TransformationNovel,
-    chapter: crate::models::Chapter,
-    chapter_content: String,
-    prev_orig: Vec<(String, String)>,
+    pub transformation_novel: TransformationNovel,
+    pub chapter: crate::models::Chapter,
+    pub chapter_content: String,
+    pub prev_orig: Vec<(String, String)>,
     /// 邻章已转换正文 (title, content) 对 —— 真内容在 workflow_result_chapters,
     /// 不再是 tc 行(§3.3)。
-    prev_tx: Vec<(String, String)>,
-    next_orig: Vec<(String, String)>,
+    pub prev_tx: Vec<(String, String)>,
+    pub next_orig: Vec<(String, String)>,
 }
 
 struct Final {

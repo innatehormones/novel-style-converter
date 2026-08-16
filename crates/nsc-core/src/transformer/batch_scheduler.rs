@@ -28,6 +28,7 @@ use crate::transformer::{
     DefaultTransformer, JobQueue, JobSpec, ProviderFactory, TransformRequest,
     TransformationNovelContext,
 };
+use crate::transformer::queue::read_context;
 
 pub struct BatchScheduler {
     db_path: PathBuf,
@@ -562,11 +563,14 @@ impl BatchScheduler {
             .ok_or_else(|| Error::NotFound(format!("chapter {chapter_id} 不存在")))?;
         let tn = db.transformation_novels().get(batch.transformation_novel_id)?
             .ok_or_else(|| Error::NotFound(format!("tn {} 不存在", batch.transformation_novel_id)))?;
-        let (prompt_id, model_config_id): (i64, i64) = db.conn.query_row(
-            "SELECT prompt_id, model_config_id FROM transformation_chapters \
+        let (prompt_id, model_config_id, ctx_prev_original, ctx_prev_transformed, ctx_next_original): (
+            i64, i64, i32, i32, i32,
+        ) = db.conn.query_row(
+            "SELECT prompt_id, model_config_id, ctx_prev_original, ctx_prev_transformed, ctx_next_original \
+             FROM transformation_chapters \
              WHERE batch_id=?1 AND chapter_id=?2",
             rusqlite::params![batch_id, chapter_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )?;
         let prompt = db.prompts().get(prompt_id)?
             .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
@@ -582,15 +586,28 @@ impl BatchScheduler {
         let preview_id = db.chapter_previews()
             .insert_generating(batch_id, chapter_id, custom_input.as_deref())?;
 
+        let job = JobSpec {
+            tc_id: preview_id,
+            tn_id: batch.transformation_novel_id,
+            mode: prompt.kind,
+            chapter: chapter.clone(),
+            prompt: prompt.clone(),
+            model_config: model.clone(),
+            ctx_prev_original,
+            ctx_prev_transformed,
+            ctx_next_original,
+        };
+        let prep = read_context(&db, &job).map_err(|e| Error::Other(e))?;
+
         let req = TransformRequest {
             transformation_id: batch.transformation_novel_id,
-            chapter: chapter.clone(),
-            chapter_content: chapter.body.clone(),
+            chapter: prep.chapter,
+            chapter_content: prep.chapter_content,
             novel_context: TransformationNovelContext {
-                transformation_novel: tn.clone(),
-                prev_original: Vec::new(),
-                prev_transformed: Vec::new(),
-                next_original: Vec::new(),
+                transformation_novel: prep.transformation_novel,
+                prev_original: prep.prev_orig,
+                prev_transformed: prep.prev_tx,
+                next_original: prep.next_orig,
             },
             prompt: prompt.clone(),
             model_config: model.clone(),
