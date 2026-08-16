@@ -82,12 +82,22 @@
       </section>
     </div>
   </Dialog>
+
+    <ConfirmDialog
+      v-model:open="commitConfirmOpen"
+      title="确认替换"
+      message="确认将草稿内容写入该章节的转换结果？此操作不可撤销。"
+      confirm-text="确认替换"
+      cancel-text="取消"
+      @confirm="doCommit"
+    />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
+import ConfirmDialog from './ui/ConfirmDialog.vue';
 import { getChapter as ipcGetChapter } from '../ipc/commands';
 import { useWorkflowsStore } from '../stores/workflows';
 import type { ChapterPreviewRow, PreviewStatus, SourceChapterRow } from '../ipc/types';
@@ -116,6 +126,7 @@ const origTab = ref<OrigTab>('cur');
 const selectedPreviewId = ref<number | null>(null);
 const generating = ref(false);
 const committing = ref(false);
+const commitConfirmOpen = ref(false);
 const discarding = ref(false);
 const lastError = ref<string | null>(null);
 const originalBody = ref('');
@@ -181,7 +192,7 @@ watch(open, async (v) => {
   } catch (e: unknown) {
     lastError.value = e instanceof Error ? e.message : String(e);
   }
-});
+}, { immediate: true });
 
 watch(origTab, async (tab) => {
   if (!open.value) return;
@@ -231,9 +242,12 @@ function onUsePreview(): void {
   else draftContent.value = content;
 }
 
-async function onCommit(): Promise<void> {
+function onCommit(): void {
   if (!canCommit.value) return;
-  if (!window.confirm('确认将草稿内容写入该章节的转换结果？此操作不可撤销。')) return;
+  commitConfirmOpen.value = true;
+}
+
+async function doCommit(): Promise<void> {
   committing.value = true;
   lastError.value = null;
   try {
