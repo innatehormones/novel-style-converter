@@ -1,21 +1,26 @@
-import { computed, ref, watch, type Ref } from 'vue';
+import { computed, ref, toValue, watch, type MaybeRefOrGetter } from 'vue';
 
 export interface SearchableLine {
   line: number;
   text: string;
 }
 
+/// 章节内搜索组合式。
+///
+/// 参数接受 `MaybeRefOrGetter`:调用方可以传 ref(从 storeToRefs/toRef 拿到的真 ref)
+/// 也可以传 getter(`() => store.rawLines` 这种)。Pinia setup store 字段会自动 unwrap,
+/// 直接传 store 字段会拿到裸值,失去响应性 —— 用 getter 形式绕开这个问题。
 export function useChapterSearch(
-  query: Ref<string>,
-  lines: Ref<readonly SearchableLine[]>,
+  query: MaybeRefOrGetter<string>,
+  lines: MaybeRefOrGetter<readonly SearchableLine[]>,
 ) {
   const currentHitCursor = ref(0);
 
   const hitLineIndices = computed<number[]>(() => {
-    const q = query.value;
+    const q = toValue(query);
     if (!q) return [];
     const out: number[] = [];
-    const arr = lines.value;
+    const arr = toValue(lines);
     for (let i = 0; i < arr.length; i++) {
       if (arr[i].text.includes(q)) out.push(i);
     }
@@ -23,8 +28,10 @@ export function useChapterSearch(
   });
 
   // 查询或行集合变化 → 把游标重置到第一个命中。
+  // watch 源用 getter 形式:即便调用方传入裸数组,Vue 也能正确把它视作 watchable getter;
+  // 传入 ref/getter 时,Vue 会自动追踪内部响应性(无需传 Ref 类型强约束)。
   watch(
-    [query, lines],
+    [() => toValue(query), () => toValue(lines)],
     () => {
       currentHitCursor.value = 0;
     },

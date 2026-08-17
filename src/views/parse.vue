@@ -208,7 +208,7 @@ const searchQueryRef = computed({
   get: () => store.searchQuery,
   set: (v: string) => store.setSearchQuery(v),
 });
-const search = useChapterSearch(searchQueryRef as unknown as import('vue').Ref<string>, store.rawLines);
+const search = useChapterSearch(searchQueryRef, () => store.rawLines);
 const { hitLineIndices, hitCount, currentHitLineIndex, next, prev } = search;
 const hitLineIndicesSet = computed(() => new Set(hitLineIndices.value));
 
