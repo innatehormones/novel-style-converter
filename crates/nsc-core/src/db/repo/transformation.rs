@@ -1,3 +1,4 @@
+use std::sync::MutexGuard;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, Row};
 
@@ -6,7 +7,7 @@ use crate::models::{
     NewTransformationChapter, PromptKind, TransformationChapter, TransformStatus,
 };
 
-pub struct TransformationChapterRepo<'a> { pub(crate) conn: &'a Connection }
+pub struct TransformationChapterRepo<'a> { pub(crate) conn: MutexGuard<'a, Connection> }
 
 impl<'a> TransformationChapterRepo<'a> {
     pub fn insert(&self, t: &NewTransformationChapter) -> Result<i64> {

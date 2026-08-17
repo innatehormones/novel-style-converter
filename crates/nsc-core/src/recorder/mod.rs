@@ -20,7 +20,7 @@
 //! - **embed 在哪里调用** 是 Phase 2 的事:`DefaultTransformer::transform` 与
 //!   `commands::models::test_model` 还没接 recorder,等下一轮。
 
-use std::path::PathBuf;
+use crate::db::Db;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
@@ -122,10 +122,10 @@ impl AiCallRecorder for ChannelRecorder {
 /// 这点很重要:`src-tauri/lib.rs::run()` 是 builder 同步阶段,.run() 之前还没有 tokio
 /// reactor,直接 `tokio::spawn` 会 panic `there is no reactor running`。
 ///
-/// DB handle 不在 hot path 出现,完全在 background task 内按路径重开:
-/// 这样 transformer / test_model 不持有 DB,跨线程安全 + 没有 Send/Sync 摩擦。
+/// DB handle 是跨线程共享的 Arc<Db>(见 db::pool) —— main / worker / notifier 都持有同一份,
+/// recorder writer 也复用同一份,不再按 path 重开连接,无 SQLITE_BUSY。
 pub fn spawn_writer(
-    db_path: PathBuf,
+    db: Arc<Db>,
     recorder: ChannelRecorder,
     mut rx: mpsc::Receiver<AiCallEvent>,
 ) -> std::thread::JoinHandle<()> {
@@ -140,27 +140,22 @@ pub fn spawn_writer(
                 return;
             }
         };
-        rt.block_on(run_writer(db_path, &mut rx, &recorder));
+        rt.block_on(run_writer(db, &mut rx, &recorder));
     })
 }
 
 /// 真正的 background loop —— `spawn_writer` 包了 `tokio::spawn`,这里直接 `await`。
-pub async fn run_writer(db_path: PathBuf, rx: &mut mpsc::Receiver<AiCallEvent>, recorder: &ChannelRecorder) {
+pub async fn run_writer(db: Arc<Db>, rx: &mut mpsc::Receiver<AiCallEvent>, recorder: &ChannelRecorder) {
     while let Some(event) = rx.recv().await {
-        if let Err(e) = write_one(&db_path, &event).await {
+        if let Err(e) = write_one(&db, &event).await {
             eprintln!("[recorder] insert failed: {e}");
         }
         recorder.record_done();
     }
 }
 
-async fn write_one(db_path: &PathBuf, event: &AiCallEvent) -> Result<()> {
-    use crate::db::Db;
+async fn write_one(db: &Arc<Db>, event: &AiCallEvent) -> Result<()> {
     use crate::db::repo::truncate_preview;
-    // Db::open 内部跑 migrate(已应用版本直接 skip),对每次 write 重开一连接
-    // 代价 = 每次 syscall + prepared statement 缓存丢失
-    // 但 DB 在本机 + WAL 模式下,200μs 级别,background 路径可接受。
-    let db = Db::connect(db_path)?;
     let (sys_prev, sys_size) = truncate_preview(&event.system_full);
     let (user_prev, user_size) = truncate_preview(&event.user_full);
     let (resp_prev, resp_size) = truncate_preview(&event.response_full);

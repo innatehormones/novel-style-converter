@@ -15,7 +15,7 @@ use crate::transformer::{
 
 use super::job::SharedQueue;
 
-pub type DbFactory = Arc<dyn Fn() -> Result<Db> + Send + Sync>;
+pub type DbFactory = Arc<dyn Fn() -> Result<Arc<Db>> + Send + Sync>;
 pub type ProviderFactory = Arc<dyn Fn(&ModelConfig) -> Box<dyn AiProvider> + Send + Sync>;
 /// 队列状态变更回调。`(tid, success, error, content)`:
 /// - `enqueue` → `(tid, false, None, "")`
@@ -54,8 +54,7 @@ impl JobQueue {
         provider_factory: P,
         recorder: Arc<dyn AiCallRecorder>,
     ) -> Self
-    where
-        F: Fn() -> Result<Db> + Send + Sync + 'static,
+    where F: Fn() -> Result<Arc<Db>> + Send + Sync + 'static,
         P: Fn(&ModelConfig) -> Box<dyn AiProvider> + Send + Sync + 'static,
     {
         assert!(workers >= 1, "at least 1 worker");
@@ -188,13 +187,13 @@ enum DbWrite {
 
 async fn run_job(
     shared: super::job::Shared,
-    db: Db,
+    db: Arc<Db>,
     ai: Arc<dyn AiProvider>,
     sem: Arc<tokio::sync::Semaphore>,
     job: JobSpec,
     notify: NotifySlot,
     recorder: Arc<dyn AiCallRecorder>,
-) -> Db {
+) -> Arc<Db> {
     let tid = job.tc_id;
     let chapter_title = job.chapter.title.clone();
     let chapter_idx = job.chapter.idx;
@@ -266,7 +265,7 @@ async fn run_job(
 
 /// 同步读所有 job 上下文:从 uploads.original_text 切片 chapter / 邻章正文。
 /// 通过 tid 反查 transformation_novel_id(避免 caller 多传字段)。
-pub fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
+pub fn read_context(db: &Arc<Db>, job: &JobSpec) -> StdResult<Prep, String> {
     let cid = job.chapter.id;
     let idx = job.chapter.idx;
     let data_asset_id = job.chapter.data_asset_id;
@@ -336,7 +335,7 @@ pub fn read_context(db: &Db, job: &JobSpec) -> StdResult<Prep, String> {
 }
 
 fn apply_result(
-    db: &Db,
+    db: &Arc<Db>,
     tid: i64,
     chapter_title: String,
     chapter_idx: i32,

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -91,10 +91,9 @@ pub(crate) fn join_chapter_info(
 
 #[tauri::command]
 pub fn list_transformation_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     transformation_novel_id: i64,
 ) -> Result<Vec<TransformationChapterRow>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let tn = db
         .transformation_novels()
         .get(transformation_novel_id)
@@ -109,10 +108,9 @@ pub fn list_transformation_chapters(
 
 #[tauri::command]
 pub fn list_transformation_chapters_for_chapter(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     chapter_id: i64,
 ) -> Result<Vec<TransformationChapterRow>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let ch = db
         .chapters()
         .get(chapter_id)
@@ -133,7 +131,7 @@ pub fn list_transformation_chapters_for_chapter(
 /// 返回所有新 `transformation_chapter.id` 的顺序列表。
 #[tauri::command]
 pub fn enqueue_transformation_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     queue: State<'_, Arc<JobQueue>>,
     payload: EnqueuePayload,
 ) -> Result<Vec<i64>, String> {
@@ -141,7 +139,7 @@ pub fn enqueue_transformation_chapters(
         return Ok(vec![]);
     }
     let (tn, prompt, model_cfg) = {
-        let db = db.lock().map_err(|e| e.to_string())?;
+
         let tn = db
             .transformation_novels()
             .get(payload.transformation_novel_id)
@@ -165,7 +163,7 @@ pub fn enqueue_transformation_chapters(
     let mut ids = Vec::with_capacity(payload.chapter_ids.len());
     let mut jobs: Vec<JobSpec> = Vec::with_capacity(payload.chapter_ids.len());
     {
-        let db = db.lock().map_err(|e| e.to_string())?;
+
         for chapter_id in &payload.chapter_ids {
             let chapter = db
                 .chapters()
@@ -223,12 +221,12 @@ pub fn enqueue_transformation_chapters(
 /// 落库 + 入队流程)。返回新 `transformation_chapter.id` 列表(按 idx 顺序)。
 #[tauri::command]
 pub fn enqueue_all_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     queue: State<'_, Arc<JobQueue>>,
     payload: EnqueueAllPayload,
 ) -> Result<Vec<i64>, String> {
     let chapter_ids: Vec<i64> = {
-        let db = db.lock().map_err(|e| e.to_string())?;
+
         let tn = db
             .transformation_novels()
             .get(payload.transformation_novel_id)

@@ -1,3 +1,4 @@
+use std::sync::MutexGuard;
 use rusqlite::{params, Connection, Row};
 
 use crate::error::Result;
@@ -15,7 +16,7 @@ pub struct PromptUpdate<'a> {
     pub template: &'a str,
 }
 
-pub struct PromptRepo<'a> { pub(crate) conn: &'a Connection }
+pub struct PromptRepo<'a> { pub(crate) conn: MutexGuard<'a, Connection> }
 
 impl<'a> PromptRepo<'a> {
     /// 默认列表:仅返回 `archived = 0` 的活动行(UI 主表格)。

@@ -1,9 +1,10 @@
+use std::sync::MutexGuard;
 use rusqlite::{params, Connection, Row};
 
 use crate::error::Result;
 use crate::models::{Chapter, NewChapter};
 
-pub struct ChapterRepo<'a> { pub(crate) conn: &'a Connection }
+pub struct ChapterRepo<'a> { pub(crate) conn: MutexGuard<'a, Connection> }
 
 fn chapter_from_row(row: &Row<'_>) -> rusqlite::Result<Chapter> {
     Ok(Chapter {

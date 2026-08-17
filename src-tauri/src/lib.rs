@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use nsc_core::ai::{AiProvider, OpenAiProvider};
 use nsc_core::db::Db;
@@ -20,10 +20,10 @@ pub fn run() {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let db = Arc::new(Mutex::new(Db::open(&path).expect("failed to open db")));
-    nsc_core::startup_recovery::run(&db.lock().expect("recovery lock").conn)
+    let db = Db::open(&path).expect("failed to open db");
+    nsc_core::startup_recovery::run(&db.lock())
         .expect("startup safe-recovery failed");
-    nsc_core::startup_cleanup::run(&db.lock().expect("cleanup lock").conn)
+    nsc_core::startup_cleanup::run(&db.lock())
         .expect("startup cleanup failed");
 
     // 鈹€鈹€ AI 璋冪敤 recorder 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
@@ -35,7 +35,7 @@ pub fn run() {
     // handle 鐣欑潃 鈥斺€?app 閫€鍑烘椂 sender 琚?drop 鈫?channel 鍏抽棴 鈫?recv 杩斿洖 None
     // 鈫?loop break,鏈€鍚庡嚑琛屾棩蹇楄兘钀藉畬銆備笉涓诲姩 abort,閬垮厤鎴柇銆?
     let (recorder, rx) = ChannelRecorder::new(4096);
-    let _writer_handle = spawn_writer(path.clone(), recorder.clone(), rx);
+    let _writer_handle = spawn_writer(db.clone(), recorder.clone(), rx);
     let recorder: Arc<dyn AiCallRecorder> = Arc::new(recorder);
 
     fn make_provider(cfg: &nsc_core::models::ModelConfig) -> Box<dyn AiProvider> {
@@ -48,15 +48,15 @@ pub fn run() {
         )
     }
 
-    let db_path_for_workers = path.clone();
+    let db_for_workers = db.clone();
     let job_queue = Arc::new(JobQueue::new(
         2,
-        move || Ok(Db::connect(&db_path_for_workers).expect("worker db open")),
+        move || Ok(db_for_workers.clone()),
         make_provider,
         recorder.clone(),
     ));
     let scheduler = Arc::new(BatchScheduler::new(
-        path.clone(),
+        db.clone(),
         job_queue.clone(),
         Arc::new(make_provider),
         recorder.clone(),

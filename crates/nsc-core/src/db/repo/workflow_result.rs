@@ -1,10 +1,11 @@
+use std::sync::MutexGuard;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::error::Result;
 use crate::models::workflow_result::{WorkflowResult, WorkflowResultChapter};
 
-pub struct WorkflowResultRepo<'a> { pub(crate) conn: &'a Connection }
+pub struct WorkflowResultRepo<'a> { pub(crate) conn: MutexGuard<'a, Connection> }
 
 impl<'a> WorkflowResultRepo<'a> {
     /// 在同一事务内创建结果集 + N 个空结果槽;任一失败回滚。

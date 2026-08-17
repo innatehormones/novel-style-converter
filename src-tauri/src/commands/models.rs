@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 use nsc_core::ai::{AiProvider, ChatMessage, ChatRequest, OpenAiProvider, Role};
@@ -10,29 +10,25 @@ use tauri::State;
 
 /// 默认列表(仅 `archived = 0`)。各 dialog 拉模型下拉用。
 #[tauri::command]
-pub fn list_models(db: State<'_, Arc<Mutex<Db>>>) -> Result<Vec<ModelConfig>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn list_models(db: State<'_, Arc<Db>>) -> Result<Vec<ModelConfig>, String> {
     db.model_configs().list(false).map_err(|e| e.to_string())
 }
 
 /// 含归档的列表 —— Models.vue 顶部“显示已归档”开关用。
 #[tauri::command]
-pub fn list_models_including_archived(db: State<'_, Arc<Mutex<Db>>>) -> Result<Vec<ModelConfig>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn list_models_including_archived(db: State<'_, Arc<Db>>) -> Result<Vec<ModelConfig>, String> {
     db.model_configs().list(true).map_err(|e| e.to_string())
 }
 
 /// 软删:`archived = 1` + `api_key = ''`。行保留以便历史 tc / tn 引用解析。
 #[tauri::command]
-pub fn delete_model(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn delete_model(db: State<'_, Arc<Db>>, id: i64) -> Result<(), String> {
     db.model_configs().archive(id).map_err(|e| e.to_string())
 }
 
 /// 取消软删。注意:被抹掉的 `api_key` 不会自动恢复,用户需重新编辑保存。
 #[tauri::command]
-pub fn restore_model(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn restore_model(db: State<'_, Arc<Db>>, id: i64) -> Result<(), String> {
     db.model_configs().restore(id).map_err(|e| e.to_string())
 }
 
@@ -82,8 +78,7 @@ impl ModelConfigDto {
 /// 否则走 update(返回传入的 id)。`ModelConfigDto` 是手写 snake_case DTO
 /// (后端 `#[serde(rename_all = "snake_case")]`),前端调用时内层字段保持 snake_case。
 #[tauri::command]
-pub fn upsert_model(db: State<'_, Arc<Mutex<Db>>>, payload: ModelConfigDto) -> Result<i64, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn upsert_model(db: State<'_, Arc<Db>>, payload: ModelConfigDto) -> Result<i64, String> {
     if payload.id == 0 {
         let new = ModelConfigDto::into_new(payload);
         db.model_configs().insert(&new).map_err(|e| e.to_string())

@@ -1,3 +1,4 @@
+use std::sync::MutexGuard;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Row};
 use serde::Serialize;
@@ -5,7 +6,7 @@ use serde::Serialize;
 use crate::error::Result;
 use crate::models::{Batch, BatchStatus, NewBatch, OnFailurePolicy};
 
-pub struct BatchRepo<'a> { pub(crate) conn: &'a rusqlite::Connection }
+pub struct BatchRepo<'a> { pub(crate) conn: MutexGuard<'a, rusqlite::Connection> }
 
 impl<'a> BatchRepo<'a> {
     /// 插入一条 batch(status='pending')。返回新 id。

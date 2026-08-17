@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Response;
@@ -69,21 +69,19 @@ pub fn read_upload_original_text(u: &Upload) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn list_uploads(db: State<'_, Arc<Mutex<Db>>>) -> Result<Vec<UploadSummary>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn list_uploads(db: State<'_, Arc<Db>>) -> Result<Vec<UploadSummary>, String> {
     let ups = db.uploads().list().map_err(|e| e.to_string())?;
     Ok(ups.iter().map(to_summary).collect())
 }
 
 #[tauri::command]
 pub fn upload_file(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     payload: UploadFilePayload,
 ) -> Result<UploadSummary, String> {
     let dir = uploads_dir();
     let source = PathBuf::from(&payload.file_path);
-    let db_guard = db.lock().map_err(|e| e.to_string())?;
-    let u = upload::upload_file(&db_guard, &source, &payload.filename, &dir)
+    let u = upload::upload_file(&db, &source, &payload.filename, &dir)
         .map_err(|e| e.to_string())?;
     Ok(to_summary(&u))
 }
@@ -93,10 +91,9 @@ pub fn upload_file(
 /// 注意：data_asset 不再被 CASCADE 删除（migration 0015 已断 FK）。
 #[tauri::command]
 pub fn preview_upload_deletion(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     upload_id: i64,
 ) -> Result<UploadDeletePreview, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let u = db.uploads().get(upload_id).map_err(|e| e.to_string())?
         .ok_or_else(|| format!("upload {upload_id} 不存在"))?;
     let derived: Vec<DataAssetRef> = {
@@ -122,8 +119,7 @@ pub fn preview_upload_deletion(
 /// 直接删除 upload + 文件。FK 已断，data_asset 不会被带走。
 /// 前端在弹窗预览后用户确认后调用此命令。
 #[tauri::command]
-pub fn delete_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn delete_upload(db: State<'_, Arc<Db>>, id: i64) -> Result<(), String> {
     let u = db.uploads().get(id).map_err(|e| e.to_string())?
         .ok_or_else(|| format!("upload {id} 不存在"))?;
     let _ = std::fs::remove_file(&u.file_path);
@@ -131,17 +127,15 @@ pub fn delete_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub fn get_upload(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<UploadSummary, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn get_upload(db: State<'_, Arc<Db>>, id: i64) -> Result<UploadSummary, String> {
     let u = db.uploads().get(id).map_err(|e| e.to_string())?
         .ok_or_else(|| format!("upload {id} 不存在"))?;
     Ok(to_summary(&u))
 }
 
 #[tauri::command]
-pub fn get_upload_text(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<Response, String> {
+pub fn get_upload_text(db: State<'_, Arc<Db>>, id: i64) -> Result<Response, String> {
     let text = {
-        let db = db.lock().map_err(|e| e.to_string())?;
         let u = db.uploads().get(id).map_err(|e| e.to_string())?
             .ok_or_else(|| format!("upload {id} 不存在"))?;
         if u.original_text.is_empty() {
@@ -156,11 +150,10 @@ pub fn get_upload_text(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<Respons
 /// 注意：不影响已存在的 data_asset（它们有独立 source_filename 副本 + chapter.body）。
 #[tauri::command]
 pub fn update_upload_text(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     id: i64,
     text: String,
 ) -> Result<(), String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     if db.uploads().get(id).map_err(|e| e.to_string())?.is_none() {
         return Err(format!("upload {id} 不存在"));
     }
@@ -173,13 +166,12 @@ pub fn update_upload_text(
 /// 单次返回 ≤ CHUNK_LOAD_STEP 字节,UI 边收边显示,避免一次性渲染 N MB textarea 卡顿。
 #[tauri::command]
 pub fn get_upload_text_chunk(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     id: i64,
     byte_offset: usize,
     byte_length: usize,
 ) -> Result<Response, String> {
     let text = {
-        let db = db.lock().map_err(|e| e.to_string())?;
         let u = db.uploads().get(id).map_err(|e| e.to_string())?
             .ok_or_else(|| format!("upload {id} 不存在"))?;
         if u.original_text.is_empty() {

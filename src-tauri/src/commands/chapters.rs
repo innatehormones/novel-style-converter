@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -42,13 +42,13 @@ pub struct ChapterInput {
 /// + suppressed（章节 idx），返回 ChapterSegment 列表直接展示。
 #[tauri::command]
 pub fn list_chapter_segments(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     upload_id: i64,
     markers: Option<Vec<i64>>,
     suppressed: Option<Vec<i64>>,
 ) -> Result<Vec<ChapterSegment>, String> {
     let text = {
-        let db = db.lock().map_err(|e| e.to_string())?;
+
         let u = db.uploads().get(upload_id).map_err(|e| e.to_string())?
             .ok_or_else(|| format!("upload {upload_id} 不存在"))?;
         crate::commands::uploads::read_upload_original_text(&u)?
@@ -77,10 +77,9 @@ pub fn list_chapter_segments(
 /// 已提交章节列表（data_asset 视角）。
 #[tauri::command]
 pub fn get_chapter_contents(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     data_asset_id: i64,
 ) -> Result<Vec<ChapterContentRow>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let chapters = db.chapters().list_by_data_asset(data_asset_id).map_err(|e| e.to_string())?;
     Ok(chapters.into_iter().map(|c| ChapterContentRow {
         idx: c.idx,
@@ -93,10 +92,9 @@ pub fn get_chapter_contents(
 /// 兼容老 parse.vue / dataAsset store 的旧字段。
 #[tauri::command]
 pub fn list_committed_segments(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     data_asset_id: i64,
 ) -> Result<Vec<ChapterSegment>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let chapters = db.chapters().list_by_data_asset(data_asset_id).map_err(|e| e.to_string())?;
     Ok(chapters.into_iter().map(|c| ChapterSegment {
         title: c.title,
@@ -108,10 +106,9 @@ pub fn list_committed_segments(
 /// 列出 data_asset 下全部章节（含 body），给前端做完整视图。
 #[tauri::command]
 pub fn list_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     data_asset_id: i64,
 ) -> Result<Vec<ChapterMeta>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let chapters = db.chapters().list_by_data_asset(data_asset_id).map_err(|e| e.to_string())?;
     Ok(chapters.into_iter().map(|c| ChapterMeta {
         id: c.id,
@@ -124,10 +121,9 @@ pub fn list_chapters(
 
 #[tauri::command]
 pub fn get_chapter(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     chapter_id: i64,
 ) -> Result<Chapter, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     db.chapters().get(chapter_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("chapter {chapter_id} 不存在"))
@@ -139,11 +135,10 @@ pub fn get_chapter(
 /// 是独立 TEXT 列，改源 chapter 不会破坏已落库结果。
 #[tauri::command]
 pub fn update_chapter_body(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     chapter_id: i64,
     body: String,
 ) -> Result<(), String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     db.chapters().update_body(chapter_id, &body)
         .map_err(|e| e.to_string())
 }
@@ -151,7 +146,7 @@ pub fn update_chapter_body(
 /// commit 时用：parse.vue 把编辑好的 segments 直接提交，每段是 title + content。
 #[tauri::command]
 pub fn parse_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     data_asset_id: i64,
     segments: Vec<ChapterInput>,
 ) -> Result<usize, String> {
@@ -166,7 +161,6 @@ pub fn parse_chapters(
             ..Default::default()
         }
     }).collect();
-    let db = db.lock().map_err(|e| e.to_string())?;
     let n = db.chapters().replace_all_for_data_asset(data_asset_id, &new_chapters)
         .map_err(|e| e.to_string())?;
     Ok(n)

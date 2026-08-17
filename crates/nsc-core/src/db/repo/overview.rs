@@ -1,3 +1,4 @@
+use std::sync::MutexGuard;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
@@ -83,7 +84,7 @@ pub struct OverviewStats {
     pub failed_recent_count: i64,
 }
 
-pub struct OverviewRepo<'a> { pub(crate) conn: &'a Connection }
+pub struct OverviewRepo<'a> { pub(crate) conn: MutexGuard<'a, Connection> }
 
 impl<'a> OverviewRepo<'a> {
     /// 单次拉取整张图。5s 轮询时只走这条,避免多次 IPC 往返。
@@ -328,6 +329,8 @@ impl<'a> OverviewRepo<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use crate::db::Db;
     use super::*;
     use crate::models::{
         NewBatch, NewChapter, NewDataAsset,
@@ -335,7 +338,7 @@ mod tests {
         OnFailurePolicy, PromptKind,
     };
 
-    fn fresh_db() -> crate::db::Db {
+    fn fresh_db() -> Arc<Db> {
         let dir = tempfile::tempdir().unwrap();
         crate::db::Db::open(&dir.path().join("test.db")).unwrap()
     }
@@ -371,12 +374,12 @@ mod tests {
 
         // 人为构造 promoted_da(直接 insert,绕过 promotion 需要的 batch 状态等复杂链)
         let now = chrono::Utc::now().to_rfc3339();
-        db.conn.execute(
+        db.lock().execute(
             "INSERT INTO data_assets (upload_id, title, parsed_at, source_filename, kind, source_workflow_id, source_data_asset_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![upload_id, "派生1", now, "f.txt", "promoted", b1, da1_id],
         ).unwrap();
-        let da2_id = db.conn.last_insert_rowid();
+        let da2_id = db.lock().last_insert_rowid();
 
         let tn2_id = db.transformation_novels().insert(&NewTransformationNovel {
             data_asset_id: da2_id, title: "tn2".into(), note: "".into(),
@@ -395,12 +398,12 @@ mod tests {
             ctx_prev_original: 0, ctx_prev_transformed: 0, ctx_next_original: 0,
             batch_id: Some(b2), style_ref_chapter_id: None,
         }).unwrap();
-        db.conn.execute(
+        db.lock().execute(
             "INSERT INTO data_assets (upload_id, title, parsed_at, source_filename, kind, source_workflow_id, source_data_asset_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![upload_id, "派生2", now, "f.txt", "promoted", b2, da2_id],
         ).unwrap();
-        let da3_id = db.conn.last_insert_rowid();
+        let da3_id = db.lock().last_insert_rowid();
         (upload_id, da1_id, da2_id, da3_id, b1, b2)
     }
 

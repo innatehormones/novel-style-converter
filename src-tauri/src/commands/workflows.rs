@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -136,7 +136,7 @@ fn parse_transform_status(s: &str) -> Result<TransformStatus, String> {
 }
 
 fn to_summary(db: &Db, b: &Batch) -> WorkflowSummary {
-    let (done, failed, skipped, total): (i64, i64, i64, i64) = db.conn.query_row(
+    let (done, failed, skipped, total): (i64, i64, i64, i64) = db.lock().query_row(
         "SELECT \
             COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END), 0), \
             COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0), \
@@ -146,7 +146,7 @@ fn to_summary(db: &Db, b: &Batch) -> WorkflowSummary {
         rusqlite::params![b.id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     ).unwrap_or((0, 0, 0, 0));
-    let promoted_count: i64 = db.conn.query_row(
+    let promoted_count: i64 = db.lock().query_row(
         "SELECT COUNT(*) FROM data_assets WHERE source_workflow_id = ?1",
         rusqlite::params![b.id],
         |row| row.get(0),
@@ -169,7 +169,7 @@ fn to_summary(db: &Db, b: &Batch) -> WorkflowSummary {
 
 #[tauri::command]
 pub async fn create_workflow(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     payload: CreateWorkflowPayload,
     scheduler: State<'_, Arc<BatchScheduler>>,
 ) -> Result<WorkflowSummary, String> {
@@ -179,26 +179,23 @@ pub async fn create_workflow(
         .await
         .map_err(|e| format!("create_workflow join: {e}"))?
         .map_err(|e| e.to_string())?;
-    let db = db.lock().map_err(|e| e.to_string())?;
     Ok(to_summary(&db, &res))
 }
 
 #[tauri::command]
 pub fn list_workflows(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     tn_id: i64,
 ) -> Result<Vec<WorkflowSummary>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let batches = db.batches().list_by_tn(tn_id).map_err(|e| e.to_string())?;
     Ok(batches.iter().map(|b| to_summary(&db, b)).collect())
 }
 
 #[tauri::command]
 pub fn get_workflow(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     batch_id: i64,
 ) -> Result<WorkflowSummary, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let b = db.batches().get(batch_id).map_err(|e| e.to_string())?
         .ok_or_else(|| format!("batch {batch_id} 不存在"))?;
     Ok(to_summary(&db, &b))
@@ -206,14 +203,14 @@ pub fn get_workflow(
 
 #[tauri::command]
 pub fn list_workflow_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     batch_id: i64,
 ) -> Result<Vec<WorkflowChapterRow>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let _batch = db.batches().get(batch_id).map_err(|e| e.to_string())?
         .ok_or_else(|| format!("batch {batch_id} 不存在"))?;
 
-    let mut stmt = db.conn.prepare(
+    let _dbg = db.lock();
+    let mut stmt = _dbg.prepare(
         "SELECT tc.id, tc.chapter_id, c.idx, c.title, tc.status, tc.error, wrc.content \
          FROM transformation_chapters tc \
          JOIN chapters c ON c.id = tc.chapter_id \
@@ -253,7 +250,7 @@ fn preview_first_chars(s: &str) -> String {
 
 #[tauri::command]
 pub async fn stop_workflow(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     batch_id: i64,
     scheduler: State<'_, Arc<BatchScheduler>>,
 ) -> Result<WorkflowSummary, String> {
@@ -262,13 +259,12 @@ pub async fn stop_workflow(
         .await
         .map_err(|e| format!("stop_workflow join: {e}"))?
         .map_err(|e| e.to_string())?;
-    let db = db.lock().map_err(|e| e.to_string())?;
     Ok(to_summary(&db, &res))
 }
 
 #[tauri::command]
 pub async fn retry_workflow_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     batch_id: i64,
     chapter_ids: Vec<i64>,
     scheduler: State<'_, Arc<BatchScheduler>>,
@@ -278,19 +274,18 @@ pub async fn retry_workflow_chapters(
         .await
         .map_err(|e| format!("retry_workflow_chapters join: {e}"))?
         .map_err(|e| e.to_string())?;
-    let db = db.lock().map_err(|e| e.to_string())?;
     Ok(to_summary(&db, &res))
 }
 
 #[tauri::command]
 pub fn list_transformation_source_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     tn_id: i64,
 ) -> Result<Vec<SourceChapterRow>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let tn = db.transformation_novels().get(tn_id).map_err(|e| e.to_string())?
         .ok_or_else(|| format!("tn {tn_id} 不存在"))?;
-    let mut stmt = db.conn.prepare(
+    let _dbg = db.lock();
+    let mut stmt = _dbg.prepare(
         "SELECT c.id, c.idx, c.title, c.word_count, \
                 COALESCE((SELECT COUNT(*) FROM workflow_result_chapters wrc \
                     JOIN workflow_results wr ON wr.id = wrc.workflow_result_id \
@@ -319,12 +314,12 @@ pub fn list_transformation_source_chapters(
 
 #[tauri::command]
 pub fn list_chapter_workflow_results(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     tn_id: i64,
     chapter_id: i64,
 ) -> Result<Vec<ChapterWorkflowResultRow>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = db.conn.prepare(
+    let _dbg = db.lock();
+    let mut stmt = _dbg.prepare(
         "SELECT b.id, b.label, b.status, b.ended_at, wrc.content, tc.status \
          FROM batches b \
          JOIN workflow_results wr ON wr.batch_id = b.id \
@@ -382,7 +377,7 @@ pub async fn regenerate_chapter_preview(
 
 #[tauri::command]
 pub fn commit_chapter_preview(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     scheduler: State<'_, Arc<BatchScheduler>>,
     input: CommitPreviewInput,
 ) -> Result<WorkflowSummary, String> {
@@ -393,7 +388,6 @@ pub fn commit_chapter_preview(
         input.draft_content,
         input.source_preview_id,
     ).map_err(|e| e.to_string())?;
-    let db = db.lock().map_err(|e| e.to_string())?;
     Ok(to_summary(&db, &res))
 }
 

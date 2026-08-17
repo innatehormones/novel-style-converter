@@ -1,3 +1,4 @@
+use std::sync::MutexGuard;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
@@ -6,7 +7,7 @@ use rusqlite::{params, Connection, Row};
 use crate::error::Result;
 use crate::models::{ChapterPreviewRow, PreviewStatus};
 
-pub struct ChapterPreviewRepo<'a> { pub(crate) conn: &'a Connection }
+pub struct ChapterPreviewRepo<'a> { pub(crate) conn: MutexGuard<'a, Connection> }
 
 impl<'a> ChapterPreviewRepo<'a> {
     /// 插入一条 status='generating' 的预览行,返回新 id。

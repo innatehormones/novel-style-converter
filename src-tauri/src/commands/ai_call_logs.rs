@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use nsc_core::db::Db;
 use nsc_core::models::{AiCallBusiness, AiCallLogFilter, AiCallStatus};
@@ -36,29 +36,26 @@ impl AiCallLogFilterDto {
 /// 列表:按 filter 过滤,时间倒序。
 #[tauri::command]
 pub fn list_ai_call_logs(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     filter: AiCallLogFilterDto,
 ) -> Result<Vec<nsc_core::models::AiCallLog>, String> {
     let f = filter.into_filter()?;
-    let db = db.lock().map_err(|e| e.to_string())?;
     db.ai_call_logs().list(&f).map_err(|e| e.to_string())
 }
 
 /// 单行详情:UI 详情页拉。
 #[tauri::command]
 pub fn get_ai_call_log(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     id: i64,
 ) -> Result<Option<nsc_core::models::AiCallLog>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     db.ai_call_logs().get(id).map_err(|e| e.to_string())
 }
 
 /// 清空全部日志 —— UI 看板"清空"按钮专用,返回删除行数供 toast。
 #[tauri::command]
 pub fn clear_ai_call_logs(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
 ) -> Result<usize, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     db.ai_call_logs().clear().map_err(|e| e.to_string())
 }

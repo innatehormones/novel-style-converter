@@ -1,3 +1,4 @@
+use std::sync::MutexGuard;
 use rusqlite::{params, params_from_iter, Connection, Row};
 
 use chrono::{DateTime, Utc};
@@ -7,7 +8,7 @@ use crate::models::{AiCallBusiness, AiCallLog, AiCallLogFilter, AiCallStatus, Ne
 
 /// ai_call_logs 表 repo —— 写时直接用 NewAiCallLog;读时返回 AiCallLog。
 /// list(filter) 按时间倒序,带 business / model_config_id / status 三个可选过滤 + limit。
-pub struct AiCallLogRepo<'a> { pub(crate) conn: &'a Connection }
+pub struct AiCallLogRepo<'a> { pub(crate) conn: MutexGuard<'a, Connection> }
 
 /// prompt / response 预览上限 —— 10KB。
 /// 截断的字节数够展示 1-2 屏内容,排查时够定位"是模型没听 prompt 还是参数填错了";

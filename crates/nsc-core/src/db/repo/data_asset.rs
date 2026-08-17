@@ -1,3 +1,4 @@
+use std::sync::MutexGuard;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension, Row};
 
@@ -19,7 +20,7 @@ pub struct DataAssetWithUpload {
     pub promoted_count: i64,
 }
 
-pub struct DataAssetRepo<'a> { pub(crate) conn: &'a rusqlite::Connection }
+pub struct DataAssetRepo<'a> { pub(crate) conn: MutexGuard<'a, rusqlite::Connection> }
 
 fn from_row(row: &Row) -> rusqlite::Result<DataAsset> {
     let parsed_at_s: String = row.get(3)?;
@@ -148,13 +149,14 @@ impl std::error::Error for KindErr {}
 #[cfg(test)]
 mod tests {
     use crate::db::Db;
+    use std::sync::Arc;
     use crate::models::{
         BatchStatus, DataAssetKind, NewBatch, NewChapter, NewDataAsset,
         NewTransformationChapter, NewTransformationNovel, NewUpload,
         OnFailurePolicy, PromptKind,
     };
 
-    fn fresh_db() -> Db {
+    fn fresh_db() -> Arc<Db> {
         let dir = tempfile::tempdir().unwrap();
         Db::open(&dir.path().join("test.db")).unwrap()
     }

@@ -1,9 +1,10 @@
+use std::sync::MutexGuard;
 use rusqlite::{params, Connection, Row};
 
 use crate::error::Result;
 use crate::models::{ModelConfig, NewModelConfig};
 
-pub struct ModelConfigRepo<'a> { pub(crate) conn: &'a Connection }
+pub struct ModelConfigRepo<'a> { pub(crate) conn: MutexGuard<'a, Connection> }
 
 impl<'a> ModelConfigRepo<'a> {
     pub fn insert(&self, m: &NewModelConfig) -> Result<i64> {

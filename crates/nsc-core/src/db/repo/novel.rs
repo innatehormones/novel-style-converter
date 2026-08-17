@@ -1,10 +1,11 @@
+use std::sync::MutexGuard;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Row};
 
 use crate::error::Result;
 use crate::models::{NewTransformationNovel, NewUpload, TransformationNovel, Upload};
 
-pub struct UploadRepo<'a> { pub(crate) conn: &'a rusqlite::Connection }
+pub struct UploadRepo<'a> { pub(crate) conn: MutexGuard<'a, rusqlite::Connection> }
 
 impl<'a> UploadRepo<'a> {
     pub fn insert(&self, u: &NewUpload) -> Result<i64> {
@@ -131,7 +132,7 @@ fn from_row(row: &Row) -> rusqlite::Result<Upload> {
     })
 }
 
-pub struct TransformationNovelRepo<'a> { pub(crate) conn: &'a rusqlite::Connection }
+pub struct TransformationNovelRepo<'a> { pub(crate) conn: MutexGuard<'a, rusqlite::Connection> }
 
 impl<'a> TransformationNovelRepo<'a> {
     /// 创建 transformation_novel。是否被引用看 `transformation_novels` 真实行,

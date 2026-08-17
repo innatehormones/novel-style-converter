@@ -1,9 +1,10 @@
+use std::sync::MutexGuard;
 use chrono::Utc;
 use rusqlite::params;
 use crate::error::{Error, Result};
 use crate::models::{DataAsset, DataAssetKind};
 
-pub struct PromotionRepo<'a> { pub(crate) conn: &'a rusqlite::Connection }
+pub struct PromotionRepo<'a> { pub(crate) conn: MutexGuard<'a, rusqlite::Connection> }
 
 impl<'a> PromotionRepo<'a> {
     /// 从一个 Stopped workflow 派生新的 promoted data_asset + N 个 chapter。
@@ -180,13 +181,14 @@ impl std::error::Error for KindErr {}
 #[cfg(test)]
 mod tests {
     use crate::db::Db;
+    use std::sync::Arc;
     use crate::models::{
         BatchStatus, DataAssetKind, NewBatch, NewChapter, NewDataAsset,
         NewTransformationChapter, NewTransformationNovel, NewUpload,
         OnFailurePolicy, PromptKind,
     };
 
-    fn fresh_db() -> Db {
+    fn fresh_db() -> Arc<Db> {
         let dir = tempfile::tempdir().unwrap();
         Db::open(&dir.path().join("test.db")).unwrap()
     }

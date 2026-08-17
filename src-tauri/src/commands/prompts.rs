@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use nsc_core::db::repo::prompt::PromptUpdate;
 use nsc_core::db::Db;
@@ -8,21 +8,18 @@ use tauri::State;
 
 /// 默认列表(仅 `archived = 0`)。各 dialog 拉 prompt 下拉用。
 #[tauri::command]
-pub fn list_prompts(db: State<'_, Arc<Mutex<Db>>>) -> Result<Vec<Prompt>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn list_prompts(db: State<'_, Arc<Db>>) -> Result<Vec<Prompt>, String> {
     db.prompts().list(false).map_err(|e| e.to_string())
 }
 
 /// 含归档的列表 —— Prompts.vue "显示已归档"开关用。
 #[tauri::command]
-pub fn list_prompts_including_archived(db: State<'_, Arc<Mutex<Db>>>) -> Result<Vec<Prompt>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn list_prompts_including_archived(db: State<'_, Arc<Db>>) -> Result<Vec<Prompt>, String> {
     db.prompts().list(true).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn get_prompt(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<Prompt, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn get_prompt(db: State<'_, Arc<Db>>, id: i64) -> Result<Prompt, String> {
     db.prompts()
         .get(id)
         .map_err(|e| e.to_string())?
@@ -42,10 +39,9 @@ pub struct PromptInput {
 
 #[tauri::command]
 pub fn upsert_prompt(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     payload: PromptInput,
 ) -> Result<i64, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     if payload.id == 0 {
         let new = Prompt {
             id: 0,
@@ -81,23 +77,20 @@ pub fn upsert_prompt(
 /// 软删:`archived = 1`。builtin 行可被软删(seed_builtin_if_empty 看到 archived=1
 /// 仍算 count >= 1,不再种入)。
 #[tauri::command]
-pub fn delete_prompt(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn delete_prompt(db: State<'_, Arc<Db>>, id: i64) -> Result<(), String> {
     db.prompts().archive(id).map_err(|e| e.to_string())
 }
 
 /// 取消软删:恢复 `archived = 0`。
 #[tauri::command]
-pub fn restore_prompt(db: State<'_, Arc<Mutex<Db>>>, id: i64) -> Result<(), String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn restore_prompt(db: State<'_, Arc<Db>>, id: i64) -> Result<(), String> {
     db.prompts().restore(id).map_err(|e| e.to_string())
 }
 
 /// 统计 prompt 被 `transformation_chapters` 引用的次数。
 /// 前端删除 prompt 前展示"被 N 个转换结果引用",N=0 不展示。
 #[tauri::command]
-pub fn count_prompt_usage(db: State<'_, Arc<Mutex<Db>>>, prompt_id: i64) -> Result<i64, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
+pub fn count_prompt_usage(db: State<'_, Arc<Db>>, prompt_id: i64) -> Result<i64, String> {
     db.prompts()
         .count_by_prompt(prompt_id)
         .map_err(|e| e.to_string())

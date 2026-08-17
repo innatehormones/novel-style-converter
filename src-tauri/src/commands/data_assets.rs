@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde::Serialize;
 use tauri::State;
@@ -35,10 +35,9 @@ impl From<&Chapter> for DataAssetChapter {
 
 #[tauri::command]
 pub fn list_data_asset_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     data_asset_id: i64,
 ) -> Result<Vec<DataAssetChapter>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let chapters = db.chapters().list_by_data_asset(data_asset_id).map_err(|e| e.to_string())?;
     Ok(chapters.iter().map(DataAssetChapter::from).collect())
 }
@@ -50,7 +49,7 @@ pub fn list_data_asset_chapters(
 /// 允许同一 upload 创建多个 data_asset（不同清洗/不同切分）。
 #[tauri::command]
 pub fn commit_data_asset(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     upload_id: i64,
     title: String,
     chapters: Vec<crate::commands::chapters::ChapterInput>,
@@ -59,7 +58,6 @@ pub fn commit_data_asset(
     if title.is_empty() {
         return Err("标题不能为空".into());
     }
-    let db = db.lock().map_err(|e| e.to_string())?;
 
     let upload = db.uploads().get(upload_id).map_err(|e| e.to_string())?
         .ok_or_else(|| format!("upload {upload_id} 不存在"))?;
@@ -130,9 +128,8 @@ impl From<DataAssetWithUpload> for DataAssetRow {
 
 #[tauri::command]
 pub fn list_data_assets(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
 ) -> Result<Vec<DataAssetRow>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     Ok(db.data_assets().list_with_upload()
         .map_err(|e| e.to_string())?
         .into_iter()
@@ -144,10 +141,9 @@ pub fn list_data_assets(
 /// 路由迁移（router beforeEach）取首条跳到 data_asset 详情。
 #[tauri::command]
 pub fn find_data_asset_by_upload(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     upload_id: i64,
 ) -> Result<Vec<i64>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     Ok(db.data_assets().find_by_upload(upload_id)
         .map_err(|e| e.to_string())?
         .into_iter()
@@ -157,10 +153,9 @@ pub fn find_data_asset_by_upload(
 
 #[tauri::command]
 pub fn delete_data_asset(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     data_asset_id: i64,
 ) -> Result<(), String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     db.data_assets().delete(data_asset_id)
         .map_err(|e| e.to_string())
 }
@@ -169,11 +164,10 @@ pub fn delete_data_asset(
 /// 业务语义:见 spec §5.1 — 单事务,失败回滚。
 #[tauri::command]
 pub fn promote_workflow(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     batch_id: i64,
     title: String,
 ) -> Result<nsc_core::models::DataAsset, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let new_id = db.promotion()
         .create_promoted_from_workflow(batch_id, title)
         .map_err(|e| e.to_string())?;
@@ -185,29 +179,26 @@ pub fn promote_workflow(
 /// 统计指定 workflow 已派生出多少 promoted data_asset。
 #[tauri::command]
 pub fn count_promoted_data_assets_by_workflow(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     batch_id: i64,
 ) -> Result<i64, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     db.promotion().count_by_workflow(batch_id).map_err(|e| e.to_string())
 }
 
 /// 列出指定 workflow 派生的所有 promoted data_asset。
 #[tauri::command]
 pub fn list_promoted_data_assets_for_workflow(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     batch_id: i64,
 ) -> Result<Vec<nsc_core::models::DataAsset>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     db.promotion().list_by_workflow(batch_id).map_err(|e| e.to_string())
 }
 
 /// 列出指定 upload 派生的所有 data_asset(包含 source + promoted)。
 #[tauri::command]
 pub fn list_data_assets_by_upload(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     upload_id: i64,
 ) -> Result<Vec<nsc_core::models::DataAsset>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     db.promotion().list_by_upload(upload_id).map_err(|e| e.to_string())
 }

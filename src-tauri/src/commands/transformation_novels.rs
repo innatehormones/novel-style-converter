@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -60,10 +60,9 @@ fn to_summary(db: &Db, n: &TransformationNovel) -> TransformationNovelSummary {
 
 #[tauri::command]
 pub fn list_transformation_novels(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     data_asset_id: Option<i64>,
 ) -> Result<Vec<TransformationNovelSummary>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let all = match data_asset_id {
         Some(da_id) => db
             .transformation_novels()
@@ -81,10 +80,9 @@ pub fn list_transformation_novels(
 /// 找不到时返回 Err(让前端直接报错,不要静默 fallback)。
 #[tauri::command]
 pub fn get_transformation_novel(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     id: i64,
 ) -> Result<TransformationNovelSummary, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let n = db
         .transformation_novels()
         .get(id)
@@ -98,14 +96,13 @@ pub fn get_transformation_novel(
 /// 返回新 `transformation_novel.id`。
 #[tauri::command]
 pub fn create_transformation_novel(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     payload: CreateTransformationNovelPayload,
 ) -> Result<i64, String> {
     let title = payload.title.trim();
     if title.is_empty() {
         return Err("标题不能为空".into());
     }
-    let db = db.lock().map_err(|e| e.to_string())?;
     let _da = db
         .data_assets()
         .get(payload.data_asset_id)
@@ -122,14 +119,13 @@ pub fn create_transformation_novel(
 
 #[tauri::command]
 pub fn update_transformation_novel(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     payload: UpdateTransformationNovelPayload,
 ) -> Result<(), String> {
     let title = payload.title.trim();
     if title.is_empty() {
         return Err("标题不能为空".into());
     }
-    let db = db.lock().map_err(|e| e.to_string())?;
     let cur = db
         .transformation_novels()
         .get(payload.id)
@@ -147,9 +143,8 @@ pub fn update_transformation_novel(
 
 #[tauri::command]
 pub fn delete_transformation_novel(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     id: i64,
 ) -> Result<(), String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     db.transformation_novels().delete(id).map_err(|e| e.to_string())
 }
