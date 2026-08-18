@@ -458,9 +458,19 @@ function canRetryChapter(c: WorkflowChapterRow): boolean {
 
 const retrySubmitting = ref(false);
 const POLLABLE_STATUSES = new Set(['running']);
+/// 还有 pending/running 章节时也应继续轮询 —— backend 把最后
+/// 一章推到 done 跟 batch 收口到 stopped 之间存在一个微小窗口,
+/// 若只看 workflow.status,5s 父轮询可能抢先看到 batch=stopped
+/// 而把 2s 子轮询关掉,此时 chaptersByBatch 还停在上一轮的旧 running,
+/// UI 就卡在"转换中"。让章节状态也参与判定,子轮询会多跑几轮
+/// 直到 chaptersByBatch 也收敛到终态。
+const ACTIVE_CHAPTER_STATUSES = new Set(['pending', 'running']);
 const isBatchLive = computed<boolean>(() => {
   const s = selectedWorkflow.value;
-  return s !== null && POLLABLE_STATUSES.has(s.status);
+  if (s === null) return false;
+  if (POLLABLE_STATUSES.has(s.status)) return true;
+  const chapters = store.chaptersByBatch.get(s.id) ?? [];
+  return chapters.some((c) => ACTIVE_CHAPTER_STATUSES.has(c.status));
 });
 const canRetrySelection = computed<boolean>(() => {
   const s = selectedWorkflow.value;
