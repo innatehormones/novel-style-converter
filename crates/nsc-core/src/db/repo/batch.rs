@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Row};
 use serde::Serialize;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::models::{Batch, BatchStatus, NewBatch, OnFailurePolicy};
 
 pub struct BatchRepo<'a> { pub(crate) conn: MutexGuard<'a, rusqlite::Connection> }
@@ -76,6 +76,33 @@ impl<'a> BatchRepo<'a> {
             "UPDATE batches SET label = ?2, on_failure_policy = ?3 WHERE id = ?1",
             params![b.id, b.label, policy_s],
         )?;
+        Ok(())
+    }
+
+    /// 删除一条 batch。
+    /// 仅允许 deleted-status 的 batch 被删(防止误删正在被 worker 处理的任务):
+    /// stopped / completed / terminated / cancelled —— 这四个状态 batch 不会再被
+    /// scheduler 触碰,可以安全整行删。
+    /// - 派生语义:data_assets.source_workflow_id 已在 0021 挂好 ON DELETE SET NULL,
+    ///   promoted da 自动把"来源工作流"抹掉,da + da.chapters 物理保留(已是拷贝语义)。
+    /// - 章节结果:workflow_results / workflow_result_chapters / transformation_chapters
+    ///   在 0011 / 0027 挂好 CASCADE,跟 batch 一起删;chapter_previews 在 0024 挂好 CASCADE。
+    /// - transformation_novels 不动 —— 工作流实例被删,工程模板保留。
+    pub fn delete(&self, id: i64) -> Result<()> {
+        let status_s: String = self.conn.query_row(
+            "SELECT status FROM batches WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        ).map_err(|_| Error::NotFound(format!("batch {id} 不存在")))?;
+        if !matches!(status_s.as_str(),
+            "stopped" | "completed" | "terminated" | "cancelled")
+        {
+            return Err(Error::Validation(format!(
+                "仅 stopped/completed/terminated/cancelled 工作流可删除(当前 {status_s})"
+            )));
+        }
+        let n = self.conn.execute("DELETE FROM batches WHERE id = ?1", params![id])?;
+        debug_assert_eq!(n, 1, "DELETE 应恰好影响 1 行");
         Ok(())
     }
 

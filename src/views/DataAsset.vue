@@ -28,6 +28,7 @@
       <div class="meta-text">
         <span v-if="store.parsedAt">{{ formatTime(store.parsedAt) }}</span>
         <span v-if="store.sourceWorkflowId !== null" class="src">来自工作流 #{{ store.sourceWorkflowId }}</span>
+        <span v-else-if="store.kind === 'promoted' && store.uploadId !== null" class="src" title="原派生自工作流,工作流已删除,数据资产本身保留">来自上传文件 #{{ store.uploadId }}</span>
       </div>
     </div>
 

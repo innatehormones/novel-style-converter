@@ -1,12 +1,20 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use nsc_core::ai::{AiProvider, OpenAiProvider};
 use nsc_core::db::Db;
 use nsc_core::recorder::{spawn_writer, AiCallRecorder, ChannelRecorder};
+use nsc_core::catalog::{parse_close_thinking_models, BUNDLED_CATALOG_JSON, CatalogStore};
+use tauri::Manager;
 use nsc_core::transformer::{BatchScheduler, JobQueue, Notifier};
 
 mod commands;
+
+/// 启动时构造 CatalogStore 并注入 Tauri state。
+fn build_catalog_store(app: &tauri::AppHandle) -> Result<Arc<CatalogStore>, String> {
+    commands::catalog::build_store(app)
+}
 
 fn data_db_path() -> PathBuf {
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
@@ -37,6 +45,10 @@ pub fn run() {
     let (recorder, rx) = ChannelRecorder::new(4096);
     let _writer_handle = spawn_writer(db.clone(), recorder.clone(), rx);
     let recorder: Arc<dyn AiCallRecorder> = Arc::new(recorder);
+    // 启动期解析 bundled catalog 得到 已知可关思考 的 model_id 集合。
+    // 转换业务调 AI 时(transformer / test_model)如果 model_config.model 在该集合内 ——
+    // 尽力塞 reasoning_effort:"none";否则不塞。catalog 拖入 / 远端更新需要重启应用生效。
+    let close_thinking: Arc<HashSet<String>> = Arc::new(parse_close_thinking_models(BUNDLED_CATALOG_JSON));
 
     fn make_provider(cfg: &nsc_core::models::ModelConfig) -> Box<dyn AiProvider> {
         Box::new(
@@ -54,12 +66,14 @@ pub fn run() {
         move || Ok(db_for_workers.clone()),
         make_provider,
         recorder.clone(),
+        close_thinking.clone(),
     ));
     let scheduler = Arc::new(BatchScheduler::new(
         db.clone(),
         job_queue.clone(),
         Arc::new(make_provider),
         recorder.clone(),
+        close_thinking.clone(),
     ));
     {
         let sched = scheduler.clone();
@@ -83,7 +97,13 @@ pub fn run() {
         .manage(job_queue)
         .manage(scheduler)
         .manage(recorder)
-        .setup(|_app| Ok(()))
+        .manage(close_thinking)
+        .setup(|app| {
+        let store = build_catalog_store(app.handle())
+            .map_err(|e| format!("catalog store 构建失败: {e}"))?;
+        app.manage(store);
+        Ok(())
+    })
         .invoke_handler(tauri::generate_handler![
             commands::models::list_models,
             commands::models::list_models_including_archived,
@@ -140,6 +160,10 @@ pub fn run() {
             commands::workflows::list_workflow_chapters,
             commands::workflows::stop_workflow,
             commands::workflows::retry_workflow_chapters,
+            commands::catalog::catalog_status,
+            commands::catalog::catalog_refresh,
+            commands::catalog::catalog_import_drop,
+            commands::catalog::catalog_read_active,
             commands::ai_call_logs::list_ai_call_logs,
             commands::ai_call_logs::get_ai_call_log,
             commands::ai_call_logs::clear_ai_call_logs,
@@ -148,7 +172,8 @@ pub fn run() {
             commands::workflows::regenerate_chapter_preview,
             commands::workflows::commit_chapter_preview,
             commands::workflows::list_chapter_previews,
-            commands::workflows::discard_chapter_preview,
+            commands::workflows::discard_chapter_preview,            commands::workflows::delete_workflow,
+
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

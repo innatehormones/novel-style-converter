@@ -7,13 +7,18 @@ use crate::models::DataAssetKind;
 
 /// 总览页面单次拉取的图 + 统计的最小完整数据。
 ///
-/// `nodes` + `edges` 严格只画 4 条正向边,绝不画回溯边:
+/// `nodes` + `edges` 严格只画 5 条正向边,绝不画回溯边:
 ///  - upload        -> source_da
+///  - upload        -> promoted_da    (派生资产属于哪个上传文件,structural 关系,始终画)
 ///  - {source,promoted}_da -> transformation_novel
 ///  - transformation_novel  -> batch
-///  - batch         -> promoted_da
+///  - batch         -> promoted_da    (工作流存在时才有的"转换路径"边)
 /// promoted_da 自身可以再次成为 transformation_novel 的源,所以图天然支持多代派生,
-/// 结构是 DAG(不会形成环)。
+/// 结构是 DAG(不会形成环):upload 是 sink-less 起点,batch 是有入无出的中间节点,
+/// da / tn 是中继节点;upload 既连 source_da 也连 promoted_da,但都向下,无回环。
+///
+/// 工作流被删时 batch 节点消失,batch->promoted_da 这条边也跟着消失,但
+/// upload->promoted_da 始终在 —— promoted_da 永远不会变成孤儿。
 ///
 /// `data_assets.source_data_asset_id` 是回溯指针(谁派生了我),不在图里画边,只在 tooltip / detail 显示。
 #[derive(Debug, Clone, Serialize)]
@@ -59,6 +64,7 @@ pub struct OverviewNode {
 #[serde(rename_all = "snake_case")]
 pub enum OverviewEdgeKind {
     UploadToSourceDa,
+    UploadToPromotedDa,
     DaToTn,
     TnToBatch,
     BatchToPromotedDa,
@@ -189,15 +195,18 @@ impl<'a> OverviewRepo<'a> {
                 byte_size: None,
                 subtitle,
             });
-            // upload -> source_da 边:仅 source 类型的 da 有 upload_id 关联。
-            if matches!(kind, DataAssetKind::Source) {
-                if let Some(uid) = upload_id {
-                    edges.push(OverviewEdge {
-                        source: format!("upload:{uid}"),
-                        target: format!("da:{id}"),
-                        kind: OverviewEdgeKind::UploadToSourceDa,
-                    });
-                }
+            // upload -> da 边:source 和 promoted 都画,后者是 structural 关系(始终在),
+            // 前者是原始解析路径。promote 时 upload_id 物理拷贝,所以 promoted 也有值。
+            if let Some(uid) = upload_id {
+                let kind_edge = match kind {
+                    DataAssetKind::Source    => OverviewEdgeKind::UploadToSourceDa,
+                    DataAssetKind::Promoted  => OverviewEdgeKind::UploadToPromotedDa,
+                };
+                edges.push(OverviewEdge {
+                    source: format!("upload:{uid}"),
+                    target: format!("da:{id}"),
+                    kind: kind_edge,
+                });
             }
         }
         Ok(())
@@ -418,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_generation_produces_dag_with_4_edge_kinds() {
+    fn multi_generation_produces_dag_with_5_edge_kinds() {
         let db = fresh_db();
         let (_u, da1, da2, da3, b1, b2) = seed_multi_generation(&db);
         let g = db.overview().load_graph().unwrap();
@@ -434,12 +443,18 @@ mod tests {
         assert!(kinds.iter().any(|(k, _)| k == "da:3"));
         assert_eq!(kinds.iter().filter(|(_, k)| matches!(k, OverviewNodeKind::Batch)).count(), 2);
 
-        // 边数:upload->da1, da1->tn1, tn1->b1, b1->da2, da2->tn2, tn2->b2, b2->da3 = 7
-        assert_eq!(g.edges.len(), 7);
+        // 边数:
+        //   upload->da1 (source_da)
+        //   upload->da2 (promoted_da)   <-- 新增的 structural 边
+        //   upload->da3 (promoted_da)   <-- 新增的 structural 边
+        //   da1->tn1, tn1->b1, b1->da2, da2->tn2, tn2->b2, b2->da3 = 7
+        // 总共 9 条边。
+        assert_eq!(g.edges.len(), 9, "expected 9 edges, got {:#?}", g.edges);
 
-        // 验证 4 类边都存在
+        // 验证 5 类边都存在
         let kinds: std::collections::HashSet<_> = g.edges.iter().map(|e| e.kind).collect();
         assert!(kinds.contains(&OverviewEdgeKind::UploadToSourceDa));
+        assert!(kinds.contains(&OverviewEdgeKind::UploadToPromotedDa));
         assert!(kinds.contains(&OverviewEdgeKind::DaToTn));
         assert!(kinds.contains(&OverviewEdgeKind::TnToBatch));
         assert!(kinds.contains(&OverviewEdgeKind::BatchToPromotedDa));

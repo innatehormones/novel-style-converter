@@ -16,7 +16,7 @@ import type {
   CreateTransformationNovelInput, UpdateTransformationNovelInput,
   EnqueuePayload, EnqueueAllPayload, QueueSnapshot,
   Prompt, PromptInput, TestModelReport,
-  CreateWorkflowInput, PromoteWorkflowInput, WorkflowSummary, WorkflowChapterRow,
+  CreateWorkflowInput, PromoteWorkflowInput, WorkflowSummary, WorkflowChapterRow, DeleteWorkflowResult,
   SourceChapterRow, ChapterWorkflowResultRow,
   UploadDeletePreview,
   AiCallLog, AiCallLogFilter,
@@ -233,6 +233,13 @@ export const stopWorkflow = (batchId: number): Promise<WorkflowSummary> =>
 
 export const retryWorkflowChapters = (batchId: number, chapterIds: number[]): Promise<WorkflowSummary> =>
   invoke<WorkflowSummary>('retry_workflow_chapters', { batchId, chapterIds });
+/// 删除工作流。仅 stopped/completed/terminated/cancelled 状态可删;后端 cascade
+/// 处理 workflow_results / workflow_result_chapters / transformation_chapters / chapter_previews,
+/// 并把 data_assets.source_workflow_id SET NULL(promoted da 物理保留)。
+export const deleteWorkflow = (batchId: number): Promise<DeleteWorkflowResult> =>
+  invoke<DeleteWorkflowResult>('delete_workflow', { batchId });
+
+
 
 export const listChapterWorkflowResults = (tnId: number, chapterId: number): Promise<ChapterWorkflowResultRow[]> =>
   invoke<ChapterWorkflowResultRow[]>('list_chapter_workflow_results', { tnId, chapterId });

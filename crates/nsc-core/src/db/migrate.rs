@@ -23,4 +23,7 @@ pub const SCHEMAS: &[(&str, &str)] = &[
     ("0022_chapter_edited_at", include_str!("../../../../migrations/0022_chapter_edited_at.sql")),
     ("0023_chapters_idx_one_based", include_str!("../../../../migrations/0023_chapters_idx_one_based.sql")),
     ("0024_chapter_previews", include_str!("../../../../migrations/0024_chapter_previews.sql")),
+    ("0025_model_max_context", include_str!("../../../../migrations/0025_model_max_context.sql")),
+    ("0026_model_disable_thinking", include_str!("../../../../migrations/0026_model_disable_thinking.sql")),
+    ("0027_tc_batch_cascade", include_str!("../../../../migrations/0027_tc_batch_cascade.sql")),
 ];

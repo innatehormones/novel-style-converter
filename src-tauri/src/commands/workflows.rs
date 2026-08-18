@@ -402,6 +402,31 @@ pub fn list_chapter_previews(
         .map_err(|e| e.to_string())
 }
 
+/// 工作流删除结果 —— 报告被影响的对象,给 UI 提示用户"哪些数据资产来源工作流没了"。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DeleteWorkflowResult {
+    pub deleted_batch_id: i64,
+    /// 删除时已派生自此工作流的 promoted data_asset 数量(删除前快照)。
+    /// UI 提示用:"已有 N 份数据资产从此工作流派生,删除后它们的来源工作流将被抹掉"。
+    pub promoted_data_asset_count: i64,
+}
+
+#[tauri::command]
+pub fn delete_workflow(
+    db: State<'_, Arc<Db>>,
+    batch_id: i64,
+) -> Result<DeleteWorkflowResult, String> {
+    // 先在删除前快照:已派生 da 数量(data_assets.source_workflow_id 删后被 SET NULL)。
+    let promoted = db.promotion().count_by_workflow(batch_id)
+        .map_err(|e| e.to_string())?;
+    db.batches().delete(batch_id).map_err(|e| e.to_string())?;
+    Ok(DeleteWorkflowResult {
+        deleted_batch_id: batch_id,
+        promoted_data_asset_count: promoted,
+    })
+}
+
 #[tauri::command]
 pub fn discard_chapter_preview(
     scheduler: State<'_, Arc<BatchScheduler>>,

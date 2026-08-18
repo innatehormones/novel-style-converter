@@ -32,6 +32,8 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
   // 工作流转正相关元数据
   const kind = ref<'source' | 'promoted'>('source');
   const sourceWorkflowId = ref<number | null>(null);
+  /// 上传文件 id:数据资产所属 upload,source 永远有值;promoted 来源工作流被删后 source_workflow_id=null,但 uploadId 仍在。
+  const uploadId = ref<number | null>(null);
   const note = ref<string>('');
 
   let requestToken = 0;
@@ -51,6 +53,7 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
     tnCount.value = 0;
     kind.value = 'source';
     sourceWorkflowId.value = null;
+    uploadId.value = null;
     note.value = '';
     ++requestToken;
     const token = requestToken;
@@ -76,10 +79,12 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
         tnCount.value = row.tn_count;
         kind.value = row.kind;
         sourceWorkflowId.value = row.source_workflow_id;
+        uploadId.value = row.upload_id;
         note.value = row.note ?? '';
       } else {
         kind.value = 'source';
         sourceWorkflowId.value = null;
+        uploadId.value = null;
         note.value = '';
       }
     } catch (e: unknown) {
@@ -161,7 +166,7 @@ const editable = computed(() => selectedIdx.value !== null);
     dataAssetId, title, filename, parsedAt, tnCount,
     chapters, chapterIds, sourceKinds, editedAts, selectedIdx, selectedContent,
     loading, error,
-    kind, sourceWorkflowId, note,
+    kind, sourceWorkflowId, uploadId, note,
     editable, editing, draftContent, editingDirty, saving,
     load, selectChapter, selectFirstIfNone,
     enterEdit, cancelEdit, onDraftInput, saveEdit,

@@ -390,6 +390,56 @@ function askStopWorkflow(id: number) {
   stopConfirmOpen.value = true;
 }
 
+
+// 工作流删除:仅 stopped/completed/terminated/cancelled 状态可删(running/pending/paused 由后端拒绝)。
+// UI 层再做一次前置校验:不允许误触发正在跑的工作流。
+const DELETEABLE_STATUSES = new Set(['stopped', 'completed', 'terminated', 'cancelled']);
+const deleteConfirmOpen = ref(false);
+const deleteTargetId = ref<number | null>(null);
+const deleteTargetLabel = ref<string>('');
+const deleteTargetPromotedCount = ref<number>(0);
+const deleteSubmitting = ref(false);
+const deleteError = ref<string | null>(null);
+
+
+/// 删除确认弹窗的 message。promoted_count > 0 时重点提示:已派生 da 的来源会被抹掉。
+const deleteConfirmMessage = computed<string>(() => {
+  const n = deleteTargetPromotedCount.value;
+  const label = deleteTargetLabel.value;
+  const base = `确认删除 ${label}?\n此操作不可撤销 —— 工作流、所有章节结果、转换记录都会被删除。`;
+  if (n > 0) {
+    return base + `\n已有 ${n} 份数据资产从此工作流派生,删除后它们的来源字段会被清空(数据资产本身保留)。`;
+  }
+  return base + (deleteError.value ? `\n\n${deleteError.value}` : '');
+});
+function askDeleteWorkflow(w: WorkflowSummary) {
+  if (!DELETEABLE_STATUSES.has(w.status)) return;
+  deleteTargetId.value = w.id;
+  deleteTargetLabel.value = w.label ?? `工作流 #${w.id}`;
+  deleteTargetPromotedCount.value = w.promoted_count;
+  deleteError.value = null;
+  deleteConfirmOpen.value = true;
+}
+
+async function confirmDeleteWorkflow() {
+  const id = deleteTargetId.value;
+  if (id === null) return;
+  deleteSubmitting.value = true;
+  deleteError.value = null;
+  try {
+    const res = await store.deleteWorkflow(id);
+    if (selectedWorkflowId.value === id) closeWorkflowPanel();
+    deleteConfirmOpen.value = false;
+    deleteTargetId.value = null;
+    if (res.promoted_data_asset_count > 0) {
+      console.info(`[delete_workflow] 已抹掉 ${res.promoted_data_asset_count} 份数据资产的来源工作流字段`);
+    }
+  } catch (e: unknown) {
+    deleteError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    deleteSubmitting.value = false;
+  }
+}
 async function confirmStopWorkflow() {
   const id = stopTargetId.value;
   if (id === null) return;
@@ -757,6 +807,14 @@ watch(() => sources.value, (list) => {
         </template>
         <template #cell-actions="{ row }">
           <button type="button" class="row-link" @click="openWorkflowPanel(row)">详情</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <button
+            type="button"
+            class="row-link danger"
+            :disabled="!DELETEABLE_STATUSES.has(row.status)"
+            :title="DELETEABLE_STATUSES.has(row.status) ? '' : '该工作流尚在处理,无法删除'"
+            @click="askDeleteWorkflow(row)"
+          >删除</button>
         </template>
       </DataTable>
       <div v-if="createBatchError" class="error-banner">
@@ -853,6 +911,13 @@ watch(() => sources.value, (list) => {
             :loading="promoteSubmitting"
             @click="openPromoteDialog"
           >转为数据资产</Button>
+          <Button
+            v-if="DELETEABLE_STATUSES.has(selectedWorkflow.status)"
+            kind="danger"
+            size="small"
+            :loading="deleteSubmitting"
+            @click="askDeleteWorkflow(selectedWorkflow)"
+          >删除工作流</Button>
         </div>
       </div>
       <DataTable
@@ -951,7 +1016,18 @@ watch(() => sources.value, (list) => {
     </Dialog>
 
 
-    <PromoteWorkflowDialog
+    
+    <!-- 工作流删除确认弹窗(自带 deleteError 展示) -->
+    <ConfirmDialog
+      v-model:open="deleteConfirmOpen"
+      title="删除工作流"
+      :message="deleteConfirmMessage"
+      kind="danger"
+      confirm-text="删除"
+      @confirm="confirmDeleteWorkflow"
+    />
+    <div v-if="deleteSubmitting" class="hint center">删除中...</div>
+<PromoteWorkflowDialog
       v-if="selectedWorkflow !== null"
       v-model:open="promoteOpen"
       :workflow-label="selectedWorkflow.label ?? `工作流 #${selectedWorkflow.id}`"

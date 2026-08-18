@@ -1,14 +1,14 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import {
-  createWorkflow, listWorkflows, getWorkflow, stopWorkflow,
+  createWorkflow, listWorkflows, getWorkflow, stopWorkflow, deleteWorkflow as deleteWorkflowCmd,
   retryWorkflowChapters, listWorkflowChapters, listTransformationSourceChapters,
   listChapterWorkflowResults, promoteWorkflow, listPromotedDataAssetsForWorkflow,
   regenerateChapterPreview, commitChapterPreview, listChapterPreviews, discardChapterPreview,
 } from '../ipc/commands';
 import type {
   CreateWorkflowInput, WorkflowSummary, WorkflowChapterRow, SourceChapterRow,
-  ChapterWorkflowResultRow, DataAsset,
+  ChapterWorkflowResultRow, DataAsset, DeleteWorkflowResult,
   ChapterPreviewRow, CommitPreviewInput,
 } from '../ipc/types';
 
@@ -62,6 +62,22 @@ async function refresh(batchId: number) {
     const w = await retryWorkflowChapters(batchId, chapterIds);
     await refresh(batchId);
     return w;
+  }
+  /// 删除工作流。后端 cascade 处理衍生表;store 这边从 byTn 缓存里同步移除。
+  async function deleteWorkflow(batchId: number): Promise<DeleteWorkflowResult> {
+    const res = await deleteWorkflowCmd(batchId);
+    // 找出所属 tn(任一缓存命中即可),从 byTn 中移除。
+    for (const [tnId, list] of byTn.value) {
+      const i = list.findIndex((w) => w.id === batchId);
+      if (i >= 0) {
+        list.splice(i, 1);
+        byTn.value.set(tnId, [...list]);
+        break;
+      }
+    }
+    chaptersByBatch.value.delete(batchId);
+    promotedByBatch.value.delete(batchId);
+    return res;
   }
 
   // promoted data assets 派生索引:batchId -> 列表
@@ -124,5 +140,6 @@ async function refresh(batchId: number) {
     loading, error, loadSources, loadByTn, loadChapters, loadResultsForChapter,
     loadPromotedByBatch, create, refresh, stop, retry, promote,
     loadPreviews, regeneratePreview, commitPreview, discardPreview,
+    deleteWorkflow,
   };
 });

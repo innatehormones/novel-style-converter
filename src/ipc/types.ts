@@ -55,6 +55,14 @@ export interface TestModelReport {
   error: string | null;
 }
 
+/// 删除工作流结果 —— 后端 `DeleteWorkflowResult`,snake_case。
+/// - deleted_batch_id:被删的 batch id。
+/// - promoted_data_asset_count:删除时已派生自此工作流的 promoted da 数(UI 提示用)。
+export interface DeleteWorkflowResult {
+  deleted_batch_id: number;
+  promoted_data_asset_count: number;
+}
+
 /// State 1: 鍘熷涓婁紶鏂囦欢鍏冩暟鎹€備笉鍚珷鑺傜粨鏋?绔犺妭鍦?data_assets)銆?
 export interface UploadSummary {
   id: number;
@@ -538,6 +546,7 @@ export interface OverviewNode {
 
 export type OverviewEdgeKind =
   | 'upload_to_source_da'
+  | 'upload_to_promoted_da'
   | 'da_to_tn'
   | 'tn_to_batch'
   | 'batch_to_promoted_da';

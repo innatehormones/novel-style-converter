@@ -189,6 +189,10 @@ function edgeStyle(kind: ApiEdge["kind"]) {
   switch (kind) {
     case "upload_to_source_da":
       return { stroke: "#475569", strokeWidth: 1.8 };
+    case "upload_to_promoted_da":
+      // structural —— 派生资产"属于哪个上传文件"的结构关系,工作流被删时也保留。
+      // 虚线 + 浅灰跟"主路径"实线区分,视觉层级:实线=过程,虚线=归属。
+      return { stroke: "#94a3b8", strokeWidth: 1.4, strokeDasharray: "6 4" };
     case "da_to_tn":
       return { stroke: "#1E40AF", strokeWidth: 1.8 };
     case "tn_to_batch":
