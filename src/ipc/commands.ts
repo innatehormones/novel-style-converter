@@ -323,3 +323,49 @@ export function listChapterPreviews(batchId: number, chapterId: number): Promise
 export function discardChapterPreview(previewId: number): Promise<void> {
   return invoke<void>('discard_chapter_preview', { previewId });
 }
+// ─── Catalog (models.dev) ─────────────────────────────────────────────────
+export type CatalogSource = 'bundled' | 'cache';
+
+export interface CatalogMeta {
+  source: CatalogSource;
+  origin?: 'http' | 'drop';
+  fetched_at?: string;
+  sha256: string;
+  size_bytes: number;
+}
+
+export interface CatalogStatus {
+  source: CatalogSource;
+  meta: CatalogMeta | null;
+  bundled_size_bytes: number;
+  cache_size_bytes: number | null;
+}
+
+export interface CatalogRefreshResult {
+  ok: boolean;
+  source: string;
+  meta: CatalogMeta | null;
+  error: string | null;
+}
+
+export interface CatalogImportResult {
+  ok: boolean;
+  meta: CatalogMeta | null;
+  error: string | null;
+}
+
+export function catalogStatus(): Promise<CatalogStatus> {
+  return invoke<CatalogStatus>('catalog_status');
+}
+
+export async function catalogRefresh(): Promise<CatalogRefreshResult> {
+  return invoke<CatalogRefreshResult>('catalog_refresh');
+}
+
+export async function catalogImportDrop(jsonContent: string): Promise<CatalogImportResult> {
+  return invoke<CatalogImportResult>('catalog_import_drop', { jsonContent });
+}
+
+export async function catalogReadActive(): Promise<string> {
+  return invoke<string>('catalog_read_active');
+}

@@ -1,4 +1,5 @@
-﻿pub mod ai_call_logs;
+pub mod ai_call_logs;
+pub mod catalog;
 pub mod chapters;
 pub mod cleaning;
 pub mod data_assets;

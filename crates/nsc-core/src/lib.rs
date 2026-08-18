@@ -12,5 +12,7 @@ pub mod cleaner;
 pub mod startup_cleanup;
 pub mod startup_recovery;
 pub mod recorder;
+pub mod catalog;
 
 pub use error::{Error, Result};
+pub use catalog::{CatalogMeta, CatalogOrigin, CatalogSource, CatalogStatus, CatalogStore};

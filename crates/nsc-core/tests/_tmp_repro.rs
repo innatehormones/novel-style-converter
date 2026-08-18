@@ -50,7 +50,9 @@ fn seed_data(path: &std::path::Path, n: usize) -> (i64, i64, Vec<i64>) {
         api_key: "k".into(),
         model: "m".into(),
         max_tokens: None,
+        max_context: None,
         temperature: None,
+        disable_thinking: false,
         concurrency: 1,
     }).unwrap();
     let tn_id = db.transformation_novels().insert(&NewTransformationNovel {
@@ -90,6 +92,7 @@ fn reproduce_busy_lock() {
         move || Db::open(&path_for_factory),
         |_cfg| -> Box<dyn AiProvider> { Box::new(SlowEchoProvider) },
         Arc::new(nsc_core::recorder::NoopRecorder),
+        Arc::new(std::collections::HashSet::<String>::new()),
     ));
 
     let shared_db = nsc_core::db::Db::open(&path).unwrap();
@@ -98,6 +101,7 @@ fn reproduce_busy_lock() {
         queue.clone(),
         Arc::new(|_cfg| -> Box<dyn AiProvider> { Box::new(SlowEchoProvider) }),
         Arc::new(nsc_core::recorder::NoopRecorder),
+        Arc::new(std::collections::HashSet::<String>::new()),
     ));
     {
         let sched_for_cb = sched.clone();

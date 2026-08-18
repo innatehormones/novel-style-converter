@@ -10,11 +10,11 @@ impl<'a> ModelConfigRepo<'a> {
     pub fn insert(&self, m: &NewModelConfig) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO model_configs \
-             (name, base_url, api_key, model, max_tokens, temperature, concurrency) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             (name, base_url, api_key, model, max_tokens, max_context, temperature, disable_thinking, concurrency) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 m.name, m.base_url, m.api_key, m.model,
-                m.max_tokens, m.temperature, m.concurrency,
+                m.max_tokens, m.max_context, m.temperature, if m.disable_thinking { 1 } else { 0 }, m.concurrency,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -24,10 +24,10 @@ impl<'a> ModelConfigRepo<'a> {
     /// `include_archived = true` 时同时返回归档行(用于“显示已归档”切换)。
     pub fn list(&self, include_archived: bool) -> Result<Vec<ModelConfig>> {
         let sql = if include_archived {
-            "SELECT id, name, base_url, api_key, model, max_tokens, temperature, concurrency, archived \
+            "SELECT id, name, base_url, api_key, model, max_tokens, max_context, temperature, disable_thinking, concurrency, archived \
              FROM model_configs ORDER BY archived ASC, id DESC"
         } else {
-            "SELECT id, name, base_url, api_key, model, max_tokens, temperature, concurrency, archived \
+            "SELECT id, name, base_url, api_key, model, max_tokens, max_context, temperature, disable_thinking, concurrency, archived \
              FROM model_configs WHERE archived = 0 ORDER BY id DESC"
         };
         let mut stmt = self.conn.prepare(sql)?;
@@ -39,7 +39,7 @@ impl<'a> ModelConfigRepo<'a> {
     /// 读 path 必须能拿到归档行,否则历史 tc 引用解析会断。
     pub fn get(&self, id: i64) -> Result<Option<ModelConfig>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, base_url, api_key, model, max_tokens, temperature, concurrency, archived \
+            "SELECT id, name, base_url, api_key, model, max_tokens, max_context, temperature, disable_thinking, concurrency, archived \
              FROM model_configs WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -53,11 +53,11 @@ impl<'a> ModelConfigRepo<'a> {
         self.conn.execute(
             "UPDATE model_configs SET \
              name=?2, base_url=?3, api_key=?4, model=?5, \
-             max_tokens=?6, temperature=?7, concurrency=?8 \
+             max_tokens=?6, max_context=?7, temperature=?8, disable_thinking=?9, concurrency=?10 \
              WHERE id=?1",
             params![
                 m.id, m.name, m.base_url, m.api_key, m.model,
-                m.max_tokens, m.temperature, m.concurrency,
+                m.max_tokens, m.max_context, m.temperature, if m.disable_thinking { 1 } else { 0 }, m.concurrency,
             ],
         )?;
         Ok(())
@@ -93,8 +93,10 @@ fn from_row(row: &Row) -> rusqlite::Result<ModelConfig> {
         api_key: row.get(3)?,
         model: row.get(4)?,
         max_tokens: row.get(5)?,
-        temperature: row.get(6)?,
-        concurrency: row.get(7)?,
-        archived: row.get(8)?,
+        max_context: row.get(6)?,
+        temperature: row.get(7)?,
+        disable_thinking: row.get::<_, i64>(8)? != 0,
+        concurrency: row.get(9)?,
+        archived: row.get(10)?,
     })
 }

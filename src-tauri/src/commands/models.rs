@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -41,7 +42,10 @@ pub struct ModelConfigDto {
     pub api_key: String,
     pub model: String,
     pub max_tokens: Option<i32>,
+    pub max_context: Option<i32>,
     pub temperature: Option<f32>,
+    /// 用户主动关闭思考的开关(serde 默认 false)。仅对官方支持该能力的模型生效。
+    pub disable_thinking: bool,
     pub concurrency: i32,
 }
 
@@ -53,7 +57,9 @@ impl ModelConfigDto {
             api_key: self.api_key,
             model: self.model,
             max_tokens: self.max_tokens,
+            max_context: self.max_context,
             temperature: self.temperature,
+            disable_thinking: self.disable_thinking,
             concurrency: self.concurrency,
         }
     }
@@ -66,7 +72,9 @@ impl ModelConfigDto {
             api_key: self.api_key,
             model: self.model,
             max_tokens: self.max_tokens,
+            max_context: self.max_context,
             temperature: self.temperature,
+            disable_thinking: self.disable_thinking,
             concurrency: self.concurrency,
             // update 路径保留原 archived(0),不允许通过 upsert 改 archived。
             archived: 0,
@@ -114,6 +122,7 @@ pub struct TestModelReport {
 pub async fn test_model(
     payload: ModelConfigDto,
     recorder: State<'_, Arc<dyn AiCallRecorder>>,
+    close_thinking: State<'_, Arc<HashSet<String>>>,
 ) -> Result<TestModelReport, String> {
     let started = Instant::now();
     let report = match OpenAiProvider::new(payload.base_url.clone(), payload.api_key.clone()) {
@@ -132,6 +141,12 @@ pub async fn test_model(
                 messages: vec![ChatMessage { role: Role::User, content: "ping".into() }],
                 temperature: payload.temperature,
                 max_tokens: payload.max_tokens,
+                reasoning_effort: if close_thinking.contains(&payload.model) { Some("none".to_string()) } else { None },
+                thinking: if payload.model.starts_with("MiniMax-") {
+                    Some("disabled".to_string())
+                } else {
+                    None
+                },
             })
             .await
         {

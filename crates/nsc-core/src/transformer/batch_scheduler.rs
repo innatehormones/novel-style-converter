@@ -10,6 +10,7 @@
 //! - `stop_workflow` 人工停止 + `retry_empty_slots` 重试空槽
 //! - `resume` 配合 pause_and_review 策略,让用户在 paused 时介入
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -34,6 +35,8 @@ pub struct BatchScheduler {
     job_queue: Arc<JobQueue>,
     provider_factory: ProviderFactory,
     recorder: Arc<dyn AiCallRecorder>,
+    /// 已知可关思考的 model_id 集合(由启动期 catalog 解析得到)。
+    close_thinking: Arc<HashSet<String>>,
     /// 后台 tokio runtime —— regenerate_preview 的 AI 任务在这里跑
     /// (主线程没 tokio reactor,见 src-tauri/src/lib.rs:51 注释)。
     runtime: Arc<tokio::runtime::Runtime>,
@@ -64,6 +67,7 @@ impl BatchScheduler {
         job_queue: Arc<JobQueue>,
         provider_factory: ProviderFactory,
         recorder: Arc<dyn AiCallRecorder>,
+        close_thinking: Arc<HashSet<String>>,
     ) -> Self {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
@@ -72,7 +76,7 @@ impl BatchScheduler {
                 .build()
                 .expect("BatchScheduler runtime build"),
         );
-        Self { db, job_queue, provider_factory, recorder, runtime }
+        Self { db, job_queue, provider_factory, recorder, close_thinking, runtime }
     }
 
     /// 原子创建并启动工作流(spec §5.1,§12):单事务里写 batches(status='running',started_at=now) +
@@ -619,8 +623,9 @@ impl BatchScheduler {
         let provider = (self.provider_factory)(&model);
         let recorder = self.recorder.clone();
         let db = self.db.clone();
+        let close_thinking = self.close_thinking.clone();
         self.runtime.spawn(async move {
-            let transformer = DefaultTransformer { ai: provider.into(), recorder: recorder.clone() };
+            let transformer = DefaultTransformer::new(provider.into(), recorder.clone(), close_thinking.clone());
             let result = transformer.transform_with_business(req, AiCallBusiness::RegeneratePreview).await;
             let update_result = (|| -> Result<()> {
                 match &result {

@@ -13,7 +13,11 @@ pub struct ModelConfig {
     pub api_key: String,
     pub model: String,
     pub max_tokens: Option<i32>,
+    pub max_context: Option<i32>,
     pub temperature: Option<f32>,
+    /// 用户主动关闭思考的开关 —— 0 = 模型自决,1 = 主动禁用思考。
+    /// 仅对官方支持 reasoning_effort:"none" / toggle 类型模型生效。
+    pub disable_thinking: bool,
     pub concurrency: i32,
     pub archived: i32,
 }
@@ -26,6 +30,8 @@ pub struct NewModelConfig {
     pub api_key: String,
     pub model: String,
     pub max_tokens: Option<i32>,
+    pub max_context: Option<i32>,
     pub temperature: Option<f32>,
+    pub disable_thinking: bool,
     pub concurrency: i32,
 }

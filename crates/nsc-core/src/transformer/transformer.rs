@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -57,9 +58,21 @@ pub trait Transformer: Send + Sync {
 pub struct DefaultTransformer {
     pub ai: Arc<dyn AiProvider>,
     pub recorder: Arc<dyn AiCallRecorder>,
+    /// 已知可关思考的 model_id 集合(由启动期 catalog 解析得到)。
+    /// 构造 ChatRequest 时如果 model_config.model 在此集合内 —— 尽力塞
+    /// `reasoning_effort:"none"`;否则让模型自决。
+    pub close_thinking: Arc<HashSet<String>>,
 }
 
 impl DefaultTransformer {
+    pub fn new(
+        ai: Arc<dyn AiProvider>,
+        recorder: Arc<dyn AiCallRecorder>,
+        close_thinking: Arc<HashSet<String>>,
+    ) -> Self {
+        Self { ai, recorder, close_thinking }
+    }
+
     /// ä¸ `transform` ç­ä»·,ä½åè®¸æå®ä¸å¡æ è¯ ââ recorder å `ai_call_logs` æ¶æ `business` åºåä¸ä¸æ / context_type / context_idã
     /// `custom_input` éç©ºæ¶æ¼å° system prompt ææ«(spec Â§3.3)ââ ä¸ºç©ºæ¶ä¸å transform è·¯å¾ byte-equalã
     pub async fn transform_with_business(
@@ -79,6 +92,16 @@ impl DefaultTransformer {
         let rendered = render(&req.prompt.template, &ctx);
         let mut system_full = rendered.system.clone().unwrap_or_default();
         let user_full = rendered.user.clone();
+        // close_thinking 模型:catalog 标了可关思考的,在 system prompt 末尾追加
+        // "禁止输出思考过程"指令。协议层 `reasoning_effort:"none"` 是首选
+        // (OpenAI 风格),但某些 OpenAI 兼容路径(MiniMax /v1 等)不一定认;
+        // prompt 层兜底 —— 让模型明确知道不要输出思考块。
+        if self.close_thinking.contains(&req.model_config.model) {
+            system_full.push_str(
+                "\n\n---\n\n直接输出最终转换后的章节正文,不要包含任何思考/推理/分析过程(如 <think>...</think>、<thinking>...</thinking>、以 \"Reasoning:\" / \"分析:\" 等开头的段落)。\n",
+            );
+        }
+
         if let Some(extra) = req.custom_input.as_deref() {
             if !extra.trim().is_empty() {
                 system_full.push_str("\n\n---\n\n附加指令：\n");
@@ -87,16 +110,42 @@ impl DefaultTransformer {
         }
         let estimated_tokens_in =
             ((system_full.chars().count() + user_full.chars().count()) / 2) as i32;
+        // max_context 护栏 —— 估算的输入 tokens 超模型配置上限则直接拒发,
+        // 由前端把错误原样展示给用户(见 `Error::Validation` 在 ai_call_logs 透出)。
+        // None = 不强制校验,保留历史行为。
+        if let Some(max_ctx) = req.model_config.max_context {
+            if estimated_tokens_in > max_ctx {
+                return Err(Error::Validation(format!(
+                    "超出模型 max_context: 估算 {} tokens > 配置上限 {} tokens(model={}, name={})。请调小章节正文 / 上下文邻章数 / system prompt,或换用更大上下文的模型。",
+                    estimated_tokens_in, max_ctx,
+                    req.model_config.model, req.model_config.name,
+                )));
+            }
+        }
         let mut messages = Vec::with_capacity(if !system_full.is_empty() { 2 } else { 1 });
         if !system_full.is_empty() {
             messages.push(ChatMessage { role: Role::System, content: system_full.clone() });
         }
         messages.push(ChatMessage { role: Role::User, content: user_full.clone() });
+        // 尽力关闭思考 = 请求体塞 reasoning_effort:"none"(OpenAI 官方关闭思考的标准方式)。
+        // 仅在 catalog 标了 toggle / effort 含 "none" 的模型上做,其他让模型自决。
+        // (以前的 model_config.disable_thinking 字段已废弃 —— UI 不再暴露,这里改用 close_thinking 集合。)
+        let reasoning_effort = if self.close_thinking.contains(&req.model_config.model) {
+            Some("none".to_string())
+        } else {
+            None
+        };
         let chat_req = ChatRequest {
             model: req.model_config.model.clone(),
             messages,
             temperature: req.model_config.temperature,
             max_tokens: req.model_config.max_tokens,
+            reasoning_effort,
+            thinking: if req.model_config.model.starts_with("MiniMax-") {
+                Some("disabled".to_string())
+            } else {
+                None
+            },
         };
 
         let started = Instant::now();

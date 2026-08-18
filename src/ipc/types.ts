@@ -22,7 +22,12 @@ export interface ModelConfig {
   api_key: string;
   model: string;
   max_tokens: number | null;
+  /** 模型最大上下文窗口（输入 tokens 上限）。null = 不强制校验。 */
+  max_context: number | null;
   temperature: number | null;
+  /** 用户主动关闭思考的开关 —— true = 发 reasoning_effort:"none",false = 模型自决。
+   *  仅对官方支持该能力的模型生效(由 UI 控制何时暴露)。 */
+  disable_thinking: boolean;
   concurrency: number;
   archived: number;
 }

@@ -2,6 +2,7 @@
   <section>
     <PageHeader title="模型" subtitle="OpenAI 兼容 API 配置，可在此新增 / 编辑 / 软删">
       <template #actions>
+        <Button @click="openCatalogUpdate">更新模型清单</Button>
         <Button kind="primary" @click="openCreate">新增模型</Button>
       </template>
     </PageHeader>
@@ -15,6 +16,10 @@
         />
         <span>显示已归档</span>
       </label>
+      <span class="catalog-status">
+        模型清单：<strong>{{ catalogLabel }}</strong>
+        <span v-if="catalogMetaLabel" class="muted">· {{ catalogMetaLabel }}</span>
+      </span>
     </div>
 
     <div v-if="store.error" class="alert">{{ store.error }}</div>
@@ -73,19 +78,26 @@
       confirm-text="归档"
       @confirm="doDelete"
     />
+
+    <CatalogUpdateDialog
+      v-model:open="catalogUpdateOpen"
+      @updated="refreshCatalogStatus"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import Button from '../components/ui/Button.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
 import Table from '../components/ui/Table.vue';
 import Tag from '../components/ui/Tag.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import ModelDialog from '../components/ModelDialog.vue';
+import CatalogUpdateDialog from '../components/CatalogUpdateDialog.vue';
 import { useModelsStore } from '../stores/models';
 import type { ModelConfigInput } from '../ipc/types';
+import { catalogStatus, type CatalogStatus } from '../ipc/commands';
 
 const store = useModelsStore();
 const dialogOpen = ref(false);
@@ -102,7 +114,41 @@ const columns = [
   { key: 'actions', title: '操作', width: '180px', type: 'actions' as const },
 ];
 
-onMounted(() => store.load());
+// 模型清单（models.dev）状态 —— 只读展示,不参与表格渲染 / 不干预布局
+const catalogStatusState = ref<CatalogStatus | null>(null);
+const catalogUpdateOpen = ref(false);
+
+const catalogLabel = computed(() => {
+  const s = catalogStatusState.value;
+  if (!s) return '加载中…';
+  return s.source === 'cache' ? 'cache（用户目录）' : 'bundled（内置）';
+});
+
+const catalogMetaLabel = computed(() => {
+  const m = catalogStatusState.value?.meta;
+  if (!m) return null;
+  const src = m.origin === 'drop' ? '拖入' : m.origin === 'http' ? '远端拉取' : '内置';
+  const ts = m.fetched_at ? m.fetched_at.replace('T', ' ').slice(0, 19) : '';
+  const sizeMB = (m.size_bytes / (1024 * 1024)).toFixed(2);
+  return src + ' · ' + sizeMB + ' MB · ' + ts;
+});
+
+async function refreshCatalogStatus(): Promise<void> {
+  try {
+    catalogStatusState.value = await catalogStatus();
+  } catch (e) {
+    // status 拉失败不致命 —— 显示加载中即可,用户仍可点 "更新模型清单"
+    console.error('[catalog] status failed:', e);
+  }
+}
+
+function openCatalogUpdate(): void {
+  catalogUpdateOpen.value = true;
+}
+
+onMounted(async () => {
+  await Promise.all([store.load(), refreshCatalogStatus()]);
+});
 
 function openCreate() {
   dialogInitial.value = null;
@@ -142,8 +188,9 @@ async function onToggleArchived(v: boolean) {
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 .toggle {
   display: inline-flex;
@@ -153,6 +200,18 @@ async function onToggleArchived(v: boolean) {
   color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
+}
+.catalog-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.catalog-status strong {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.catalog-status .muted {
+  margin-left: 4px;
 }
 .alert {
   padding: 12px 16px;
@@ -195,4 +254,3 @@ async function onToggleArchived(v: boolean) {
   margin-left: 6px;
 }
 </style>
-
