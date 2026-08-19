@@ -5,6 +5,7 @@
 //! 本片接:
 //! - `create_workflow` 原子事务:batch + workflow_results + N 个 tc + N 个空 slot
 //! - `on_chapter_done` / `on_chapter_failed` 派下一章(`on_chapter_failed` 按 batch.on_failure_policy 分流)
+//! - 0.2 起移除 OnFailurePolicy::Terminate:"失败即终止"与 paused 时手动 Terminate 重复,且误选代价不可逆。
 //! - 完成判据 → batch 状态迁移到 Stopped/Terminated 等
 //! - `safe_stop_on_dispatch_failure` dispatch 失败的兜底
 //! - `stop_workflow` 人工停止 + `retry_empty_slots` 重试空槽
@@ -253,7 +254,6 @@ impl BatchScheduler {
 
     /// 失败回调:按 batch.on_failure_policy 分流。
     /// - PauseAndReview: tc → failed,batch → paused(ended_at 设 NOW),不 advance。
-    /// - Terminate:       tc → failed;同 batch 后续 pending → cancelled,batch → terminated(不 advance)。
     /// - SkipFailed:      tc → skipped,advance_batch 派下一章(batch 保持 running)。
     /// batch 收尾交给 advance_batch → maybe_finalize_batch(skip_failed 走这条)。
     pub fn on_chapter_failed(&self, tid: i64, error: String) -> Result<()> {
@@ -273,24 +273,6 @@ impl BatchScheduler {
                 )?;
                 tx.execute(
                     "UPDATE batches SET status='paused', ended_at=?1 WHERE id=?2",
-                    rusqlite::params![now, batch_id],
-                )?;
-                tx.commit()?;
-                Ok(())
-            }
-            OnFailurePolicy::Terminate => {
-                let _bsg = self.db.lock();
-            let tx = _bsg.unchecked_transaction()?;
-                tx.execute(
-                    "UPDATE transformation_chapters                      SET status='failed', error=?2, completed_at=?3, result_content=NULL,                          tokens_in=NULL, tokens_out=NULL                      WHERE id=?1",
-                    rusqlite::params![tid, error, now],
-                )?;
-                tx.execute(
-                    "UPDATE transformation_chapters SET status='cancelled'                      WHERE batch_id=?1 AND status='pending'",
-                    rusqlite::params![batch_id],
-                )?;
-                tx.execute(
-                    "UPDATE batches SET status='terminated', ended_at=?1 WHERE id=?2",
                     rusqlite::params![now, batch_id],
                 )?;
                 tx.commit()?;
@@ -749,7 +731,6 @@ fn frontier_chapter_id_in_workflow(guard: &rusqlite::Connection,
 fn policy_str(p: OnFailurePolicy) -> &'static str {
     match p {
         OnFailurePolicy::PauseAndReview => "pause_and_review",
-        OnFailurePolicy::Terminate => "terminate",
         OnFailurePolicy::SkipFailed => "skip_failed",
     }
 }

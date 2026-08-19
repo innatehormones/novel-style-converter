@@ -18,9 +18,10 @@
       </select>
     </div>
     <div class="row">
-      <label>标签</label>
-      <input v-model="label" placeholder="可选,如 'v1 全量'" class="label-input" />
+      <label>标签 *</label>
+      <input v-model="label" placeholder="如 'v1 全量'" class="label-input" :class="{ 'has-error': labelError !== null }" @input="labelError = null" />
     </div>
+    <div v-if="labelError" class="row-error">{{ labelError }}</div>
     <div class="row ctx">
       <div>
         <label>前文原文</label>
@@ -39,29 +40,26 @@
       给 LLM 的上下文窗口大小（章）。一般只设"前文转换" 1~3,
       让模型参考前面已经转换好的章节学文风;原文带多了浪费 token。
     </div>
-    <div class="row">
+    <div class="row policy-row">
       <label>失败策略 *</label>
       <div class="policy-options">
-        <label class="policy-opt">
+        <label class="policy-opt" data-policy="pause_and_review" :class="{ 'is-active': onFailurePolicy === 'pause_and_review' }">
           <input type="radio" v-model="onFailurePolicy" value="pause_and_review" />
-          <span class="policy-label">
+          <span class="policy-icon" aria-hidden="true"><IconPauseCircle /></span>
+          <span class="policy-body">
             <strong>暂停与审阅</strong>
             <small>失败时停下来,等你决定</small>
           </span>
+          <span class="policy-radio" aria-hidden="true" />
         </label>
-        <label class="policy-opt">
+        <label class="policy-opt" data-policy="skip_failed" :class="{ 'is-active': onFailurePolicy === 'skip_failed' }">
           <input type="radio" v-model="onFailurePolicy" value="skip_failed" />
-          <span class="policy-label">
+          <span class="policy-icon" aria-hidden="true"><IconSkipForward /></span>
+          <span class="policy-body">
             <strong>跳过问题章节</strong>
             <small>失败章节跳过,继续派下一章</small>
           </span>
-        </label>
-        <label class="policy-opt">
-          <input type="radio" v-model="onFailurePolicy" value="terminate" />
-          <span class="policy-label">
-            <strong>终止工作流</strong>
-            <small>失败时剩余章节全部取消</small>
-          </span>
+          <span class="policy-radio" aria-hidden="true" />
         </label>
       </div>
     </div>
@@ -86,6 +84,8 @@ import { computed, ref, watch } from 'vue';
 import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
 import NumberInput from './ui/NumberInput.vue';
+import IconPauseCircle from '~icons/lucide/pause-circle';
+import IconSkipForward from '~icons/lucide/skip-forward';
 import { listModels, listPrompts } from '../ipc/commands';
 import type { ModelConfig, Prompt, CreateWorkflowInput } from '../ipc/types';
 
@@ -106,6 +106,7 @@ const models = ref<ModelConfig[]>([]);
 const promptId = ref(0);
 const modelConfigId = ref(0);
 const label = ref('');
+const labelError = ref<string | null>(null);
 const ctxPrevOriginal = ref<number | null>(0);
 const ctxPrevTransformed = ref<number | null>(0);
 const ctxNextOriginal = ref<number | null>(0);
@@ -122,6 +123,7 @@ const filteredPrompts = computed(() => {
 const canSubmit = computed(() =>
   promptId.value !== 0 &&
   modelConfigId.value !== 0 &&
+  label.value.trim() !== '' &&
   ctxPrevOriginal.value !== null &&
   ctxPrevTransformed.value !== null &&
   ctxNextOriginal.value !== null &&
@@ -136,6 +138,7 @@ watch(open, async (v) => {
   promptId.value = props.defaultPromptId ?? 0;
   modelConfigId.value = props.defaultModelConfigId ?? 0;
   label.value = '';
+  labelError.value = null;
   ctxPrevOriginal.value = 0;
   ctxPrevTransformed.value = 0;
   ctxNextOriginal.value = 0;
@@ -150,7 +153,10 @@ watch(open, async (v) => {
 }, { immediate: true });
 
 async function onSubmit() {
-  if (!canSubmit.value) return;
+  if (!canSubmit.value) {
+    if (label.value.trim() === '') labelError.value = '请填写标签';
+    return;
+  }
   // mode 由所选 prompt 的 kind 决定(后端 create_workflow 会再次校验)。
   const selectedPrompt = prompts.value.find((p) => p.id === promptId.value);
   const mode = selectedPrompt?.kind;
@@ -163,7 +169,7 @@ async function onSubmit() {
   try {
     emit('submit', {
       tn_id: props.tnId,
-      label: label.value.trim() === '' ? null : label.value.trim(),
+      label: label.value.trim(),
       chapter_ids: [...props.selectedChapterIds],
       prompt_id: promptId.value,
       model_config_id: modelConfigId.value,
@@ -201,16 +207,68 @@ async function onSubmit() {
 .row { display: flex; align-items: center; margin-bottom: 12px; gap: 12px; }
 .row > label { width: 100px; font-size: 14px; color: var(--text-secondary); flex-shrink: 0; }
 .row select, .row input { flex: 1; height: 32px; }
-.label-input { padding: 0 8px; border: 1px solid var(--border-color); border-radius: var(--radius-pin); background: var(--color-sheet); color: var(--text-primary); }
+.label-input {
+  padding: 0 8px; border: 1px solid var(--border-color); border-radius: var(--radius-pin);
+  background: var(--color-sheet); color: var(--text-primary);
+}
+.label-input.has-error { border-color: var(--danger); }
+.row-error { color: var(--danger); font-size: 12px; margin: -8px 0 12px 112px; }
 .row.ctx { gap: 16px; }
 .row.ctx > div { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .row.ctx label { width: auto; font-size: 12px; color: var(--text-muted); }
 .error { color: var(--danger); font-size: 12px; margin-top: 8px; }
 .hint { color: var(--text-muted); font-size: 12px; margin-top: 8px; line-height: 1.5; }
 .ctx-hint { color: var(--text-muted); font-size: 11px; margin-top: -4px; margin-bottom: 12px; line-height: 1.5; }
+.row.policy-row { align-items: flex-start; }
 .policy-options { display: flex; flex-direction: column; gap: 8px; flex: 1; }
-.policy-opt { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 13px; }
-.policy-opt input[type='radio'] { margin-top: 4px; }
-.policy-label { display: flex; flex-direction: column; gap: 2px; }
-.policy-label small { color: var(--text-muted); font-size: 11px; }
+.policy-opt {
+  display: flex; align-items: center; gap: 12px; cursor: pointer;
+  font-size: 13px; padding: 10px 14px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-pin);
+  background: var(--color-sheet);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.policy-opt:hover {
+  border-color: var(--border-color);
+  background: var(--bg-hover);
+}
+.policy-opt input[type='radio'] {
+  position: absolute; opacity: 0; pointer-events: none; width: 0; height: 0;
+}
+.policy-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--bg-section);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.policy-icon svg { width: 16px; height: 16px; }
+.policy-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.policy-body strong { color: var(--text-primary); font-weight: 600; line-height: 1.3; }
+.policy-body small { color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.policy-radio {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid var(--border-color);
+  flex-shrink: 0;
+  position: relative;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+.policy-opt.is-active {
+  border-color: var(--color-cinnabar);
+  background: var(--color-cinnabar-light);
+  box-shadow: 0 0 0 1px var(--color-cinnabar) inset;
+}
+.policy-opt.is-active .policy-radio { border-color: var(--color-cinnabar); }
+.policy-opt.is-active .policy-radio::after {
+  content: ''; position: absolute;
+  top: 2px; left: 2px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--color-cinnabar);
+}
+.policy-opt.is-active .policy-icon { background: var(--color-sheet); }
+.policy-opt.is-active[data-policy='pause_and_review'] .policy-icon { color: var(--color-tangerine); }
+.policy-opt.is-active[data-policy='skip_failed'] .policy-icon { color: var(--color-vivid-green); }
 </style>

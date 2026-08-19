@@ -34,8 +34,9 @@ impl CreateWorkflowPayload {
         };
         let on_failure_policy = match self.on_failure_policy.as_str() {
             "pause_and_review" => OnFailurePolicy::PauseAndReview,
-            "terminate" => OnFailurePolicy::Terminate,
             "skip_failed" => OnFailurePolicy::SkipFailed,
+            // 前端已移除 'terminate'(0.2),保留解析仅为兼容历史 IPC 请求。
+            "terminate" => OnFailurePolicy::PauseAndReview,
             other => return Err(Error::Validation(format!("未知 on_failure_policy: {other}"))),
         };
         Ok(WorkflowCreate {

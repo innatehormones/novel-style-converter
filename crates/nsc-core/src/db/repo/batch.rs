@@ -202,15 +202,17 @@ fn str_to_status(s: &str) -> rusqlite::Result<BatchStatus> {
 fn policy_to_str(p: OnFailurePolicy) -> &'static str {
     match p {
         OnFailurePolicy::PauseAndReview => "pause_and_review",
-        OnFailurePolicy::Terminate      => "terminate",
         OnFailurePolicy::SkipFailed     => "skip_failed",
     }
 }
 fn str_to_policy(s: &str) -> rusqlite::Result<OnFailurePolicy> {
     match s {
         "pause_and_review" => Ok(OnFailurePolicy::PauseAndReview),
-        "terminate"        => Ok(OnFailurePolicy::Terminate),
         "skip_failed"      => Ok(OnFailurePolicy::SkipFailed),
+        // 历史库可能残留 'terminate'(0.2 之前作为 OnFailurePolicy::Terminate 写入过),
+        // 旧值已不再代表"全自动终止",降级为最保守的 PauseAndReview 让数据仍可读。
+        // spec 见 docs/spec.md §5.1。
+        "terminate" => Ok(OnFailurePolicy::PauseAndReview),
         other => Err(rusqlite::Error::FromSqlConversionFailure(
             0, rusqlite::types::Type::Text,
             format!("unknown on_failure_policy: {other}").into())),

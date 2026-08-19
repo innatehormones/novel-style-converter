@@ -18,11 +18,9 @@ pub enum BatchStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnFailurePolicy {
-    /// 章节失败 → batch 转 Paused 等用户决策
+    /// 章节失败 → batch 转 Paused 等用户决策(retry / skip / terminate 任选)。
     PauseAndReview,
-    /// 章节失败 → 同 batch 后续章节 cancelled + batch 转 Terminated
-    Terminate,
-    /// 章节失败 → 该章标 Skipped,继续 dispatch 下一章(batch 留 Running)
+    /// 章节失败 → 该章标 Skipped,继续 dispatch 下一章(batch 留 Running)。
     SkipFailed,
 }
 
