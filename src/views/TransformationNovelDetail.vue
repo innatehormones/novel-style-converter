@@ -25,6 +25,7 @@ import PromoteWorkflowDialog from '../components/PromoteWorkflowDialog.vue';
 import Dialog from '../components/ui/Dialog.vue';
 import DataTable from '../components/ui/DataTable.vue';
 import Tag from '../components/ui/Tag.vue';
+import { formatBatchStatus, formatChapterStatus } from '../utils/status-locale';
 import RegeneratePreviewDialog from '../components/RegeneratePreviewDialog.vue';
 
 const route = useRoute();
@@ -588,36 +589,7 @@ async function doRetry() {
 function fmtTime(s: string | null | undefined): string {
   return formatTime(s);
 }
-/// 章节 status 中文映射 —— 后端 TransformStatus 6 值。
-/// skipped 是失败策略 = skip_failed 或 paused 时用户显式跳过,cancelled 是终止运行。
-/// 所有 6 值必须映射,否则 default 会把原始字符串甩到 UI 上。
-function formatChapterStatus(s: TransformStatus): string {
-  switch (s) {
-    case 'pending':   return '待处理';
-    case 'running':   return '转换中';
-    case 'done':      return '已完成';
-    case 'failed':    return '失败';
-    case 'skipped':   return '已跳过';
-    case 'cancelled': return '已取消';
-    default:          return s;
-  }
-}
 
-/// 工作流 status 中文映射 —— 后端 BatchStatus 7 值。
-/// paused 是失败策略 = pause_and_review 时批停在等用户决策;
-/// completed/terminated/cancelled 是最终终态。所有 7 值必须映射。
-function formatBatchStatus(s: WorkflowStatus): string {
-  switch (s) {
-    case 'pending':    return '待处理';
-    case 'running':    return '转换中';
-    case 'stopped':    return '已停止';
-    case 'paused':     return '已暂停';
-    case 'completed':  return '已完成';
-    case 'terminated': return '已终止';
-    case 'cancelled':  return '已取消';
-    default:           return s;
-  }
-}
 
 // 新建工作流弹窗
 const createBatchOpen = ref(false);
