@@ -15,6 +15,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { nextStack } from './dialog-stack';
 
 const props = withDefaults(
   defineProps<{ title?: string; width?: number | string; size?: 'default' | 'full' }>(),
@@ -27,16 +28,16 @@ const widthCss = computed(() =>
   typeof props.width === 'number' ? `${props.width}px` : props.width,
 );
 
-/// 弹窗层级管理：模块级 stack 计数器,每次 open 变 true 时分配新的 z-index。
-/// 后打开的弹窗 z-index 更高,自然叠加在先打开的弹窗之上,避免嵌套弹窗被父弹窗的 overlay 遮挡。
-/// 上限 9999 后回卷到 1001,防止长期使用 z-index 无限增长。
-let stack = 1000;
+/// 弹窗层级管理:
+/// - nextStack() 返回全局递增的 z-index,确保后打开的弹窗总是叠在先打开的之上。
+/// - stack 计数器在 dialog-stack.ts 里 —— 必须是真正的模块级(在 <script setup>
+///   之外),否则每个 Dialog 实例独立计数,撞 z-index 后退化为 DOM 顺序,导致
+///   嵌套弹窗被父弹窗遮挡。
+/// - 上限 9999 后回卷到 1001,防止长期使用 z-index 无限增长。
 const zIndexValue = ref(1000);
 watch(open, (isOpen) => {
   if (isOpen) {
-    stack += 1;
-    if (stack > 9999) stack = 1001;
-    zIndexValue.value = stack;
+    zIndexValue.value = nextStack();
   }
 }, { immediate: true });
 
