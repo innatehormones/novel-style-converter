@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="open" class="overlay" @click.self="close">
+    <div v-if="open" class="overlay" :style="{ zIndex: zIndexValue }" @click.self="close">
       <div class="dialog" :class="{ 'dialog-full': size === 'full' }" :style="size === 'full' ? undefined : { width: widthCss }">
         <header class="header">
           <span class="title">{{ title }}</span>
@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 const props = withDefaults(
   defineProps<{ title?: string; width?: number | string; size?: 'default' | 'full' }>(),
@@ -26,6 +26,19 @@ const open = defineModel<boolean>('open', { required: true });
 const widthCss = computed(() =>
   typeof props.width === 'number' ? `${props.width}px` : props.width,
 );
+
+/// 弹窗层级管理：模块级 stack 计数器,每次 open 变 true 时分配新的 z-index。
+/// 后打开的弹窗 z-index 更高,自然叠加在先打开的弹窗之上,避免嵌套弹窗被父弹窗的 overlay 遮挡。
+/// 上限 9999 后回卷到 1001,防止长期使用 z-index 无限增长。
+let stack = 1000;
+const zIndexValue = ref(1000);
+watch(open, (isOpen) => {
+  if (isOpen) {
+    stack += 1;
+    if (stack > 9999) stack = 1001;
+    zIndexValue.value = stack;
+  }
+}, { immediate: true });
 
 function close() {
   open.value = false;

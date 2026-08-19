@@ -10,10 +10,12 @@ import {
 import type {
   SourceChapterRow, WorkflowSummary, WorkflowChapterRow, ChapterWorkflowResultRow,
   CreateWorkflowInput, Chapter, TransformationNovelSummary, DataAssetRow,
+  WorkflowStatus, TransformStatus,
 } from '../ipc/types';
 import Button from '../components/ui/Button.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
 import IconArrowLeft from '~icons/lucide/arrow-left';
+import IconAlertTriangle from '~icons/lucide/alert-triangle';
 import { countWords, formatTime, formatWordCount } from '../utils/format';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import CreateBatchDialog from '../components/CreateBatchDialog.vue';
@@ -113,7 +115,7 @@ const workflowWidths: Record<string, number> = {
   skipped: 80,
   created: 160,
   ended: 160,
-  actions: 140,
+  actions: 200,
 };
 
 /// 工作流详情表格列
@@ -122,15 +124,13 @@ const workflowChapterColumns = [
   { accessorKey: 'chapter_title', id: 'title', header: '标题', enableSorting: true },
   { id: 'status', header: '状态', enableSorting: true },
   { accessorKey: 'content_preview', id: 'preview', header: '结果预览', enableSorting: false },
-  { accessorKey: 'error', header: '错误', enableSorting: false },
   { id: 'actions', header: '操作', enableSorting: false },
 ];
 const workflowChapterWidths: Record<string, number> = {
   pick: 40,
-  title: 200,
-  status: 100,
-  preview: 240,
-  error: 200,
+  title: 220,
+  status: 110,
+  preview: 320,
   actions: 200,
 };
 
@@ -154,7 +154,7 @@ function toggleSelect(chapterId: number, on: boolean) {
 ///            → 多次应用可累加:先 1~100,再 200~300,得到 1~300;再 50~150,
 ///            得到 1~49 + 151~300。这是用户实际选长篇小说的常用模式。
 type RangeMode = 'replace' | 'toggle';
-const rangeMode = ref<RangeMode>('toggle');
+const rangeMode = ref<RangeMode>('replace');
 const rangeFrom = ref<number | null>(null);
 const rangeTo = ref<number | null>(null);
 /// 输入合法性:不能 < 1,不能 > list.length,任一不满足给错误样式并禁用"应用"。
@@ -223,24 +223,41 @@ const stopConfirmOpen = ref(false);
 const stopTargetId = ref<number | null>(null);
 const retrySelectedIds = ref<Set<number>>(new Set());
 
-// 工作流转正
+/// 通用错误/提示弹窗 —— 后端报错或前置校验失败时统一弹出,不再静默 console.error。
+const alertOpen = ref(false);
+const alertTitle = ref('提示');
+const alertMessage = ref('');
+function showAlert(title: string, message: string) {
+  alertTitle.value = title;
+  alertMessage.value = message;
+  alertOpen.value = true;
+}
+
+// 工作流转正 —— 触发源已移到外面的列表 actions 列,故不绑定 modal 的 selectedWorkflow。
+// promoteTargetId 独立记录当前在转正的 workflow,转正期间 modal 是否打开无关。
+const promoteTargetId = ref<number | null>(null);
+const promoteTarget = computed<WorkflowSummary | null>(() => {
+  if (promoteTargetId.value === null) return null;
+  return workflows.value.find((w) => w.id === promoteTargetId.value) ?? null;
+});
 const promoteOpen = ref(false);
 const promoteSubmitting = ref(false);
 const promoteError = ref<string | null>(null);
 
-function openPromoteDialog() {
-  if (selectedWorkflow.value === null) return;
+function openPromoteDialog(w: WorkflowSummary) {
+  promoteTargetId.value = w.id;
   promoteError.value = null;
   promoteOpen.value = true;
 }
 async function confirmPromote(title: string) {
-  const sw = selectedWorkflow.value;
-  if (sw === null) return;
+  const tid = promoteTargetId.value;
+  if (tid === null) return;
   promoteSubmitting.value = true;
   promoteError.value = null;
   try {
-    await store.promote(sw.id, title);
+    await store.promote(tid, title);
     promoteOpen.value = false;
+    promoteTargetId.value = null;
   } catch (e: unknown) {
     promoteError.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -298,7 +315,8 @@ function closeWorkflowPanel() {
 const detailChapter = ref<WorkflowChapterRow | null>(null);
 const detailLoading = ref(false);
 const detailTransformed = ref<string | null>(null);
-const detailTransformedStatus = ref<string | null>(null);
+/// 转换结果的状态 tag —— 与 detailTransformed 同步设置/清空。类型用 TransformStatus 让模板能用 formatChapterStatus 转中文。
+const detailTransformedStatus = ref<TransformStatus | null>(null);
 const detailSourceWordCount = computed<number>(() => sourceChapterDetail.value?.word_count ?? 0);
 const detailTransformedWordCount = computed<number>(() => detailTransformed.value === null ? 0 : countWords(detailTransformed.value));
 async function openChapterDetail(c: WorkflowChapterRow) {
@@ -334,6 +352,11 @@ function closeChapterDetail() {
   detailTransformedStatus.value = null;
 }
 async function retryFromDetail() {
+  const blocked = batchRetryBlockedReason.value;
+  if (blocked !== null) {
+    showAlert('无法重试', blocked);
+    return;
+  }
   const c = detailChapter.value;
   if (c === null || selectedWorkflowId.value === null) return;
   retrySubmitting.value = true;
@@ -374,15 +397,35 @@ async function onPreviewCommitted() {
 async function retrySingleChapter(c: WorkflowChapterRow) {
   if (selectedWorkflowId.value === null) return;
   if (!canRetryChapter(c)) return;
+  const blocked = batchRetryBlockedReason.value;
+  if (blocked !== null) {
+    showAlert('无法重试', blocked);
+    return;
+  }
   retrySubmitting.value = true;
   try {
     await store.retry(selectedWorkflowId.value, [c.chapter_id]);
     await store.loadChapters(selectedWorkflowId.value);
   } catch (e: unknown) {
-    console.error(e);
+    showAlert('重试失败', e instanceof Error ? e.message : String(e));
   } finally {
     retrySubmitting.value = false;
   }
+}
+
+// 失败详情弹窗 —— 与"详情"分开语义:详情看 source/transformed,失败详情只看错误。
+const failureDetailChapter = ref<WorkflowChapterRow | null>(null);
+function openFailureDetail(row: WorkflowChapterRow) {
+  failureDetailChapter.value = row;
+}
+function closeFailureDetail() {
+  failureDetailChapter.value = null;
+}
+async function retryFromFailureDetail() {
+  const ch = failureDetailChapter.value;
+  if (ch === null) return;
+  await retrySingleChapter(ch);
+  failureDetailChapter.value = null;
 }
 
 function askStopWorkflow(id: number) {
@@ -456,6 +499,32 @@ function canRetryChapter(c: WorkflowChapterRow): boolean {
   return c.status === 'failed' || c.status === 'skipped';
 }
 
+/// 后端 retry_empty_slots 允许集:Stopped / (Running|Paused 且 in-flight=0)。
+/// Terminated/Cancelled/Completed/Pending 或还有 in-flight 时,后端会抛 Validation。
+/// UI 提前禁用并说明原因,避免点了再被后端拒绝(bugfix: 重试按钮在 Terminated 等终态可点)。
+/// in-flight 判定以章节 status='running' 计数,与 batch_scheduler.rs 的 SQL 一致。
+const BATCH_RETRY_BLOCK_REASON: Record<WorkflowStatus, string | null> = {
+  pending:    '工作流尚未开始,无可重试章节',
+  running:    null, // 由 in-flight 进一步判断
+  stopped:    null,
+  paused:     null, // 由 in-flight 进一步判断
+  completed:  '工作流已完成,无可重试章节',
+  terminated: '工作流已终止,无法重试。如需重新转换,请新建工作流',
+  cancelled:  '工作流已取消,无法重试。如需重新转换,请新建工作流',
+};
+const batchRetryBlockedReason = computed<string | null>(() => {
+  const w = selectedWorkflow.value;
+  if (w === null) return null;
+  const staticReason = BATCH_RETRY_BLOCK_REASON[w.status];
+  if (staticReason !== null) return staticReason;
+  // running / paused: 仅当无 in-flight 时可重试
+  if (w.status === 'running' || w.status === 'paused') {
+    const hasInFlight = selectedWorkflowChapters.value.some((c) => c.status === 'running');
+    return hasInFlight ? '有章节仍在转换中,请等待完成后再试' : null;
+  }
+  return null;
+});
+
 const retrySubmitting = ref(false);
 const POLLABLE_STATUSES = new Set(['running']);
 /// 还有 pending/running 章节时也应继续轮询 —— backend 把最后
@@ -472,10 +541,10 @@ const isBatchLive = computed<boolean>(() => {
   const chapters = store.chaptersByBatch.get(s.id) ?? [];
   return chapters.some((c) => ACTIVE_CHAPTER_STATUSES.has(c.status));
 });
+/// 显示/启用"重试所选"按钮的前提:batch 状态允许重试(由 batchRetryBlockedReason 决定)。
+/// 之前写死 batch.status === 'stopped' 太严,会漏掉 running/paused 无 in-flight 的合法场景。
 const canRetrySelection = computed<boolean>(() => {
-  const s = selectedWorkflow.value;
-  if (s === null) return false;
-  if (s.status !== 'stopped') return false;
+  if (batchRetryBlockedReason.value !== null) return false;
   return retrySelectedIds.value.size > 0;
 });
 let chapterPollHandle: number | null = null;
@@ -502,6 +571,11 @@ onUnmounted(() => stopChapterPoll());
 
 async function doRetry() {
   if (selectedWorkflowId.value === null) return;
+  const blocked = batchRetryBlockedReason.value;
+  if (blocked !== null) {
+    showAlert('无法重试', blocked);
+    return;
+  }
   const chapterIds = selectedWorkflowChapters.value
     .filter((c) => retrySelectedIds.value.has(c.tc_id))
     .map((c) => c.chapter_id);
@@ -512,7 +586,7 @@ async function doRetry() {
     retrySelectedIds.value = new Set();
     await store.loadChapters(selectedWorkflowId.value);
   } catch (e: unknown) {
-    console.error(e);
+    showAlert('重试失败', e instanceof Error ? e.message : String(e));
   } finally {
     retrySubmitting.value = false;
   }
@@ -521,16 +595,34 @@ async function doRetry() {
 function fmtTime(s: string | null | undefined): string {
   return formatTime(s);
 }
-function formatWorkflowStatus(s: string): string {
+/// 章节 status 中文映射 —— 后端 TransformStatus 6 值。
+/// skipped 是失败策略 = skip_failed 或 paused 时用户显式跳过,cancelled 是终止运行。
+/// 所有 6 值必须映射,否则 default 会把原始字符串甩到 UI 上。
+function formatChapterStatus(s: TransformStatus): string {
   switch (s) {
-    case 'pending': return '待处理';
-    case 'running': return '转换中';
-    case 'done': return '已完成';
-    case 'failed': return '失败';
-    case 'skipped': return '已跳过';
+    case 'pending':   return '待处理';
+    case 'running':   return '转换中';
+    case 'done':      return '已完成';
+    case 'failed':    return '失败';
+    case 'skipped':   return '已跳过';
     case 'cancelled': return '已取消';
-    case 'stopped': return '已停止';
-    default: return s;
+    default:          return s;
+  }
+}
+
+/// 工作流 status 中文映射 —— 后端 BatchStatus 7 值。
+/// paused 是失败策略 = pause_and_review 时批停在等用户决策;
+/// completed/terminated/cancelled 是最终终态。所有 7 值必须映射。
+function formatBatchStatus(s: WorkflowStatus): string {
+  switch (s) {
+    case 'pending':    return '待处理';
+    case 'running':    return '转换中';
+    case 'stopped':    return '已停止';
+    case 'paused':     return '已暂停';
+    case 'completed':  return '已完成';
+    case 'terminated': return '已终止';
+    case 'cancelled':  return '已取消';
+    default:           return s;
   }
 }
 
@@ -801,7 +893,7 @@ watch(() => sources.value, (list) => {
       >
         <template #cell-status="{ row }">
           <div class="cell-status">
-            <span class="status" :class="row.status">{{ formatWorkflowStatus(row.status) }}</span>
+<span class="status" :class="row.status">{{ formatBatchStatus(row.status) }}</span>
             <span
               v-if="row.promoted_count > 0"
               class="promoted-tag"
@@ -817,6 +909,14 @@ watch(() => sources.value, (list) => {
         </template>
         <template #cell-actions="{ row }">
           <button type="button" class="row-link" @click="openWorkflowPanel(row)">详情</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <button
+            type="button"
+            class="row-link"
+            :disabled="row.status !== 'stopped'"
+            :title="row.status === 'stopped' ? '' : '该工作流尚未停止,无法转正'"
+            @click="openPromoteDialog(row)"
+          >转正</button>
           <span class="row-sep" aria-hidden="true">·</span>
           <button
             type="button"
@@ -873,7 +973,7 @@ watch(() => sources.value, (list) => {
         <div class="wf-status-left">
           <span class="status" :class="selectedWorkflow.status">
             <span v-if="selectedWorkflow.status === 'running'" class="dot dot-running" />
-            {{ formatWorkflowStatus(selectedWorkflow.status) }}
+            {{ formatBatchStatus(selectedWorkflow.status) }}
           </span>
           <span class="wf-counts">
             共 <strong>{{ selectedWorkflow.total_count }}</strong> 章
@@ -909,26 +1009,13 @@ watch(() => sources.value, (list) => {
             v-if="canRetrySelection"
             kind="primary"
             size="small"
-            :disabled="retrySelectedIds.size === 0 || retrySubmitting"
+            :disabled="retrySelectedIds.size === 0 || retrySubmitting || batchRetryBlockedReason !== null"
+            :title="batchRetryBlockedReason ?? ''"
             :loading="retrySubmitting"
             @click="doRetry"
           >重试所选 ({{ retrySelectedIds.size }})</Button>
         </div>
-        <div class="wf-actions-right">
-          <Button
-            v-if="selectedWorkflow.status === 'stopped'"
-            size="small"
-            :loading="promoteSubmitting"
-            @click="openPromoteDialog"
-          >转为数据资产</Button>
-          <Button
-            v-if="DELETEABLE_STATUSES.has(selectedWorkflow.status)"
-            kind="danger"
-            size="small"
-            :loading="deleteSubmitting"
-            @click="askDeleteWorkflow(selectedWorkflow)"
-          >删除工作流</Button>
-        </div>
+        <!-- 转正 / 删除已统一到外层列表 actions 列,modal 内不再放。 -->
       </div>
       <DataTable
         v-if="selectedWorkflowChapters.length > 0"
@@ -936,7 +1023,7 @@ watch(() => sources.value, (list) => {
         :data="selectedWorkflowChapters"
         :row-key="(row: WorkflowChapterRow) => row.tc_id"
         :widths="workflowChapterWidths"
-        :truncate-columns="['title', 'preview', 'error']"
+        :truncate-columns="['title', 'preview']"
         frozen-column="actions"
         empty-text="暂无章节"
       >
@@ -952,8 +1039,9 @@ watch(() => sources.value, (list) => {
           />
         </template>
         <template #cell-pick="{ row }">
+          <!-- batch 状态允许重试时才显示 checkbox:整列勾选不可用时单选也没意义 -->
           <input
-            v-if="canRetryChapter(row)"
+            v-if="canRetryChapter(row) && batchRetryBlockedReason === null"
             type="checkbox"
             :disabled="!row.is_empty_slot"
             :checked="retrySelectedIds.has(row.tc_id)"
@@ -963,27 +1051,34 @@ watch(() => sources.value, (list) => {
         <template #cell-status="{ row }">
           <span v-if="row.status === 'running'" class="dot dot-running" />
           <span v-else-if="row.status === 'pending'" class="dot dot-pending" />
-          <span class="status" :class="row.status">{{ formatWorkflowStatus(row.status) }}</span>
+          <span v-else-if="row.status === 'failed' || row.status === 'skipped'" class="status-warn-mark" :title="row.error ?? ''">
+            <IconAlertTriangle class="warn-icon" />
+          </span>
+          <span class="status" :class="row.status">{{ formatChapterStatus(row.status) }}</span>
         </template>
         <template #cell-actions="{ row }">
+          <!-- 详情：始终可见（看 source/transformed） -->
           <button type="button" class="row-link" @click="openChapterDetail(row)">详情</button>
-          <span class="row-sep" aria-hidden="true">·</span>
-          <!-- 重新生成：任意非 running/pending 状态都能点（包括 done/failed/skipped/cancelled） -->
-          <button
-            type="button"
-            class="row-link"
-            :disabled="row.status === 'running' || row.status === 'pending'"
-            :title="(row.status === 'running' || row.status === 'pending') ? '该章节正在处理中' : ''"
-            @click="openRegenerateDialog(row)"
-          >重新生成</button>
-          <span class="row-sep" aria-hidden="true">·</span>
-          <!-- 重试：仅 failed/skipped + 空槽（与现有 canRetryChapter 一致） -->
-          <button
-            type="button"
-            class="row-link"
-            :disabled="!canRetryChapter(row)"
-            @click="retrySingleChapter(row)"
-          >重试</button>
+          <!-- done: 已转换但用户想再试 -->
+          <template v-if="row.status === 'done'">
+            <span class="row-sep" aria-hidden="true">·</span>
+            <button type="button" class="row-link" @click="openRegenerateDialog(row)">重新生成</button>
+          </template>
+          <!-- failed/skipped: 失败信息单独弹框 + 重试 -->
+          <template v-else-if="row.status === 'failed' || row.status === 'skipped'">
+            <span class="row-sep" aria-hidden="true">·</span>
+            <button type="button" class="row-link" @click="openFailureDetail(row)">失败详情</button>
+            <span class="row-sep" aria-hidden="true">·</span>
+            <!-- 重试:is_empty_slot=false 或 batch 状态不允许时禁用 -->
+            <button
+              type="button"
+              class="row-link"
+              :disabled="!row.is_empty_slot || batchRetryBlockedReason !== null"
+              :title="batchRetryBlockedReason ?? (!row.is_empty_slot ? '该章节结果槽非空,无法重试' : '')"
+              @click="retrySingleChapter(row)"
+            >重试</button>
+          </template>
+          <!-- pending/running/cancelled/terminated: 只剩详情 -->
         </template>
       </DataTable>
       <div v-else class="empty">暂无章节</div>
@@ -991,24 +1086,26 @@ watch(() => sources.value, (list) => {
 
     <!-- Chapter Detail modal (within Workflow Detail) -->
     <Dialog v-if="detailChapter !== null" :open="true" title="章节详情" :width="1200" @update:open="closeChapterDetail">
+      <!-- 失败/跳过的章节:错误信息去"失败详情"弹窗看(职责分开,避免两个地方重复展示) -->
       <div class="detail-grid">
         <section>
           <h4>
-            Source Original
+            原文
             <span v-if="!sourceChapterLoading && sourceChapterText" class="word-count">{{ formatWordCount(detailSourceWordCount) }}</span>
           </h4>
-          <div v-if="sourceChapterLoading" class="hint">Loading...</div>
+          <div v-if="sourceChapterLoading" class="hint">加载中...</div>
           <pre v-else-if="sourceChapterText" class="result-content">{{ sourceChapterText }}</pre>
-          <div v-else class="hint">No source text</div>
+          <div v-else class="hint">暂无原文</div>
         </section>
         <section>
           <h4>
-            Transformed
-            <span v-if="detailTransformedStatus" class="status" :class="detailTransformedStatus">{{ detailTransformedStatus }}</span>
+            转换结果
+            <span v-if="detailTransformedStatus" class="status" :class="detailTransformedStatus">{{ formatChapterStatus(detailTransformedStatus) }}</span>
             <span v-if="!detailLoading && detailTransformed" class="word-count">{{ formatWordCount(detailTransformedWordCount) }}</span>
           </h4>
-          <div v-if="detailLoading" class="hint">Loading...</div>
+          <div v-if="detailLoading" class="hint">加载中...</div>
           <pre v-else-if="detailTransformed" class="result-content">{{ detailTransformed }}</pre>
+          <div v-else-if="detailChapter.status === 'failed' || detailChapter.status === 'skipped'" class="hint">未生成结果</div>
           <div v-else class="hint">尚未转换</div>
         </section>
       </div>
@@ -1017,7 +1114,8 @@ watch(() => sources.value, (list) => {
           v-if="detailChapter !== null && canRetryChapter(detailChapter)"
           kind="primary"
           size="small"
-          :disabled="!detailChapter.is_empty_slot || retrySubmitting"
+          :disabled="!detailChapter.is_empty_slot || retrySubmitting || batchRetryBlockedReason !== null"
+          :title="batchRetryBlockedReason ?? ''"
           :loading="retrySubmitting"
           @click="retryFromDetail"
         >重试</Button>
@@ -1025,8 +1123,36 @@ watch(() => sources.value, (list) => {
       </template>
     </Dialog>
 
+    <!-- 失败详情弹窗 —— 与"详情"分开语义:只看错误 + 重试入口 -->
+    <Dialog
+      v-if="failureDetailChapter !== null"
+      :open="true"
+      :title="`失败详情 · 第${failureDetailChapter.chapter_idx} 章 · ${failureDetailChapter.chapter_title}`"
+      :width="600"
+      @update:open="closeFailureDetail"
+    >
+      <div class="failure-detail">
+        <div class="failure-meta">
+          <span class="status" :class="failureDetailChapter.status">{{ formatChapterStatus(failureDetailChapter.status) }}</span>
+          <span class="failure-meta-text">工作流 #{{ selectedWorkflowId }} · 章节 ID {{ failureDetailChapter.chapter_id }}</span>
+        </div>
+        <h4 class="failure-h">错误信息</h4>
+        <pre v-if="failureDetailChapter.error" class="failure-body">{{ failureDetailChapter.error }}</pre>
+        <div v-else class="failure-empty">未提供错误信息</div>
+      </div>
+      <template #footer>
+        <Button
+          kind="primary"
+          size="small"
+          :disabled="!failureDetailChapter.is_empty_slot || retrySubmitting || batchRetryBlockedReason !== null"
+          :title="batchRetryBlockedReason ?? ''"
+          :loading="retrySubmitting"
+          @click="retryFromFailureDetail"
+        >重试</Button>
+        <Button size="small" @click="closeFailureDetail">关闭</Button>
+      </template>
+    </Dialog>
 
-    
     <!-- 工作流删除确认弹窗(自带 deleteError 展示) -->
     <ConfirmDialog
       v-model:open="deleteConfirmOpen"
@@ -1038,13 +1164,13 @@ watch(() => sources.value, (list) => {
     />
     <div v-if="deleteSubmitting" class="hint center">删除中...</div>
 <PromoteWorkflowDialog
-      v-if="selectedWorkflow !== null"
+      v-if="promoteTarget !== null"
       v-model:open="promoteOpen"
-      :workflow-label="selectedWorkflow.label ?? `工作流 #${selectedWorkflow.id}`"
+      :workflow-label="promoteTarget.label ?? `工作流 #${promoteTarget.id}`"
       :source-data-asset-title="tnTitle"
-      :success-count="selectedWorkflow.done_count"
-      :fail-count="selectedWorkflow.failed_count"
-      :skip-count="selectedWorkflow.skipped_count"
+      :success-count="promoteTarget.done_count"
+      :fail-count="promoteTarget.failed_count"
+      :skip-count="promoteTarget.skipped_count"
       @confirm="confirmPromote"
     />
 
@@ -1066,6 +1192,18 @@ watch(() => sources.value, (list) => {
       confirm-text="停止"
       @confirm="confirmStopWorkflow"
     />
+
+    <!-- 通用提示弹窗：后端报错或前置校验失败时统一弹出 -->
+    <Dialog
+      v-model:open="alertOpen"
+      :title="alertTitle"
+      :width="420"
+    >
+      <p class="message">{{ alertMessage }}</p>
+      <template #footer>
+        <Button @click="alertOpen = false">确定</Button>
+      </template>
+    </Dialog>
 
     <RegeneratePreviewDialog
       v-if="regenChapter !== null"
@@ -1251,6 +1389,32 @@ watch(() => sources.value, (list) => {
 }
 .dot-running { background: var(--color-cinnabar); animation: pulse 1.2s ease-in-out infinite; }
 .dot-pending { background: var(--text-muted); opacity: 0.55; }
+/* 失败/跳过行的状态列前 ⚠️ 标识 —— 视觉上快速定位,完整错误去 Chapter Detail 看。 */
+.status-warn-mark { display: inline-flex; align-items: center; color: var(--danger); margin-right: 4px; }
+.warn-icon { width: 14px; height: 14px; flex-shrink: 0; }
+/* 失败详情弹窗 —— 紧凑布局,主体错误信息。 */
+.failure-detail { display: flex; flex-direction: column; gap: 12px; }
+.failure-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.failure-meta-text { color: var(--text-muted); font-size: 12px; font-family: var(--font-mono); }
+.failure-h { margin: 0; font-size: 13px; color: var(--text-secondary); font-weight: 600; }
+.failure-body {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--bg-section);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pin);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow: auto;
+  color: var(--text-primary);
+}
+.failure-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+
+
 .chapter-row.running .status.running { background: var(--color-cinnabar); color: #faf6ee; border-color: var(--color-cinnabar); }
 .spinner-dot {
   display: inline-block;
