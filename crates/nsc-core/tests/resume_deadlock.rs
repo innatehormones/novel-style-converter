@@ -258,14 +258,17 @@ fn resume_retry_does_not_deadlock() {
     ).expect("Retry 必须不卡死");
     assert_eq!(updated.status, BatchStatus::Running, "Retry → batch=Running, 实际 {:?}", updated.status);
 
-    // Retry 只动指定那 1 个 tc → pending;我们的 seed 只有 1 个 tc,失败后 Retry 让它重新派。
+    // Retry 后该 tc 应离开 failed —— 要么 pending(resume 的 UPDATE 还没被 worker 覆盖),
+    // 要么 running(worker 已 mark_running),总之不应再是 failed。
+    // 测 pending 是不稳定状态:SlowEchoProvider 之前 worker 会极快 mark_running(几 ms 内),
+    // 测试读 DB 时常已错过 pending 窗口。tc 非 failed 即说明 dispatch 成功。
     let db = Db::open(&path).unwrap();
-    let pending_count: i64 = db.lock().query_row(
-        "SELECT COUNT(*) FROM transformation_chapters WHERE batch_id=?1 AND status='pending'",
+    let failed_count: i64 = db.lock().query_row(
+        "SELECT COUNT(*) FROM transformation_chapters WHERE batch_id=?1 AND status='failed'",
         rusqlite::params![batch_id],
         |r| r.get(0),
     ).unwrap();
-    assert_eq!(pending_count, 1, "Retry 后该 tc → pending(被 dispatch), 实际 {pending_count}");
+    assert_eq!(failed_count, 0, "Retry 后该 tc 应已离开 failed, 实际 failed={failed_count}");
 }
 // ===== 同步递归链爆栈回归 =====
 //
