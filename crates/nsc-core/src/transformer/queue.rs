@@ -27,10 +27,26 @@ pub type Notifier = Arc<dyn Fn(i64, bool, Option<String>, String) + Send + Sync>
 
 type NotifySlot = Arc<std::sync::Mutex<Option<Notifier>>>;
 
+/// Pending notifier 闭包 + 上下文。worker 在每次 `run_job` 后 drain 这些 envelope,
+/// 代替直接调用 —— 这样 `fire → cb → enqueue → fire → ...` 的递归链被切断,
+/// 栈深度始终 = 1,SkipFailed 大批失败也不会栈溢出。
+struct CallbackEnvelope {
+    cb: Notifier,
+    tid: i64,
+    success: bool,
+    error: Option<String>,
+    content: String,
+}
+
+/// `Vec<CallbackEnvelope>` 由所有 worker 共享。push / drain 短临界区,
+/// 不嵌套重入(`queue_callback` 取闭包和 push 之间无 await/重锁)。
+type PendingCallbacks = Arc<std::sync::Mutex<Vec<CallbackEnvelope>>>;
+
 pub struct JobQueue {
     tx: mpsc::UnboundedSender<JobSpec>,
     shared: super::job::Shared,
     notify: NotifySlot,
+    pending_callbacks: PendingCallbacks,
 }
 
 impl JobQueue {
@@ -66,6 +82,7 @@ impl JobQueue {
         let db_factory: DbFactory = Arc::new(db_factory);
         let provider_factory: ProviderFactory = Arc::new(provider_factory);
         let notify: NotifySlot = Arc::new(std::sync::Mutex::new(None));
+        let pending_callbacks: PendingCallbacks = Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorder: Arc<dyn AiCallRecorder> = recorder;
         let close_thinking: Arc<HashSet<String>> = close_thinking;
         // 屏障同步 worker 与主线程:`JobQueue::new` 返回前确保每个 worker
@@ -84,6 +101,7 @@ impl JobQueue {
             let ready = ready.clone();
             let recorder = recorder.clone();
             let close_thinking = close_thinking.clone();
+            let pending_callbacks = pending_callbacks.clone();
             // 每个 worker 内部独立的 provider cache —— 见 provider_cache.rs。
             std::thread::spawn(move || {
                 // worker-local cache; 生命周期与 worker 线程一致。
@@ -117,13 +135,22 @@ impl JobQueue {
                         // cache miss 时通过 provider_factory 重建一次,后续 job 直接命中。
                         let cached = cache.get_or_create(&job.model_config)
                             .expect("provider cache get_or_create");
-                        db = run_job(shared.clone(), db, cached.provider, cached.sem, job, notify.clone(), recorder.clone(), close_thinking.clone()).await;
+                        db = run_job(shared.clone(), db, cached.provider, cached.sem, job, notify.clone(), pending_callbacks.clone(), recorder.clone(), close_thinking.clone()).await;
+                        // drain pending notifier callbacks(锁内 swap,锁外 invoke)
+                        // 切断 `fire → cb → enqueue → fire → ...` 的同步递归链 —— 栈深度恒为 1。
+                        let drained: Vec<CallbackEnvelope> = {
+                            let mut g = pending_callbacks.lock().expect("callbacks lock");
+                            std::mem::take(&mut *g)
+                        };
+                        for env in drained {
+                            (env.cb)(env.tid, env.success, env.error, env.content);
+                        }
                     }
                 });
             });
         }
         ready.wait();
-        Self { tx, shared, notify }
+        Self { tx, shared, notify, pending_callbacks }
     }
 
     /// 注册队列变更回调。每次 `enqueue` / job 状态转换(Running / Done / Failed)末尾触发。
@@ -132,16 +159,27 @@ impl JobQueue {
         *self.notify.lock().expect("notify lock") = Some(notifier);
     }
 
-    /// 点火 notifier —— **必须先克隆闭包出锁,再调用**(`std::sync::Mutex` 不可重入;
-    /// 若闭包里再调 `enqueue` 会重锁导致死锁)。
-    fn fire(notify: &NotifySlot, tid: i64, success: bool, error: Option<String>, content: String) {
+    /// 入队一个 notifier 回调(不立即执行)。
+    /// worker loop 在 `run_job` 之后 drain 这些 envelope 并执行,
+    /// 这样 `fire → cb → enqueue → fire → ...` 的同步递归链被切断,
+    /// 栈深度始终 = 1 —— SkipFailed 大批失败也不会爆栈。
+    /// **必须先克隆闭包出锁**,再 push 进 `callbacks`(`std::sync::Mutex` 不可重入)。
+    fn queue_callback(
+        notify: &NotifySlot,
+        callbacks: &std::sync::Mutex<Vec<CallbackEnvelope>>,
+        tid: i64,
+        success: bool,
+        error: Option<String>,
+        content: String,
+    ) {
         let cb = notify
             .lock()
             .expect("notify lock")
             .as_ref()
             .cloned();
-        if let Some(n) = cb {
-            n(tid, success, error, content);
+        if let Some(cb) = cb {
+            let mut g = callbacks.lock().expect("callbacks lock");
+            g.push(CallbackEnvelope { cb, tid, success, error, content });
         }
     }
 
@@ -151,7 +189,7 @@ impl JobQueue {
     pub fn enqueue(&self, job: JobSpec) -> i64 {
         let id = job.tc_id;
         self.tx.send(job).expect("queue alive");
-        Self::fire(&self.notify, id, false, None, String::new());
+        Self::queue_callback(&self.notify, &self.pending_callbacks, id, false, None, String::new());
         id
     }
 
@@ -196,6 +234,7 @@ async fn run_job(
     sem: Arc<tokio::sync::Semaphore>,
     job: JobSpec,
     notify: NotifySlot,
+    callbacks: PendingCallbacks,
     recorder: Arc<dyn AiCallRecorder>,
     close_thinking: Arc<HashSet<String>>,
 ) -> Arc<Db> {
@@ -209,7 +248,7 @@ async fn run_job(
         Err(err) => {
             let _ = db.transformation_chapters().mark_failed(tid, err.clone());
             push_failed(&shared, tid, job.tn_id, String::new(), 0, err.clone()).await;
-            JobQueue::fire(&notify, tid, false, Some(err), String::new());
+            JobQueue::queue_callback(&notify, &callbacks, tid, false, Some(err), String::new());
             return db;
         }
     };
@@ -252,7 +291,7 @@ async fn run_job(
                 final_state.chapter_idx,
                 tokens_in, tokens_out,
             ).await;
-            JobQueue::fire(&notify, tid, true, None, final_state.content);
+            JobQueue::queue_callback(&notify, &callbacks, tid, true, None, final_state.content);
         }
         DbWrite::Failed { err } => {
             push_failed(
@@ -261,7 +300,7 @@ async fn run_job(
                 final_state.chapter_idx,
                 err.clone(),
             ).await;
-            JobQueue::fire(&notify, tid, false, Some(err), String::new());
+            JobQueue::queue_callback(&notify, &callbacks, tid, false, Some(err), String::new());
         }
     }
 
