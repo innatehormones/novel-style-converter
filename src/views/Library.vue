@@ -106,6 +106,11 @@
         :widths="tnWidths"
         frozen-column="actions"
       >
+        <template #cell-source="{ row }">
+          <button class="cell-link" @click="goDataAsset(row.data_asset_id)">
+            {{ sourceAssetTitle(row.data_asset_id) }} · {{ row.chapters_count ?? 0 }} 章
+          </button>
+        </template>
         <template #cell-title="{ row }">
           <Input v-if="renamingId === row.id" v-model="renameDraft" />
           <template v-else>{{ row.title }}</template>
@@ -200,6 +205,11 @@ const daCountByUpload = computed(() => {
 });
 function daCount(uploadId: number): number {
   return daCountByUpload.value.get(uploadId) ?? 0;
+}
+/// 转换工程源列 —— 从 store.dataAssets 按 id 查标题。
+/// 数据资产被删后 join 失败,fallback 到 `数据资产 #N`,不显示 "undefined"。
+function sourceAssetTitle(dataAssetId: number): string {
+  return store.dataAssets.find((a) => a.id === dataAssetId)?.title ?? `数据资产 #${dataAssetId}`;
 }
 
 type Page = 'uploads' | 'data-assets' | 'transformations';
@@ -314,16 +324,16 @@ const daWidths: Record<string, number> = {
   actions: 200,
 };
 
-/// 转换工程列表(TanStack format)
+/// 转换工程列表(TanStack format)。
+/// - 不显示 id 列 —— 标题已是主标识,横向 60px 留给标题更划算。
+/// - 源列点数据资产标题(从 store.dataAssets join),可点击跳转对应数据资产页。
 const tnColumns = [
-  { accessorKey: 'id', header: 'id', enableSorting: true },
   { accessorKey: 'title', header: '标题', enableSorting: true },
   {
     accessorKey: 'data_asset_id',
     id: 'source',
     header: '源',
     enableSorting: true,
-    cell: (info: any) => `data_asset #${info.getValue() as number} · ${info.row.original.chapters_count ?? 0} 章`,
   },
   {
     accessorKey: 'created_at',
@@ -335,9 +345,8 @@ const tnColumns = [
   { id: 'actions', header: '操作', enableSorting: false },
 ];
 const tnWidths: Record<string, number> = {
-  id: 60,
-  title: 220,
-  source: 240,
+  title: 280,
+  source: 280,
   created: 180,
   actions: 200,
 };
