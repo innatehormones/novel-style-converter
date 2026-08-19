@@ -328,9 +328,11 @@ impl<'a> OverviewRepo<'a> {
             [],
             |r| r.get(0),
         )?;
+        // 仅 "Terminated" 算失败:失败策略触发系统终止。
+        // "Stopped" 是用户主动停止/启动失败/启动恢复的收口,非失败;"Cancelled" 当前死状态。
         let failed_count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM batches
-             WHERE status IN ('terminated','cancelled','stopped')
+             WHERE status = 'terminated'
                AND ended_at IS NOT NULL
                AND julianday('now') - julianday(ended_at) <= 1.0",
             [],
@@ -492,5 +494,19 @@ mod tests {
         assert_eq!(g.stats.transformation_novel_count, 2);
         assert_eq!(g.stats.data_asset_count, 3); // da1 source + da2 promoted + da3 promoted
         assert_eq!(g.stats.running_batch_count, 2); // running + paused
+    }
+
+    /// 24h 失败 batch 严格只算 Terminated;Stopped(用户主动停止/启动恢复收口)不能算失败。
+    /// 修 overview.rs 之前 SQL 含 ('stopped') 会把正常停止的 batch 当成失败计入。
+    #[test]
+    fn failed_recent_count_only_counts_terminated() {
+        let db = fresh_db();
+        let (_u, _da1, _da2, _da3, b1, b2) = seed_multi_generation(&db);
+        use crate::models::BatchStatus;
+        db.batches().set_status(b1, BatchStatus::Terminated).unwrap();
+        db.batches().set_status(b2, BatchStatus::Stopped).unwrap();
+
+        let g = db.overview().load_graph().unwrap();
+        assert_eq!(g.stats.failed_recent_count, 1, "Stopped 不应计入 24h 失败 batch");
     }
 }
