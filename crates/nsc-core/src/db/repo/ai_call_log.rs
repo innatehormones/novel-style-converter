@@ -264,7 +264,7 @@ mod tests {
         let repo = db.ai_call_logs();
         let id = repo.insert(&new_log(AiCallBusiness::TransformChapter)).unwrap();
         assert!(id > 0);
-        let logs = repo.list(&AiCallLogFilter::default()).unwrap();
+        let (logs, _) = repo.list(&AiCallLogFilter::default()).unwrap();
         assert_eq!(logs.len(), 1);
         let got = &logs[0];
         assert_eq!(got.id, id);
@@ -285,11 +285,11 @@ mod tests {
         bad.error = Some("oops".into());
         repo.insert(&bad).unwrap();
         let f = AiCallLogFilter { business: Some(AiCallBusiness::TestModel), ..Default::default() };
-        assert_eq!(repo.list(&f).unwrap().len(), 1);
+        assert_eq!(repo.list(&f).unwrap().0.len(), 1);
         let f = AiCallLogFilter { status: Some(AiCallStatus::Failed), ..Default::default() };
-        assert_eq!(repo.list(&f).unwrap().len(), 1);
+        assert_eq!(repo.list(&f).unwrap().0.len(), 1);
         let f = AiCallLogFilter { status: Some(AiCallStatus::Success), ..Default::default() };
-        assert_eq!(repo.list(&f).unwrap().len(), 2);
+        assert_eq!(repo.list(&f).unwrap().0.len(), 2);
     }
 
     #[test]
@@ -300,7 +300,7 @@ mod tests {
         repo.insert(&new_log(AiCallBusiness::TestModel)).unwrap();
         let n = repo.clear().unwrap();
         assert_eq!(n, 2);
-        assert!(repo.list(&AiCallLogFilter::default()).unwrap().is_empty());
+        assert!(repo.list(&AiCallLogFilter::default()).unwrap().0.is_empty());
     }
 
     #[test]
