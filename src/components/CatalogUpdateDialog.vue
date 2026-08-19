@@ -2,7 +2,7 @@
   <Dialog v-model:open="open" :title="titleText" :width="500">
     <div v-if="phase === 'loading'" class="phase">
       <div class="spinner" aria-label="加载中" />
-      <p class="phase-msg">正在拉取 {{ REMOTE_URL }} …</p>
+      <p class="phase-msg">正在拉取 <a href="#" @click.prevent="openUrl(REMOTE_URL)">{{ REMOTE_URL }}</a> …</p>
       <p class="phase-hint">需要 VPN / 直连；不通时会自动切换到拖拽模式。</p>
     </div>
 
@@ -11,7 +11,7 @@
       <pre v-if="error" class="error-text">{{ error }}</pre>
       <p class="phase-hint">
         请在浏览器访问
-        <a href="https://models.dev/api.json" target="_blank" rel="noopener">models.dev/api.json</a>
+        <a href="#" @click.prevent="openUrl(REMOTE_URL)">models.dev/api.json</a>
         下载后，将 <code>api.json</code> 拖到下面，或点击选择文件：
       </p>
       <div
@@ -43,7 +43,7 @@
     <div v-else-if="phase === 'success'" class="phase">
       <p class="phase-msg success">已更新模型清单</p>
       <p v-if="successMeta" class="phase-hint mono">
-        {{ formatSize(successMeta.size_bytes) }} · {{ formatTime(successMeta.fetched_at) }}
+        {{ formatSize(successMeta.size_bytes) }} · {{ formatTimeShort(successMeta.fetched_at) }}
       </p>
       <p class="phase-hint">下次启动仍生效（cache 存于 APPDATA）。</p>
     </div>
@@ -72,6 +72,8 @@ import {
   type CatalogMeta,
 } from '../ipc/commands';
 import { REMOTE_URL } from '../ipc/catalog';
+import { openExternalUrl } from '../ipc/commands';
+import { formatTimeShort } from '../utils/format';
 
 const open = defineModel<boolean>('open', { required: true });
 const emit = defineEmits<{
@@ -126,6 +128,14 @@ async function runHttpRefresh(): Promise<void> {
     }
   } catch (e: unknown) {
     phase.value = 'failed';
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function openUrl(url: string): Promise<void> {
+  try {
+    await openExternalUrl(url);
+  } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e);
   }
 }
@@ -192,15 +202,6 @@ function formatSize(n: number): string {
   if (n < 1024) return n + ' B';
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
   return (n / 1024 / 1024).toFixed(2) + ' MB';
-}
-
-function formatTime(rfc3339: string | undefined): string {
-  if (!rfc3339) return '';
-  const d = new Date(rfc3339);
-  if (Number.isNaN(d.getTime())) return rfc3339;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
-    + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 </script>
 

@@ -94,3 +94,13 @@ export function formatTime(iso: string | null | undefined): string {
   const pad = (n: number) => n.toString().padStart(2, "0");
   return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
 }
+
+/// RFC3339 → "YYYY-MM-DD HH:mm"(本地时区)。CatalogUpdateDialog 拉取成功时的元信息展示用 ——
+/// 秒字段对"刚才拉到一份"不必要,简化为时分即可。空值返回 "—"。
+export function formatTimeShort(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}

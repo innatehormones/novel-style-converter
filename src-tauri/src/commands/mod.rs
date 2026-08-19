@@ -9,4 +9,5 @@ pub mod prompts;
 pub mod transformation_novels;
 pub mod transformations;
 pub mod uploads;
+pub mod util;
 pub mod workflows;

@@ -376,3 +376,10 @@ export async function catalogImportDrop(jsonContent: string): Promise<CatalogImp
 export async function catalogReadActive(): Promise<string> {
   return invoke<string>('catalog_read_active');
 }
+
+/// 调系统默认浏览器打开外部链接。Tauri webview 的 <a target="_blank"> 会开 webview
+/// 新标签,不会引导到外部浏览器 —— 走 Rust 命令调 open crate 等价于用户在桌面点链接。
+/// 后端限制只接受 http/https 协议,其他(比如 javascript:)直接拒绝。
+export function openExternalUrl(url: string): Promise<void> {
+  return invoke<void>('open_external_url', { url });
+}

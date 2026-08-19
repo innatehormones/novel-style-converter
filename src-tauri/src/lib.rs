@@ -167,6 +167,7 @@ pub fn run() {
             commands::ai_call_logs::list_ai_call_logs,
             commands::ai_call_logs::get_ai_call_log,
             commands::ai_call_logs::clear_ai_call_logs,
+            commands::util::open_external_url,
             commands::overview::get_overview_graph,
             commands::workflows::list_chapter_workflow_results,
             commands::workflows::regenerate_chapter_preview,
