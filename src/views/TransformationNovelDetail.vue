@@ -1,18 +1,29 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, watch } from 'vue';
-import { useIntervalFn } from '@vueuse/core';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useDynamicTableHeight } from '../composables/useDynamicTableHeight';
 import { useRoute, useRouter } from 'vue-router';
+import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { useWorkflowsStore } from '../stores/workflows';
 import {
   getChapter as ipcGetChapter,
   getTransformationNovel,
   listDataAssets,
+  listTransformationSourceChapters,
+  listWorkflows,
+  listWorkflowChapters,
+  listChapterWorkflowResults,
 } from '../ipc/commands';
 import type {
-  SourceChapterRow, WorkflowSummary, WorkflowChapterRow, ChapterWorkflowResultRow,
-  CreateWorkflowInput, Chapter, TransformationNovelSummary, DataAssetRow,
-  WorkflowStatus, TransformStatus,
+  TransformationNovelSummary,
+  DataAssetRow,
+  WorkflowSummary,
+  WorkflowChapterRow,
+  ChapterWorkflowResultRow,
+  Chapter,
+  TransformStatus,
+  WorkflowStatus,
+  CreateWorkflowInput,
+  SourceChapterRow,
 } from '../ipc/types';
 import Button from '../components/ui/Button.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
@@ -27,7 +38,6 @@ import DataTable from '../components/ui/DataTable.vue';
 import Tag from '../components/ui/Tag.vue';
 import { formatBatchStatus, formatChapterStatus } from '../utils/status-locale';
 import RegeneratePreviewDialog from '../components/RegeneratePreviewDialog.vue';
-
 const route = useRoute();
 const router = useRouter();
 const tnId = computed(() => Number(route.params.tnId));
@@ -57,9 +67,9 @@ async function loadTn() {
 }
 
 const store = useWorkflowsStore();
+const queryClient = useQueryClient();
 
 const activeTab = ref<'chapters' | 'workflows'>('chapters');
-
 
 /// 章节来源 tab 表格列(TanStack format)
 const sourceColumns = [
@@ -121,7 +131,13 @@ const workflowChapterWidths: Record<string, number> = {
 const selectedChapterIds = ref<Set<number>>(new Set());
 const openSourceChapterId = ref<number | null>(null);
 
-const sources = computed<SourceChapterRow[]>(() => store.sourcesByTn.get(tnId.value) ?? []);
+/// 章节来源 — vue-query 自动按 tnId 缓存,5s 轮询 non_empty_result_count 实时刷新进度。
+const sourcesQuery = useQuery({
+  queryKey: ['transformationSourceChapters', tnId],
+  queryFn: () => listTransformationSourceChapters(tnId.value),
+  refetchInterval: 5000,
+});
+const sources = computed<SourceChapterRow[]>(() => sourcesQuery.data.value ?? []);
 const selectedCount = computed(() => selectedChapterIds.value.size);
 
 function toggleSelect(chapterId: number, on: boolean) {
@@ -184,13 +200,16 @@ function selectNone() {
   selectedChapterIds.value = new Set();
 }
 
-
 // 工作流 tab
-const workflows = computed<WorkflowSummary[]>(() => store.byTn.get(tnId.value) ?? []);
+/// 工作流列表 — vue-query 5s 轮询;create/stop/delete/promote 后 store 自动 invalidate。
+const workflowsQuery = useQuery({
+  queryKey: ['workflows', tnId],
+  queryFn: () => listWorkflows(tnId.value),
+  refetchInterval: 5000,
+});
+const workflows = computed<WorkflowSummary[]>(() => workflowsQuery.data.value ?? []);
 /// 章节来源 tab 表格自适应高度:监听 `main.app` 的尺寸变化,实时算出
 /// 章节来源 Tab 表格 + 工作流 Tab 表格共用 composable,统一从 main.app 计算可用高度。
-
-
 
 /// 章节来源 Tab 表格自适应高度
 const chaptersTableEl = ref<HTMLElement | null>(null);
@@ -208,19 +227,38 @@ const { maxHeight: workflowsTableMaxHeight } = useDynamicTableHeight({
   deps: [() => workflows.value.length, activeTab],
 });
 const selectedWorkflowId = ref<number | null>(null);
-const selectedWorkflowChapters = computed<WorkflowChapterRow[]>(() =>
-  selectedWorkflowId.value === null ? [] : (store.chaptersByBatch.get(selectedWorkflowId.value) ?? []),
-);
+/// 工作流章节 — vue-query 2s 轮询,enabled 跟随 selectedWorkflowId。
+/// 章节级 2s 轮询 —— vue-query 的 refetchInterval 函数式声明:
+/// - 任一章节 pending/running → 2s 轮询,UI 实时反映进度。
+/// - 全 done/failed/skipped/cancelled → false 停,减少无意义 IPC。
+/// 同时消除原 isBatchLive + useIntervalFn 手动 pause/resume 的状态机。
+const selectedWorkflowChaptersQuery = useQuery({
+  queryKey: ['workflowChapters', selectedWorkflowId],
+  queryFn: () => listWorkflowChapters(selectedWorkflowId.value!),
+  enabled: computed(() => selectedWorkflowId.value !== null),
+  refetchInterval: (query) => {
+    const data = query.state.data as WorkflowChapterRow[] | undefined;
+    if (data === undefined) return 2000;
+    const hasActive = data.some((c) => c.status === 'pending' || c.status === 'running');
+    return hasActive ? 2000 : false;
+  },
+});
+const selectedWorkflowChapters = computed<WorkflowChapterRow[]>(() => selectedWorkflowChaptersQuery.data.value ?? []);
 const selectedWorkflow = computed<WorkflowSummary | null>(() => {
   if (selectedWorkflowId.value === null) return null;
   return workflows.value.find((w) => w.id === selectedWorkflowId.value) ?? null;
 });
 
-// 章节Detail侧边栏(章节来源 tab 用)
-const openSourceResults = computed<ChapterWorkflowResultRow[]>(() => {
-  if (openSourceChapterId.value === null) return [];
-  return store.resultsByTnChapter.get(`${tnId.value}:${openSourceChapterId.value}`) ?? [];
+
+/// 章节Detail侧边栏(章节来源 tab 用)
+/// on-demand:只在用户点击章节行打开侧栏时拉取,关闭后自动停。
+/// vue-query 的 enabled: false 时不订阅、不缓存、不占用网络。
+const openSourceResultsQuery = useQuery({
+  queryKey: ['chapterWorkflowResults', tnId, openSourceChapterId],
+  queryFn: () => listChapterWorkflowResults(tnId.value, openSourceChapterId.value!),
+  enabled: computed(() => openSourceChapterId.value !== null),
 });
+const openSourceResults = computed<ChapterWorkflowResultRow[]>(() => openSourceResultsQuery.data.value ?? []);
 
 const stopConfirmOpen = ref(false);
 const stopTargetId = ref<number | null>(null);
@@ -283,8 +321,7 @@ async function openChapterPanel(chapterId: number) {
   openSourceChapterId.value = chapterId;
   sourceChapterDetail.value = null;
   sourceChapterText.value = '';
-  await store.loadResultsForChapter(tnId.value, chapterId);
-  // 拉章节 + 切 data_asset 内容 → 显示源原文
+  // 章节结果由 openSourceResultsQuery (enabled=true) 自动拉取
   sourceChapterLoading.value = true;
   try {
     const ch = await ipcGetChapter(chapterId);
@@ -303,10 +340,10 @@ function closeChapterPanel() {
   sourceChapterText.value = '';
 }
 
+/// selectedWorkflowId 变更会自动触发 selectedWorkflowChaptersQuery (vue-query enabled + 2s 轮询),无需手动 loadChapters。
 async function openWorkflowPanel(w: WorkflowSummary) {
   selectedWorkflowId.value = w.id;
   retrySelectedIds.value = new Set();
-  await store.loadChapters(w.id);
 }
 
 function closeWorkflowPanel() {
@@ -322,6 +359,8 @@ const detailTransformed = ref<string | null>(null);
 const detailTransformedStatus = ref<TransformStatus | null>(null);
 const detailSourceWordCount = computed<number>(() => sourceChapterDetail.value?.word_count ?? 0);
 const detailTransformedWordCount = computed<number>(() => detailTransformed.value === null ? 0 : countWords(detailTransformed.value));
+/// Chapter Detail 弹窗:在 Workflow Detail 弹窗内显示单章 source/transformed 对照。
+/// queryClient.fetchQuery:打开时不订阅,只是同步拿到结果后填充 detailTransformed。
 async function openChapterDetail(c: WorkflowChapterRow) {
   detailChapter.value = c;
   detailTransformed.value = null;
@@ -331,14 +370,16 @@ async function openChapterDetail(c: WorkflowChapterRow) {
   detailLoading.value = true;
   sourceChapterLoading.value = true;
   try {
-    await Promise.all([
-      store.loadResultsForChapter(tnId.value, c.chapter_id),
+    const [, list] = await Promise.all([
       ipcGetChapter(c.chapter_id).then((ch) => {
         sourceChapterDetail.value = ch;
         sourceChapterText.value = ch.body;
       }),
+      queryClient.fetchQuery<ChapterWorkflowResultRow[]>({
+        queryKey: ['chapterWorkflowResults', tnId, c.chapter_id],
+        queryFn: () => listChapterWorkflowResults(tnId.value, c.chapter_id),
+      }),
     ]);
-    const list = store.resultsByTnChapter.get(`${tnId.value}:${c.chapter_id}`) ?? [];
     const match = list.find((r) => r.batch_id === selectedWorkflowId.value);
     detailTransformed.value = match?.content ?? null;
     detailTransformedStatus.value = match?.status ?? null;
@@ -349,11 +390,13 @@ async function openChapterDetail(c: WorkflowChapterRow) {
     sourceChapterLoading.value = false;
   }
 }
+
 function closeChapterDetail() {
   detailChapter.value = null;
   detailTransformed.value = null;
   detailTransformedStatus.value = null;
 }
+
 async function retryFromDetail() {
   const blocked = batchRetryBlockedReason.value;
   if (blocked !== null) {
@@ -364,8 +407,8 @@ async function retryFromDetail() {
   if (c === null || selectedWorkflowId.value === null) return;
   retrySubmitting.value = true;
   try {
+    // store.retry 自动 invalidate selectedWorkflowChapters,无需手动 loadChapters
     await store.retry(selectedWorkflowId.value, [c.chapter_id]);
-    await store.loadChapters(selectedWorkflowId.value);
     closeChapterDetail();
   } catch (e: unknown) {
     console.error(e);
@@ -390,10 +433,9 @@ function openRegenerateDialog(row: WorkflowChapterRow) {
 }
 
 async function onPreviewCommitted() {
-  // 提交后 wrc.content 变了 + tc.status 变了，刷新 workflow chapters 列表
-  if (selectedWorkflowId.value !== null) {
-    await store.loadChapters(selectedWorkflowId.value);
-  }
+  // store.commitPreview 已 invalidate [workflowChapters,batchId] + [workflows],无需手动 loadChapters。
+  // 此函数保留为 RegeneratePreviewDialog 的事件 hook 出口。
+  void selectedWorkflowId.value;
 }
 
 // 单章节重试（仅 failed/skipped + 空槽，与 canRetryChapter 一致）
@@ -407,8 +449,8 @@ async function retrySingleChapter(c: WorkflowChapterRow) {
   }
   retrySubmitting.value = true;
   try {
+    // store.retry 自动 invalidate selectedWorkflowChapters,无需手动 loadChapters
     await store.retry(selectedWorkflowId.value, [c.chapter_id]);
-    await store.loadChapters(selectedWorkflowId.value);
   } catch (e: unknown) {
     showAlert('重试失败', e instanceof Error ? e.message : String(e));
   } finally {
@@ -436,7 +478,6 @@ function askStopWorkflow(id: number) {
   stopConfirmOpen.value = true;
 }
 
-
 // 工作流删除:仅 stopped/completed/terminated/cancelled 状态可删(running/pending/paused 由后端拒绝)。
 // UI 层再做一次前置校验:不允许误触发正在跑的工作流。
 const DELETEABLE_STATUSES = new Set(['stopped', 'completed', 'terminated', 'cancelled']);
@@ -446,7 +487,6 @@ const deleteTargetLabel = ref<string>('');
 const deleteTargetPromotedCount = ref<number>(0);
 const deleteSubmitting = ref(false);
 const deleteError = ref<string | null>(null);
-
 
 /// 删除确认弹窗的 message。promoted_count > 0 时重点提示:已派生 da 的来源会被抹掉。
 const deleteConfirmMessage = computed<string>(() => {
@@ -490,8 +530,8 @@ async function confirmStopWorkflow() {
   const id = stopTargetId.value;
   if (id === null) return;
   try {
+    // store.stop 自动 invalidate [workflowChapters,batchId] + [workflows],无需手动 loadChapters
     await store.stop(id);
-    await store.loadChapters(id);
   } catch (e: unknown) {
     console.error(e);
   }
@@ -529,40 +569,12 @@ const batchRetryBlockedReason = computed<string | null>(() => {
 });
 
 const retrySubmitting = ref(false);
-const POLLABLE_STATUSES = new Set(['running']);
-/// 还有 pending/running 章节时也应继续轮询 —— backend 把最后
-/// 一章推到 done 跟 batch 收口到 stopped 之间存在一个微小窗口,
-/// 若只看 workflow.status,5s 父轮询可能抢先看到 batch=stopped
-/// 而把 2s 子轮询关掉,此时 chaptersByBatch 还停在上一轮的旧 running,
-/// UI 就卡在"转换中"。让章节状态也参与判定,子轮询会多跑几轮
-/// 直到 chaptersByBatch 也收敛到终态。
-const ACTIVE_CHAPTER_STATUSES = new Set(['pending', 'running']);
-const isBatchLive = computed<boolean>(() => {
-  const s = selectedWorkflow.value;
-  if (s === null) return false;
-  if (POLLABLE_STATUSES.has(s.status)) return true;
-  const chapters = store.chaptersByBatch.get(s.id) ?? [];
-  return chapters.some((c) => ACTIVE_CHAPTER_STATUSES.has(c.status));
-});
 /// 显示/启用"重试所选"按钮的前提:batch 状态允许重试(由 batchRetryBlockedReason 决定)。
 /// 之前写死 batch.status === 'stopped' 太严,会漏掉 running/paused 无 in-flight 的合法场景。
 const canRetrySelection = computed<boolean>(() => {
   if (batchRetryBlockedReason.value !== null) return false;
   return retrySelectedIds.value.size > 0;
 });
-/// 章节级 2s 轮询 —— vueuse useIntervalFn 自动随组件卸载清理。
-/// selectedWorkflowId / isBatchLive 任一不满足时 pause,两者皆 true 时 resume。
-const chapterPoll = useIntervalFn(() => {
-  if (selectedWorkflowId.value === null) return;
-  void store.loadChapters(selectedWorkflowId.value);
-}, 2000, { immediate: false, immediateCallback: false });
-watch(selectedWorkflowId, (id) => {
-  if (id !== null) chapterPoll.resume(); else chapterPoll.pause();
-}, { immediate: true });
-watch(isBatchLive, (live) => {
-  if (live) chapterPoll.resume(); else chapterPoll.pause();
-});
-
 async function doRetry() {
   if (selectedWorkflowId.value === null) return;
   const blocked = batchRetryBlockedReason.value;
@@ -576,9 +588,9 @@ async function doRetry() {
   if (chapterIds.length === 0) return;
   retrySubmitting.value = true;
   try {
+    // store.retry 自动 invalidate selectedWorkflowChapters,无需手动 loadChapters
     await store.retry(selectedWorkflowId.value, chapterIds);
     retrySelectedIds.value = new Set();
-    await store.loadChapters(selectedWorkflowId.value);
   } catch (e: unknown) {
     showAlert('重试失败', e instanceof Error ? e.message : String(e));
   } finally {
@@ -589,7 +601,6 @@ async function doRetry() {
 function fmtTime(s: string | null | undefined): string {
   return formatTime(s);
 }
-
 
 // 新建工作流弹窗
 const createBatchOpen = ref(false);
@@ -631,14 +642,6 @@ async function onCreateBatch(payload: CreateWorkflowInput) {
   }
 }
 
-async function loadAll() {
-  await Promise.all([
-    store.loadSources(tnId.value),
-    store.loadByTn(tnId.value),
-    loadTn(),
-  ]);
-}
-
 /// 章节来源表格表头全选/全不选。
 function onToggleAll(e: Event) {
   const checked = (e.target as HTMLInputElement).checked;
@@ -661,20 +664,11 @@ function onToggleAllRetry(e: Event) {
   retrySelectedIds.value = next;
 }
 
-/// 5s 轮询工作流列表 + 章节来源(non_empty_result_count) —— vueuse useIntervalFn 自动随组件卸载清理。
-/// sources 章节本身稳定,但每章已有结果数随工作流运行变化,所以 sources 也加进轮询,UI 才能实时看到进度。
-const workflowListPoll = useIntervalFn(() => {
-  void store.loadByTn(tnId.value);
-  void store.loadSources(tnId.value);
-}, 5000, { immediate: false, immediateCallback: false });
-
 onMounted(async () => {
-  await loadAll();
-  workflowListPoll.resume();
+  // sources/workflows 由 vue-query 自动订阅(refetchInterval: 5s),无需手动加载。
   // 表格高度由 useDynamicTableHeight composable 自动监听 main.app 尺寸变化,无需手动管理。
-  await nextTick();
+  await loadTn();
 });
-
 
 watch(() => workflows.value, (list) => {
   if (selectedWorkflowId.value === null) return;
@@ -1364,7 +1358,6 @@ watch(() => sources.value, (list) => {
   color: var(--text-primary);
 }
 .failure-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
-
 
 .chapter-row.running .status.running { background: var(--color-cinnabar); color: #faf6ee; border-color: var(--color-cinnabar); }
 .spinner-dot {
