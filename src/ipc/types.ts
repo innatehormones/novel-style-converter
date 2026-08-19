@@ -556,6 +556,8 @@ export interface OverviewNode {
   byte_size: number | null;
   /** DA:回溯来源("由 batch 42 生成")。 */
   subtitle: string | null;
+  /** 仅 `batch` 有:所属 transformation_novel.id,前端点击跳转 `/library/transformation/:tnId`。 */
+  tn_id: number | null;
 }
 
 export type OverviewEdgeKind =

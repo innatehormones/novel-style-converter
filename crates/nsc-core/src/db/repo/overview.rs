@@ -58,6 +58,8 @@ pub struct OverviewNode {
     pub byte_size: Option<i64>,
     /// DA:回溯来源("从 batch 42 生成")。
     pub subtitle: Option<String>,
+    /// 仅 batch 有:所属 transformation_novel.id,前端点击跳转用。
+    pub tn_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -139,6 +141,7 @@ impl<'a> OverviewRepo<'a> {
                 status: None,
                 byte_size: Some(byte_size),
                 subtitle: None,
+                tn_id: None,
             });
         }
         Ok(())
@@ -194,6 +197,7 @@ impl<'a> OverviewRepo<'a> {
                 status: None,
                 byte_size: None,
                 subtitle,
+                tn_id: None,
             });
             // upload -> da 边:source 和 promoted 都画,后者是 structural 关系(始终在),
             // 前者是原始解析路径。promote 时 upload_id 物理拷贝,所以 promoted 也有值。
@@ -241,6 +245,7 @@ impl<'a> OverviewRepo<'a> {
                 status: None,
                 byte_size: None,
                 subtitle: None,
+                tn_id: None,
             });
             edges.push(OverviewEdge {
                 source: format!("da:{da_id}"),
@@ -282,6 +287,7 @@ impl<'a> OverviewRepo<'a> {
                 status: Some(status),
                 byte_size: None,
                 subtitle: None,
+                tn_id: Some(tn_id),
             });
             edges.push(OverviewEdge {
                 source: format!("tn:{tn_id}"),

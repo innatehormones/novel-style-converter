@@ -48,6 +48,7 @@
       :pan-on-drag="true"
       fit-view-on-init
       class="cy-container"
+      @node-click="onNodeClick"
       @move="onMove"
     >
       <Background :gap="20" :size="1" />
@@ -63,9 +64,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, markRaw } from "vue";
+import { onMounted, ref, markRaw, nextTick } from "vue";
+import { useRouter } from "vue-router";
 import { useIntervalFn } from "@vueuse/core";
-import { VueFlow, type Node, type Edge } from "@vue-flow/core";
+import { VueFlow, useVueFlow, type Node, type Edge } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import { MiniMap } from "@vue-flow/minimap";
@@ -97,6 +99,8 @@ const error = ref("");
 const loading = ref(false);
 const flowNodes = ref<Node[]>([]);
 const flowEdges = ref<Edge[]>([]);
+const router = useRouter();
+const { setViewport } = useVueFlow();
 let savedViewport: { x: number; y: number; zoom: number } | null = null;
 /// 总览图自动 5s 刷新 —— vueuse useIntervalFn 自动随组件卸载清理。
 
@@ -118,6 +122,29 @@ async function reload() {
 function onMove(moveEvent: { event: unknown; flowTransform: { x: number; y: number; zoom: number } }) {
   const ft = moveEvent.flowTransform;
   savedViewport = { x: ft.x, y: ft.y, zoom: ft.zoom };
+}
+
+function onNodeClick({ node }: { node: Node }) {
+  const d = node.data as { kind?: string; id?: number; tn_id?: number | null };
+  if (!d.kind || d.id == null) return;
+  switch (d.kind) {
+    case "upload":
+      void router.push({ name: "upload", params: { uploadId: String(d.id) } });
+      return;
+    case "source_data_asset":
+    case "promoted_data_asset":
+      void router.push({ name: "data-asset", params: { dataAssetId: String(d.id) } });
+      return;
+    case "transformation_novel":
+      void router.push({ name: "transformation-detail", params: { tnId: String(d.id) } });
+      return;
+    case "batch":
+      // batch 跳到所属 tn 的详情页(用户从节点进入最自然的入口是工作流的"母工程")
+      if (d.tn_id != null) {
+        void router.push({ name: "transformation-detail", params: { tnId: String(d.tn_id) } });
+      }
+      return;
+  }
 }
 
 function formatWc(n: number): string {
@@ -152,6 +179,9 @@ function applyGraph(g: OverviewGraph) {
     type: n.kind,
     position: { x: 0, y: 0 },
     data: {
+      kind: n.kind,
+      id: n.id,
+      tn_id: n.tn_id ?? null,
       title: n.title,
       subtitle: n.subtitle ?? null,
       byte_size: n.byte_size ?? null,
@@ -184,6 +214,14 @@ function applyGraph(g: OverviewGraph) {
 
   flowNodes.value = newNodes;
   flowEdges.value = newEdges;
+  // 复原用户操作过的视口 —— 5s 轮询重建 nodes/edges 时不重置 zoom/pan。
+  // 首次加载(savedViewport 仍为 null)走 VueFlow 的 `fit-view-on-init`,不重复 fit。
+  if (savedViewport) {
+    const vp = savedViewport;
+    void nextTick(() => {
+      setViewport(vp);
+    });
+  }
 }
 
 function edgeStyle(kind: ApiEdge["kind"]) {

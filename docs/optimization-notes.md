@@ -763,6 +763,22 @@ hover 时整体上抬 1px、加深阴影。
   - `nodeTypes` 用 `markRaw` 注册,避免 Vue 把组件代理成响应式
   - 路由 `/overview`,左侧菜单第 1 项
 
+### 交互
+
+- **节点点击跳转**(2026-08-19 加):5 个节点卡片均有 `cursor: pointer`,点击按 kind 分流:
+  - `upload`         → `/library/upload/:uploadId`
+  - `source_data_asset` / `promoted_data_asset` → `/library/data/:dataAssetId`
+  - `transformation_novel` → `/library/transformation/:tnId`
+  - `batch`         → 所属 tn 的详情页(`/library/transformation/:tnId`,从 `OverviewNode.tn_id` 拿)
+
+  后端 `OverviewNode` 加 `tn_id: Option<i64>` 字段,仅 batch 节点填值,前端 `Overview.vue:onNodeClick` 派发 router。
+
+- **视口持久化**(2026-08-19 修):`@move` 事件存 `savedViewport = {x, y, zoom}`,`applyGraph` 末尾若 `savedViewport` 非空,用 `useVueFlow().setViewport(savedViewport)` 复原。
+  5s 轮询重建 `flowNodes.value` 时不会重置用户操作过的 zoom/pan。
+  首次加载(savedViewport 仍为 null)走 VueFlow 的 `fit-view-on-init`,不重复 fit。
+
+- **BatchNode status pill 显示中文**(2026-08-19 改):之前直接渲染 `data.status` 英文(running/STOPPED),改用 `formatBatchStatus` 与其他视图对齐(转换中/已停止)。CSS `text-transform: uppercase` 一并移除。
+
 ### 设计约束
 
 - **无截断**:节点数 ≥ 500 时仅底部显示一行提示(可拖拽 / 滚轮缩放 / 拖动平移);不强行折叠隐藏关系

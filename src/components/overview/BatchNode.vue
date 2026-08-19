@@ -3,7 +3,7 @@
     <div class="ov-kind"><IconRefreshCw :size="14" :stroke-width="2.2" /> 工作流</div>
     <div class="ov-title">{{ data.title }}</div>
     <div class="ov-row">
-      <span class="status-pill" v-if="data.status">{{ data.status }}</span>
+      <span class="status-pill" v-if="data.status">{{ formatBatchStatus(data.status as any) }}</span>
       <span class="ov-meta" v-if="data.meta">{{ data.meta }}</span>
     </div>
   </div>
@@ -12,6 +12,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import IconRefreshCw from '~icons/lucide/refresh-cw';
+import { formatBatchStatus } from '../../utils/status-locale';
 
 const props = defineProps<{ data: { title: string; status?: string | null; meta?: string | null } }>();
 
@@ -75,13 +76,11 @@ const statusClass = computed(() => STATUS_MAP[props.data.status ?? ''] ?? 'defau
   text-overflow: ellipsis;
 }
 .status-pill {
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.22);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 /* batch 默认色(无 status) */
