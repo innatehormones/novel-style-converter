@@ -1,6 +1,8 @@
-import { nextTick, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 
-// 单一 anchor / text / 可见性,模块级 singleton。TooltipHost 和所有 Tooltip 触发器共享。
+// 单一 anchor / text / 可见性,模块级 singleton —— TooltipHost 渲染 + 所有触发器共享。
+// 之前在模块顶层 addEventListener 三件套,有挂无卸(HMR 切换 TooltipHost 时监听器会累加)。
+// 现改为 setup-style:onMounted 注册、onUnmounted 移除;TooltipHost.vue 是唯一调用方,生命周期正确配对。
 const text = ref('');
 const visible = ref(false);
 const x = ref(0);
@@ -10,12 +12,6 @@ const mouseX = ref(0);
 const mouseY = ref(0);
 let pendingAnchor: HTMLElement | null = null;
 let pendingText = '';
-
-function clamp(v: number, min: number, max: number): number {
-  if (v < min) return min;
-  if (v > max) return max;
-  return v;
-}
 
 async function place() {
   const tipEl = document.getElementById('app-tooltip-host');
@@ -34,29 +30,39 @@ async function place() {
   const maxX = window.innerWidth - margin - tipRect.width;
   const maxY = window.innerHeight - margin - tipRect.height;
 
-  x.value = clamp(desiredX, margin + tipRect.width / 2, maxX + tipRect.width / 2);
-  y.value = clamp(desiredY, margin, maxY);
+  // clamp(lo, v, hi):最小居中坐标 = margin + 半宽;最大居中坐标 = innerWidth - margin - 半宽
+  x.value = Math.min(Math.max(desiredX, margin + tipRect.width / 2), maxX + tipRect.width / 2);
+  y.value = Math.min(Math.max(desiredY, margin), maxY);
 
   visible.value = true;
 }
 
-if (typeof window !== 'undefined') {
-  // tooltip 跟随鼠标:每次 mousemove 都重算位置
-  window.addEventListener('mousemove', (e) => {
-    mouseX.value = e.clientX;
-    mouseY.value = e.clientY;
-    if (visible.value) void place();
-  });
-  // 滚动 / 窗口尺寸变化时也要重新定位(否则 tooltip 会停在原位)
-  window.addEventListener('scroll', () => {
-    if (visible.value) void place();
-  }, true);
-  window.addEventListener('resize', () => {
-    if (visible.value) void place();
-  });
+function onMouseMove(e: MouseEvent) {
+  mouseX.value = e.clientX;
+  mouseY.value = e.clientY;
+  if (visible.value) void place();
+}
+
+function onScrollOrResize() {
+  if (visible.value) void place();
 }
 
 export function useTooltip() {
+  // tooltip 跟随鼠标 + 滚动 / 窗口尺寸变化时重定位;挂载期注册、卸载时清理。
+  // 注意:必须在 setup 顶层调用 —— 当前唯一调用方 TooltipHost.vue 满足此条件。
+  onMounted(() => {
+    if (typeof window === 'undefined') return;
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+  });
+  onUnmounted(() => {
+    if (typeof window === 'undefined') return;
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('scroll', onScrollOrResize, true);
+    window.removeEventListener('resize', onScrollOrResize);
+  });
+
   function show(t: string, anchor: HTMLElement) {
     pendingText = t;
     pendingAnchor = anchor;
@@ -69,9 +75,10 @@ export function useTooltip() {
     // 立即清掉 anchor / text,任何在飞的 scroll/resize 都会被 ignore
     pendingAnchor = null;
     pendingText = '';
+    // 不能把 x/y 重置 0 —— TooltipHost 的 transition 只覆盖 opacity,
+    // 重置位置会让 tooltip 在 120ms 渐隐期间瞬时跳到 (0,0),看起来是左上角闪一下。
+    // 不可见时 x/y 值无意义,下次 show() 走 place() 重算。
     visible.value = false;
-    x.value = 0;
-    y.value = 0;
   }
 
   return { text, visible, x, y, show, hide };
