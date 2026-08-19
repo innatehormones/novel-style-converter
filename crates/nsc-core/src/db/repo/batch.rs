@@ -143,7 +143,7 @@ pub struct BatchStatusCount {
     pub cancelled: i64,
 }
 
-fn batch_from_row(row: &Row) -> rusqlite::Result<Batch> {
+pub(crate) fn batch_from_row(row: &Row) -> rusqlite::Result<Batch> {
     let created_at_s: String = row.get(5)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_s)
         .map(|d| d.with_timezone(&Utc))

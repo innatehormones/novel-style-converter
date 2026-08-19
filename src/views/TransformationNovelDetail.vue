@@ -1009,12 +1009,24 @@ watch(() => sources.value, (list) => {
             <span class="row-sep" aria-hidden="true">·</span>
             <button type="button" class="row-link" @click="openRegenerateDialog(row)">重新生成</button>
           </template>
-          <!-- failed/skipped: 失败信息单独弹框 + 重试 -->
-          <template v-else-if="row.status === 'failed' || row.status === 'skipped'">
+          <!-- failed: 失败信息单独弹框 + 重试 -->
+          <template v-else-if="row.status === 'failed'">
             <span class="row-sep" aria-hidden="true">·</span>
             <button type="button" class="row-link" @click="openFailureDetail(row)">失败详情</button>
             <span class="row-sep" aria-hidden="true">·</span>
             <!-- 重试:is_empty_slot=false 或 batch 状态不允许时禁用 -->
+            <button
+              type="button"
+              class="row-link"
+              :disabled="!row.is_empty_slot || batchRetryBlockedReason !== null"
+              :title="batchRetryBlockedReason ?? (!row.is_empty_slot ? '该章节结果槽非空,无法重试' : '')"
+              @click="retrySingleChapter(row)"
+            >重试</button>
+          </template>
+          <!-- skipped: 不展示"失败详情"(skip 是有意跳过 / 策略跳过 / 用户停止,非失败);
+               仅重试入口,允许把空槽补回去。 -->
+          <template v-else-if="row.status === 'skipped'">
+            <span class="row-sep" aria-hidden="true">·</span>
             <button
               type="button"
               class="row-link"

@@ -437,6 +437,10 @@ impl BatchScheduler {
             )));
         }
         let now = Utc::now().to_rfc3339();
+        // 整段进事务:skip pending tc + 视 in-flight 情况 batch → stopped +
+        // 回读最新 batch —— 全程只持一次 std::sync::Mutex 锁。
+        // 旧实现 commit 后再 self.db.batches().get(...) 第二次 lock(),std::sync::Mutex
+        // 非可重入 → 死锁(线上复现:日志停 after tx.commit(),后续无输出)。
         let _bsg = self.db.lock();
         let tx = _bsg.unchecked_transaction()?;
         tx.execute(
@@ -453,9 +457,19 @@ impl BatchScheduler {
                 rusqlite::params![now, batch_id],
             )?;
         }
+        // 事务内回读最新 batch —— 失败映射 QueryReturnedNoRows → NotFound,
+        // 其他 rusqlite 错误经 `?` 由 #[from] 自动转 Error::Db。
+        let updated = match tx.query_row(
+            "SELECT id, transformation_novel_id, label, on_failure_policy, status, created_at, started_at, ended_at \
+             FROM batches WHERE id = ?1",
+            rusqlite::params![batch_id],
+            crate::db::repo::batch::batch_from_row,
+        ) {
+            Ok(b) => b,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Err(Error::NotFound("batch 回读失败".into())),
+            Err(e) => return Err(Error::Db(e)),
+        };
         tx.commit()?;
-        let updated = self.db.batches().get(batch_id)?
-            .ok_or_else(|| Error::NotFound("batch 回读失败".into()))?;
         Ok(updated)
     }
 
