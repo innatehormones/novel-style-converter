@@ -278,14 +278,18 @@ impl BatchScheduler {
                 tx.commit()?;
                 Ok(())
             }
-            OnFailurePolicy::SkipFailed => {
-                let _bsg = self.db.lock();
-            let tx = _bsg.unchecked_transaction()?;
-                tx.execute(
-                    "UPDATE transformation_chapters                      SET status='skipped', error=?2, completed_at=?3, result_content=NULL,                          tokens_in=NULL, tokens_out=NULL                      WHERE id=?1",
-                    rusqlite::params![tid, error, now],
-                )?;
-                tx.commit()?;
+                        OnFailurePolicy::SkipFailed => {
+                // scope 锁,commit 后立刻 drop —— 否则后续 advance_batch 内部
+                // `self.db.batches().get(batch_id)` 会再次 lock,std::sync::Mutex 非可重入 → 死锁。
+                {
+                    let _bsg = self.db.lock();
+                    let tx = _bsg.unchecked_transaction()?;
+                    tx.execute(
+                        "UPDATE transformation_chapters                      SET status='skipped', error=?2, completed_at=?3, result_content=NULL,                          tokens_in=NULL, tokens_out=NULL                      WHERE id=?1",
+                        rusqlite::params![tid, error, now],
+                    )?;
+                    tx.commit()?;
+                }
                 self.advance_batch(&self.db, batch_id)
             }
         }
@@ -298,7 +302,7 @@ impl BatchScheduler {
 
         // 取 batch 内第一个 pending 行(按 chapter_idx ASC)
         let next_tid: Option<i64> = {
-            let _bsg = self.db.lock();
+        let _bsg = self.db.lock();
             let mut stmt = _bsg.prepare(
                 "SELECT transformation_chapters.id FROM transformation_chapters                  JOIN chapters c ON c.id = transformation_chapters.chapter_id                  WHERE transformation_chapters.batch_id = ?1                    AND transformation_chapters.status = 'pending'                  ORDER BY c.idx ASC, transformation_chapters.id ASC                  LIMIT 1",
             )?;
