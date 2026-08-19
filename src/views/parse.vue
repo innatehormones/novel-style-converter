@@ -78,8 +78,7 @@
           <input
             class="search-input"
             placeholder="全文搜索"
-            :value="store.searchQuery"
-            @input="onSearchInput(($event.target as HTMLInputElement).value)"
+            v-model="searchQuery"
           />
           <span class="search-counter">{{ counterText }}</span>
           <Button size="small" :disabled="hitCount === 0" @click="onPrevHit">‹</Button>
@@ -204,11 +203,8 @@ const chaptersWithIdx = computed(() =>
 );
 const markerSet = computed(() => new Set(store.markers.map((m) => String(m))));
 
-const searchQueryRef = computed({
-  get: () => store.searchQuery,
-  set: (v: string) => store.setSearchQuery(v),
-});
-const search = useChapterSearch(searchQueryRef, () => store.rawLines);
+const searchQuery = ref<string>('');
+const search = useChapterSearch(searchQuery, () => store.rawLines);
 const { hitLineIndices, hitCount, currentHitLineIndex, next, prev } = search;
 const hitLineIndicesSet = computed(() => new Set(hitLineIndices.value));
 
@@ -297,7 +293,7 @@ function segIdx(item: ChapterSegment | null | undefined): number {
 }
 
 function onSearchInput(value: string) {
-  store.setSearchQuery(value);
+  searchQuery.value = value;
   scrollToActiveHit();
 }
 

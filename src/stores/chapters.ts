@@ -45,8 +45,6 @@ export const useChaptersStore = defineStore('chapters', () => {
 
   const loading = ref(false);
   const error = ref<string | null>(null);
-  const searchQuery = ref<string>('');
-  const currentHitIndex = ref<number>(0);
 
 
   let requestToken = 0;
@@ -146,8 +144,6 @@ export const useChaptersStore = defineStore('chapters', () => {
     markers.value = [];
     suppressed.value = [];
     titleOverrides.value = {};
-    searchQuery.value = '';
-    currentHitIndex.value = 0;
     loading.value = true;
     error.value = null;
     ++requestToken;
@@ -246,8 +242,6 @@ export const useChaptersStore = defineStore('chapters', () => {
     titleOverrides.value = {};
     workingChapters.value = [];
     segLineMap.value = new Map();
-    searchQuery.value = '';
-    currentHitIndex.value = 0;
     error.value = null;
     loading.value = false;
   }
@@ -270,23 +264,6 @@ export const useChaptersStore = defineStore('chapters', () => {
   /// 拿到一段章节在原文里的起始行号(用于点击章节跳转到右侧原文)。
   function startLineOf(seg: ChapterSegment): number {
     return segLineMap.value.get(segmentKey(seg)) ?? -1;
-  }
-
-  function setSearchQuery(q: string) {
-    searchQuery.value = q;
-    currentHitIndex.value = 0;
-  }
-
-  function nextSearchHit(total: number) {
-    if (total === 0) return;
-    const safe = Math.min(currentHitIndex.value, total - 1);
-    currentHitIndex.value = (safe + 1) % total;
-  }
-
-  function prevSearchHit(total: number) {
-    if (total === 0) return;
-    const safe = Math.min(currentHitIndex.value, total - 1);
-    currentHitIndex.value = (safe - 1 + total) % total;
   }
 
   async function commit(title: string): Promise<number> {
@@ -317,11 +294,9 @@ export const useChaptersStore = defineStore('chapters', () => {
     source, sourceKind,
     segLineMap,
     loading, error,
-    searchQuery, currentHitIndex,
     committed, dirty,
     load,
     addMarker, removeMarker, removeChapter, updateTitle, reset, reSplit, commit,
-    setSearchQuery, nextSearchHit, prevSearchHit,
     startLineOf,
     unload,
   };
