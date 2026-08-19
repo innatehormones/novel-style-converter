@@ -467,7 +467,16 @@ export type AiCallLogFilter = {
   model_config_id?: number | null;
   status?: AiCallStatus | null;
   limit?: number | null;
+  /// 跳过行数(>=0)。传统 OFFSET 翻页,UI "第 N 页"导航。
+  offset?: number | null;
 };
+
+/// list_ai_call_logs 返回包装。后端 snake_case。total 是同 filter 下的总行数,
+/// 供 UI 计算 "共 N 条 / 共 X 页"。
+export interface AiCallLogPage {
+  logs: AiCallLog[];
+  total: number;
+}
 
 /// 单章节预览草稿状态(spec §4 / §5.3)。后端 serde snake_case。
 export type PreviewStatus = 'generating' | 'done' | 'failed';

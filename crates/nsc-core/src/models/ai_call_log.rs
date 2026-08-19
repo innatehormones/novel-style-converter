@@ -84,11 +84,16 @@ pub struct NewAiCallLog {
 /// - `business` 过滤 `'transform_chapter' | 'test_model' | None(=全部)`
 /// - `model_config_id` 过滤某 model 的全部调用(`None` 不过滤)
 /// - `status` 过滤 `'success' | 'failed' | None(=全部)`
-/// - `limit` 上限行数,默认 200;UI 列表按时间倒序翻页时再扩。
-#[derive(Debug, Clone, Default)]
+/// - `limit` 上限行数,默认 200,UI 列表翻页时再扩;上限 1000。
+/// - `offset` 跳过行数(>=0),用于传统 OFFSET 翻页(UI "第 N 页"导航)。
+///   OFFSET 在新写入时会"漂移":插入到顶部会让后续页整体上移一格。
+///   对显式页码导航是可接受的 —— 用户点 N 就是取第 N 页,UI 重新渲染。
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct AiCallLogFilter {
     pub business: Option<AiCallBusiness>,
     pub model_config_id: Option<i64>,
     pub status: Option<AiCallStatus>,
     pub limit: Option<i64>,
+    #[serde(default)]
+    pub offset: Option<i64>,
 }

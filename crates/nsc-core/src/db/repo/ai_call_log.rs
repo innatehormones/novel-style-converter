@@ -91,20 +91,50 @@ impl<'a> AiCallLogRepo<'a> {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// 按 AiCallLogFilter 过滤 + 时间倒序 + 限制行数。
+    /// 按 AiCallLogFilter 过滤 + 时间倒序 + 限制行数 + offset 翻页。
     /// 任意过滤项为 None 时不过滤。limit 缺省 200(UI 列表初次拉 + 翻页都用这个);
     /// 上限 1000,防止 UI 误传 1e9 把 DB 拉死。
-    pub fn list(&self, filter: &AiCallLogFilter) -> Result<Vec<AiCallLog>> {
+    /// 偏移:filter.offset(>=0)跳过指定行数,作为传统 OFFSET 翻页的 SQL 实现。
+    /// OFFSET 在新写入时会"漂移"(插到顶部会让后面的页整体上移),但 UI
+    /// 是显式页码导航,用户点 N 就是取第 N 页,漂移由 UI 解释(看到的不是上次
+    /// 的内容,UI 重新渲染),所以不必为此上 cursor。
+    /// 返回 (logs, total):total 是同 filter 下的总行数,供 UI "共 N 条" +
+    /// 总页数计算用。两次 SELECT 走同一把 Mutex,串行执行,微秒级窗口内可能
+    /// total 与 logs 不一致(新增/删除正好夹在中间),可接受。
+    pub fn list(&self, filter: &AiCallLogFilter) -> Result<(Vec<AiCallLog>, i64)> {
         let limit = filter.limit.unwrap_or(200).clamp(1, 1000);
-        let mut sql = String::from(
+        let offset = filter.offset.unwrap_or(0).max(0);
+
+        // 拼 WHERE + binds,与 (将来)count 共用 build_where_clause。
+        let (where_sql, binds) = self.build_where_clause(filter)?;
+
+        // count 走 * 加速。
+        let count_sql = format!("SELECT COUNT(*) FROM ai_call_logs WHERE {}", where_sql);
+        let bind_refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
+        let total: i64 = self.conn.query_row(&count_sql, params_from_iter(bind_refs.clone()), |row| {
+ row.get::<_, i64>(0)
+        })?;
+
+        let list_sql = format!(
             "SELECT id, created_at, business, context_type, context_id,
                     model_config_id, model_name, base_url,
                     temperature, max_tokens,
                     system_preview, user_preview, system_size, user_size,
                     estimated_tokens_in, actual_tokens_in, actual_tokens_out,
                     status, response_preview, response_size, latency_ms, error
-               FROM ai_call_logs WHERE 1=1",
+               FROM ai_call_logs WHERE {} ORDER BY created_at DESC, id DESC LIMIT {} OFFSET {}",
+            where_sql, limit, offset
         );
+        let mut stmt = self.conn.prepare(&list_sql)?;
+        let rows = stmt.query_map(params_from_iter(bind_refs), |row| from_row(row))?;
+        let logs: Vec<AiCallLog> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok((logs, total))
+    }
+
+    /// 拼 ai_call_logs 的过滤子句 + binds。list() 内部复用,
+    /// 避免 SQL 与 filter 字段不同步。
+    fn build_where_clause(&self, filter: &AiCallLogFilter) -> Result<(String, Vec<Box<dyn rusqlite::ToSql>>)> {
+        let mut sql = String::from("1=1");
         let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(b) = filter.business {
             sql.push_str(" AND business = ?");
@@ -125,13 +155,7 @@ impl<'a> AiCallLogRepo<'a> {
                 AiCallStatus::Failed => "failed",
             }));
         }
-        sql.push_str(" ORDER BY created_at DESC, id DESC LIMIT ");
-        sql.push_str(&limit.to_string());
-
-        let mut stmt = self.conn.prepare(&sql)?;
-        let bind_refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
-        let rows = stmt.query_map(params_from_iter(bind_refs), |row| from_row(row))?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        Ok((sql, binds))
     }
 
     /// 按 id 查单行 —— 不分 status,失败 / 成功都返回。

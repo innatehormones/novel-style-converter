@@ -19,7 +19,7 @@ import type {
   CreateWorkflowInput, PromoteWorkflowInput, WorkflowSummary, WorkflowChapterRow, DeleteWorkflowResult,
   SourceChapterRow, ChapterWorkflowResultRow,
   UploadDeletePreview,
-  AiCallLog, AiCallLogFilter,
+  AiCallLog, AiCallLogFilter, AiCallLogPage,
   ChapterPreviewRow, CommitPreviewInput, RegeneratePreviewInput,
 } from './types';
 
@@ -280,8 +280,8 @@ export function countPromptUsage(promptId: number): Promise<number> {
 
 
 // ─── AI calls ───────────────────────────────────────────────────────────────
-export function listAiCallLogs(filter: AiCallLogFilter): Promise<AiCallLog[]> {
-  return invoke<AiCallLog[]>('list_ai_call_logs', { filter });
+export function listAiCallLogs(filter: AiCallLogFilter): Promise<AiCallLogPage> {
+  return invoke<AiCallLogPage>('list_ai_call_logs', { filter });
 }
 
 export function getAiCallLog(id: number): Promise<AiCallLog | null> {
