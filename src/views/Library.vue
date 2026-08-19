@@ -171,6 +171,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import { useTimeoutFn } from '@vueuse/core';
 import { useRoute, useRouter } from 'vue-router';
 import Button from '../components/ui/Button.vue';
 import DataTable from '../components/ui/DataTable.vue';
@@ -394,25 +395,19 @@ async function doDeleteUpload() {
 }
 
 const toast = ref<{ text: string; action: (() => void) | null; actionLabel: string } | null>(null);
-let toastTimer: number | null = null;
+/// 5s 自动消失 toast — vueuse useTimeoutFn 自动随组件卸载清理。
+const { start: startToastTimer, stop: stopToastTimer } = useTimeoutFn(() => {
+  toast.value = null;
+}, 5000, { immediate: false });
 
 function showToast(text: string, action: (() => void) | null = null, actionLabel = '查看') {
-  if (toastTimer !== null) {
-    clearTimeout(toastTimer);
-    toastTimer = null;
-  }
+  stopToastTimer();
   toast.value = { text, action, actionLabel };
-  toastTimer = window.setTimeout(() => {
-    toast.value = null;
-    toastTimer = null;
-  }, 5000);
+  startToastTimer();
 }
 
 function dismissToast() {
-  if (toastTimer !== null) {
-    clearTimeout(toastTimer);
-    toastTimer = null;
-  }
+  stopToastTimer();
   toast.value = null;
 }
 
