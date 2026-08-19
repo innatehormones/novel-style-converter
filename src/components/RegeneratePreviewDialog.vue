@@ -95,10 +95,11 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import { useQuery } from '@tanstack/vue-query';
 import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
 import ConfirmDialog from './ui/ConfirmDialog.vue';
-import { getChapter as ipcGetChapter } from '../ipc/commands';
+import { getChapter as ipcGetChapter, listChapterPreviews, listTransformationSourceChapters } from '../ipc/commands';
 import { useWorkflowsStore } from '../stores/workflows';
 import type { ChapterPreviewRow, PreviewStatus, SourceChapterRow } from '../ipc/types';
 
@@ -133,15 +134,31 @@ const originalBody = ref('');
 
 const dialogTitle = computed(() => `重新生成章节 #${props.chapterIdx} - ${props.chapterTitle}`);
 
-const previews = computed<ChapterPreviewRow[]>(
-  () => store.previewsByBatchChapter.get(`${props.batchId}:${props.chapterId}`) ?? [],
-);
+/// preview 列表 —— vue-query 自动按 [batchId, chapterId] 缓存。
+/// regeneratePreview/commitPreview/discardPreview 在 store 内自动 invalidate 该 key。
+/// 1.5s 轮询只在有 preview 处于 generating 时触发;终态自动停。
+/// 替代原 onGenerate 内手写 setTimeout 循环。
+const previewsQuery = useQuery({
+  queryKey: ['chapterPreviews', props.batchId, props.chapterId],
+  queryFn: () => listChapterPreviews(props.batchId, props.chapterId),
+  refetchInterval: (query) => {
+    const data = query.state.data as ChapterPreviewRow[] | undefined;
+    if (data === undefined) return false;
+    return data.some((p) => p.status === 'generating') ? 1500 : false;
+  },
+});
+const previews = computed<ChapterPreviewRow[]>(() => previewsQuery.data.value ?? []);
 
 const currentPreview = computed<ChapterPreviewRow | null>(
   () => previews.value.find(p => p.id === selectedPreviewId.value) ?? previews.value[0] ?? null,
 );
 
-const sources = computed<SourceChapterRow[]>(() => store.sourcesByTn.get(props.tnId) ?? []);
+/// 章节上下文(上一章/下一章) —— 与父页同一 cache key,自动共享 + 实时同步。
+const sourcesQuery = useQuery({
+  queryKey: ['transformationSourceChapters', props.tnId],
+  queryFn: () => listTransformationSourceChapters(props.tnId),
+});
+const sources = computed<SourceChapterRow[]>(() => sourcesQuery.data.value ?? []);
 
 const currentSource = computed(() =>
   sources.value.find(s => s.chapter_id === props.chapterId) ?? null,
@@ -185,8 +202,8 @@ watch(open, async (v) => {
   draftContent.value = '';
   extraInput.value = '';
   origTab.value = 'cur';
+  // previewsQuery 自动订阅(打开对话框时 enabled),无需手动 loadPreviews。
   try {
-    await store.loadPreviews(props.batchId, props.chapterId);
     selectedPreviewId.value = previews.value[0]?.id ?? null;
     await loadOriginalBody(props.chapterId);
   } catch (e: unknown) {
@@ -214,13 +231,7 @@ async function onGenerate(): Promise<void> {
       extraInput.value.trim() || null,
     );
     selectedPreviewId.value = previews.value[0]?.id ?? null;
-    const deadline = Date.now() + 60000;
-    while (Date.now() < deadline) {
-      await new Promise<void>(r => setTimeout(r, 1500));
-      if (!open.value) break;
-      await store.loadPreviews(props.batchId, props.chapterId);
-      if (previews.value.every(p => p.status !== 'generating')) break;
-    }
+    // previewsQuery.refetchInterval 在有 generating 时自动 1.5s 轮询,无需手写 setTimeout 循环
   } catch (e: unknown) {
     lastError.value = e instanceof Error ? e.message : String(e);
   } finally {
