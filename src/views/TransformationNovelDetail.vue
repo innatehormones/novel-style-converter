@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
+import { useDynamicTableHeight } from '../composables/useDynamicTableHeight';
 import { useRoute, useRouter } from 'vue-router';
 import { useWorkflowsStore } from '../stores/workflows';
 import {
@@ -58,25 +59,25 @@ const store = useWorkflowsStore();
 const activeTab = ref<'chapters' | 'workflows'>('chapters');
 
 /// 章节来源 tab 表格自适应高度:监听 `main.app` 的尺寸变化,实时算出
-/// `main 可用高度 - 表格 div 顶部偏移 - 底部留白`,下限 300px。
-/// 表格内部垂直滚动仍然由 DataTable 的 maxHeight 触发,与此无关。
-const chaptersTableEl = ref<HTMLElement | null>(null);
-const chaptersTableMaxHeight = ref('420px');
-const CHAPTERS_TABLE_MIN_HEIGHT = 300;
-const CHAPTERS_TABLE_BOTTOM_PADDING = 48;
-/// 调试时实测:横向滚动条(~17px) + 表格 border/padding/box-shadow(~10px)
-/// 加起来约 26~36px。从 16 提到 36 给一个更稳的容错,避免 main.app
-/// 因为表格占用溢出而出现滚动条。
+/// 章节来源 Tab 表格 + 工作流 Tab 表格共用 composable,统一从 main.app 计算可用高度。
 
-function recalcChaptersTableHeight() {
-  const main = document.querySelector('main.app') as HTMLElement | null;
-  const tableEl = chaptersTableEl.value;
-  if (main === null || tableEl === null) return;
-  const mainRect = main.getBoundingClientRect();
-  const tableRect = tableEl.getBoundingClientRect();
-  const available = main.clientHeight - (tableRect.top - mainRect.top);
-  chaptersTableMaxHeight.value = `${Math.max(CHAPTERS_TABLE_MIN_HEIGHT, available - CHAPTERS_TABLE_BOTTOM_PADDING)}px`;
-}
+
+
+/// 章节来源 Tab 表格自适应高度
+const chaptersTableEl = ref<HTMLElement | null>(null);
+const { maxHeight: chaptersTableMaxHeight } = useDynamicTableHeight({
+  tableEl: chaptersTableEl,
+  minHeight: 300,
+  deps: [() => sources.value.length, activeTab],
+});
+
+/// 工作流 Tab 表格自适应高度 —— 同样跟随 main.app + tab 切换重算
+const workflowsTableEl = ref<HTMLElement | null>(null);
+const { maxHeight: workflowsTableMaxHeight } = useDynamicTableHeight({
+  tableEl: workflowsTableEl,
+  minHeight: 300,
+  deps: [() => workflows.value.length, activeTab],
+});
 
 /// 章节来源 tab 表格列(TanStack format)
 const sourceColumns = [
@@ -674,9 +675,6 @@ async function loadAll() {
   ]);
 }
 
-/// main.app 尺寸变化 → 重算章节来源表格高度。
-let mainResizeObserver: ResizeObserver | null = null;
-
 /// 章节来源表格表头全选/全不选。
 function onToggleAll(e: Event) {
   const checked = (e.target as HTMLInputElement).checked;
@@ -704,29 +702,14 @@ let pollHandle: number | null = null;
 onMounted(async () => {
   await loadAll();
   pollHandle = window.setInterval(() => { void store.loadByTn(tnId.value); }, 5000);
-  // 等 sources 首次渲染到 DOM,再算一次;之后由 ResizeObserver 跟踪 main 尺寸变化。
+  // 表格高度由 useDynamicTableHeight composable 自动监听 main.app 尺寸变化,无需手动管理。
   await nextTick();
-  recalcChaptersTableHeight();
-  const main = document.querySelector('main.app');
-  if (main !== null) {
-    mainResizeObserver = new ResizeObserver(() => recalcChaptersTableHeight());
-    mainResizeObserver.observe(main);
-  }
 });
 
 onUnmounted(() => {
   if (pollHandle !== null) window.clearInterval(pollHandle);
-  if (mainResizeObserver !== null) {
-    mainResizeObserver.disconnect();
-    mainResizeObserver = null;
-  }
 });
 
-/// sources 数量变化(数据加载完 / 切 tab 后重新显示)也会影响表格 div 在 main 内的位置,
-/// 等 DOM 更新后重算一次。
-watch([() => sources.value.length, activeTab], () => {
-  void nextTick(() => recalcChaptersTableHeight());
-});
 
 watch(() => workflows.value, (list) => {
   if (selectedWorkflowId.value === null) return;
@@ -843,7 +826,7 @@ watch(() => sources.value, (list) => {
           新建工作流 ({{ selectedCount }} 章）
         </Button>
       </div>
-      <div ref="chaptersTableEl" class="chapters-table-wrap">
+      <div ref="chaptersTableEl" class="table-wrap">
         <DataTable
           v-if="sources.length > 0"
           :columns="sourceColumns"
@@ -881,13 +864,14 @@ watch(() => sources.value, (list) => {
 
     <!-- 工作流 tab -->
     <template v-else>
+      <div v-if="workflows.length > 0" ref="workflowsTableEl" class="table-wrap">
       <DataTable
-        v-if="workflows.length > 0"
         :columns="workflowColumns"
         :data="workflows"
         :row-key="(row: WorkflowSummary) => row.id"
         :widths="workflowWidths"
         :numeric-columns="['total', 'done', 'failed', 'skipped']"
+        :max-height="workflowsTableMaxHeight"
         frozen-column="actions"
         empty-text="尚无工作流"
       >
@@ -927,6 +911,7 @@ watch(() => sources.value, (list) => {
           >删除</button>
         </template>
       </DataTable>
+      </div>
       <div v-if="createBatchError" class="error-banner">
         <span>新建工作流失败：{{ createBatchError }}</span>
         <button type="button" class="dismiss" aria-label="关闭" @click="createBatchError = null">×</button>
@@ -1023,6 +1008,7 @@ watch(() => sources.value, (list) => {
         :data="selectedWorkflowChapters"
         :row-key="(row: WorkflowChapterRow) => row.tc_id"
         :widths="workflowChapterWidths"
+        :max-height="'600px'"
         :truncate-columns="['title', 'preview']"
         frozen-column="actions"
         empty-text="暂无章节"

@@ -27,12 +27,15 @@
         点击右上"新建 prompt"创建一条;内置 prompt 可用"复制"派生用户版后再编辑。
       </p>
     </div>
-    <Table
-      v-else
-      :columns="columns"
-      :data="store.prompts"
-      :row-key="(row: Prompt) => row.id"
-    >
+    <div v-else ref="promptTableEl" class="table-wrap">
+      <DataTable
+        :columns="promptColumns"
+        :data="store.prompts"
+        :row-key="(row) => row.id"
+        :widths="promptWidths"
+        :max-height="promptTableMaxHeight"
+        frozen-column="actions"
+      >
       <template #cell-name="{ row }">
         <span :class="{ archived: row.archived === 1 }">{{ row.name }}</span>
         <Tag v-if="row.archived === 1" kind="info" class="archived-tag">已归档</Tag>
@@ -48,16 +51,19 @@
       </template>
       <template #cell-actions="{ row }">
         <template v-if="row.archived === 1">
-          <Button size="small" @click="onRestore(row.id)">恢复</Button>
+          <button type="button" class="row-link" @click="onRestore(row.id)">恢复</button>
         </template>
         <template v-else>
-          <Button v-if="row.is_builtin" size="small" @click="openView(row)">查看</Button>
-          <Button v-else size="small" @click="openEdit(row)">编辑</Button>
-          <Button size="small" @click="openCopy(row)">复制</Button>
-          <Button size="small" kind="danger" @click="onDelete(row)">删除</Button>
+          <button v-if="row.is_builtin" type="button" class="row-link" @click="openView(row)">查看</button>
+          <button v-else type="button" class="row-link" @click="openEdit(row)">编辑</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <button type="button" class="row-link" @click="openCopy(row)">复制</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <button type="button" class="row-link danger" @click="onDelete(row)">删除</button>
         </template>
       </template>
-    </Table>
+      </DataTable>
+    </div>
 
     <PromptEditDialog
       v-model:open="dialogOpen"
@@ -92,7 +98,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import Button from '../components/ui/Button.vue';
-import Table from '../components/ui/Table.vue';
+import DataTable from '../components/ui/DataTable.vue';
+import { useDynamicTableHeight } from '../composables/useDynamicTableHeight';
 import Tag from '../components/ui/Tag.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
@@ -104,14 +111,30 @@ import type { Prompt } from '../ipc/types';
 
 const store = usePromptsStore();
 
+/// 表格自适应高度 —— 跟随窗口大小变化,跟随数据数量变化(显示/隐藏归档)重算
+const promptTableEl = ref<HTMLElement | null>(null);
+const { maxHeight: promptTableMaxHeight } = useDynamicTableHeight({
+  tableEl: promptTableEl,
+  minHeight: 300,
+  deps: [() => store.prompts.length, () => store.includeArchived],
+});
+
 type DialogMode = 'create' | 'edit' | 'copy-from-builtin';
 
-const columns = [
-  { key: 'name', title: '名称', width: '240px' },
-  { key: 'kind', title: '类型', width: '100px' },
-  { key: 'builtin', title: '来源', width: '120px' },
-  { key: 'actions', title: '操作', width: '280px', type: 'actions' as const },
+/// DataTable(TanStack)列定义。kind/builtin 在模板里用 slot + Tag 渲染(列定义
+/// 只声明 header + id,具体渲染交给模板保持灵活性)。
+const promptColumns = [
+  { accessorKey: 'name', id: 'name', header: '名称', enableSorting: true },
+  { id: 'kind', header: '类型', enableSorting: false },
+  { id: 'builtin', header: '来源', enableSorting: false },
+  { id: 'actions', header: '操作', enableSorting: false },
 ];
+const promptWidths: Record<string, number> = {
+  name: 240,
+  kind: 100,
+  builtin: 120,
+  actions: 280,
+};
 
 const dialogOpen = ref(false);
 const dialogMode = ref<DialogMode>('create');
@@ -213,6 +236,12 @@ async function onToggleArchived(v: boolean) {
   cursor: pointer;
   user-select: none;
 }
+/* table-wrap 让 useDynamicTableHeight 计算表格 div 在 main.app 内的偏移;
+   不带 padding/margin,避免破坏 maxHeight 算式。 */
+.table-wrap {
+  /* 无样式,仅作为高度测量锚点 */
+}
+
 .alert {
   padding: 12px 16px;
   background: var(--bg-hover);

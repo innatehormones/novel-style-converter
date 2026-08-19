@@ -34,35 +34,36 @@
       </p>
     </div>
 
-    <Table
-      v-else
-      :columns="columns"
-      :data="store.models"
-      empty-text="暂无模型"
-      :row-key="(row) => row.id"
-    >
-      <template #cell-id="{ row }">
-        {{ row.id }}
-        <Tag v-if="row.archived === 1" kind="info" class="archived-tag">已归档</Tag>
-      </template>
+    <div v-else ref="modelTableEl" class="table-wrap">
+      <DataTable
+        :columns="modelColumns"
+        :data="store.models"
+        empty-text="暂无模型"
+        :row-key="(row) => row.id"
+        :widths="modelWidths"
+        :truncate-columns="['base_url']"
+        :max-height="modelTableMaxHeight"
+        frozen-column="actions"
+      >
       <template #cell-name="{ row }">
         <span :class="{ archived: row.archived === 1 }">{{ row.name }}</span>
+        <Tag v-if="row.archived === 1" kind="info" class="archived-tag">已归档</Tag>
       </template>
       <template #cell-model="{ row }">{{ row.model }}</template>
       <template #cell-base_url="{ row }">{{ row.base_url }}</template>
       <template #cell-concurrency="{ row }">{{ row.concurrency }}</template>
       <template #cell-actions="{ row }">
         <template v-if="row.archived === 1">
-          <Button size="small" @click="onRestore(row.id)">恢复</Button>
+          <button type="button" class="row-link" @click="onRestore(row.id)">恢复</button>
         </template>
         <template v-else>
-          <Button size="small" @click="openEdit(row)">编辑</Button>
-          <Button size="small" kind="danger" @click="onDelete(row.id)">
-            删除
-          </Button>
+          <button type="button" class="row-link" @click="openEdit(row)">编辑</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <button type="button" class="row-link danger" @click="onDelete(row.id)">删除</button>
         </template>
       </template>
-    </Table>
+      </DataTable>
+    </div>
 
     <ModelDialog
       v-model:open="dialogOpen"
@@ -90,7 +91,8 @@
 import { computed, onMounted, ref } from 'vue';
 import Button from '../components/ui/Button.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
-import Table from '../components/ui/Table.vue';
+import DataTable from '../components/ui/DataTable.vue';
+import { useDynamicTableHeight } from '../composables/useDynamicTableHeight';
 import Tag from '../components/ui/Tag.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import ModelDialog from '../components/ModelDialog.vue';
@@ -100,19 +102,37 @@ import type { ModelConfigInput } from '../ipc/types';
 import { catalogStatus, type CatalogStatus } from '../ipc/commands';
 
 const store = useModelsStore();
+
+/// 表格自适应高度 —— 跟随窗口大小变化,跟随数据数量变化(显示/隐藏归档)重算
+const modelTableEl = ref<HTMLElement | null>(null);
+const { maxHeight: modelTableMaxHeight } = useDynamicTableHeight({
+  tableEl: modelTableEl,
+  minHeight: 300,
+  deps: [() => store.models.length, () => store.includeArchived],
+});
 const dialogOpen = ref(false);
 const dialogInitial = ref<ModelConfigInput | null>(null);
 const deleteConfirmOpen = ref(false);
 const deleteTargetId = ref<number | null>(null);
 
-const columns = [
-  { key: 'id', title: 'id', width: '90px' },
-  { key: 'name', title: '名称', width: '160px' },
-  { key: 'model', title: '模型', width: '160px' },
-  { key: 'base_url', title: 'Base URL' },
-  { key: 'concurrency', title: '并发', width: '70px' },
-  { key: 'actions', title: '操作', width: '180px', type: 'actions' as const },
+/// DataTable(TanStack)列定义 —— name / id / base_url 在模板里用 slot 处理 archived 样式,
+/// 列定义只声明 header + id。concurrency 是数字列,UI 端用 tabular-nums 右对齐。
+/// id 列已移除:从前用户填模型 id 时方便对照,现在 AiCalls 用下拉选模型名,
+/// 表格里再单独列一个数字 id 属于冗余。
+const modelColumns = [
+  { accessorKey: 'name', id: 'name', header: '名称', enableSorting: true },
+  { accessorKey: 'model', id: 'model', header: '模型', enableSorting: true },
+  { accessorKey: 'base_url', id: 'base_url', header: 'Base URL', enableSorting: false },
+  { accessorKey: 'concurrency', id: 'concurrency', header: '并发', enableSorting: true },
+  { id: 'actions', header: '操作', enableSorting: false },
 ];
+const modelWidths: Record<string, number> = {
+  name: 160,
+  model: 180,
+  base_url: 280,
+  concurrency: 80,
+  actions: 180,
+};
 
 // 模型清单（models.dev）状态 —— 只读展示,不参与表格渲染 / 不干预布局
 const catalogStatusState = ref<CatalogStatus | null>(null);
@@ -213,6 +233,12 @@ async function onToggleArchived(v: boolean) {
 .catalog-status .muted {
   margin-left: 4px;
 }
+/* table-wrap 让 useDynamicTableHeight 计算表格 div 在 main.app 内的偏移;
+   不带 padding/margin,避免破坏 maxHeight 算式。 */
+.table-wrap {
+  /* 无样式,仅作为高度测量锚点 */
+}
+
 .alert {
   padding: 12px 16px;
   background: var(--danger-bg);
