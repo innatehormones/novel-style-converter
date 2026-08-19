@@ -137,21 +137,22 @@ fn parse_transform_status(s: &str) -> Result<TransformStatus, String> {
 }
 
 fn to_summary(db: &Db, b: &Batch) -> WorkflowSummary {
-    let (done, failed, skipped, total): (i64, i64, i64, i64) = db.lock().query_row(
+    // 单 SQL JOIN 一次拿完 5 个聚合:tc status 计数 + promoted da 计数。
+    // 旧实现拆成 2 次 db.lock() 各跑一次 SQL,每次跨 mutex 序列化往返。
+    // list_workflows 调 to_summary N 次,旧 = 2N 次锁;新 = N 次锁。
+    // 在 tn 下 batch 数较多时,refetch 路径(list_workflows / invalidate 后的
+    // vue-query 重 fetch)总开销减半。
+    let (done, failed, skipped, total, promoted_count): (i64, i64, i64, i64, i64) = db.lock().query_row(
         "SELECT \
-            COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END), 0), \
-            COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0), \
-            COALESCE(SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END), 0), \
-            COUNT(*) \
-         FROM transformation_chapters WHERE batch_id = ?1",
+            COALESCE(SUM(CASE WHEN tc.status='done' THEN 1 ELSE 0 END), 0), \
+            COALESCE(SUM(CASE WHEN tc.status='failed' THEN 1 ELSE 0 END), 0), \
+            COALESCE(SUM(CASE WHEN tc.status='skipped' THEN 1 ELSE 0 END), 0), \
+            COUNT(tc.id), \
+            COALESCE((SELECT COUNT(*) FROM data_assets WHERE source_workflow_id = ?1), 0) \
+         FROM transformation_chapters tc WHERE tc.batch_id = ?1",
         rusqlite::params![b.id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-    ).unwrap_or((0, 0, 0, 0));
-    let promoted_count: i64 = db.lock().query_row(
-        "SELECT COUNT(*) FROM data_assets WHERE source_workflow_id = ?1",
-        rusqlite::params![b.id],
-        |row| row.get(0),
-    ).unwrap_or(0);
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+    ).unwrap_or((0, 0, 0, 0, 0));
     WorkflowSummary {
         id: b.id,
         tn_id: b.transformation_novel_id,
