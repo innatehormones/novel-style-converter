@@ -104,12 +104,15 @@
         :data="store.transformationNovels"
         :row-key="(row: TransformationNovelSummary) => row.id"
         :widths="tnWidths"
+        :truncate-columns="['source']"
         frozen-column="actions"
       >
         <template #cell-source="{ row }">
-          <button class="cell-link" @click="goDataAsset(row.data_asset_id)">
-            {{ sourceAssetTitle(row.data_asset_id) }} · {{ row.chapters_count ?? 0 }} 章
-          </button>
+          <Tooltip :text="sourceAssetTitle(row.data_asset_id)">
+            <button type="button" class="row-link source-link" @click="goDataAsset(row.data_asset_id)">
+              {{ sourceAssetTitle(row.data_asset_id) }} · {{ row.chapters_count ?? 0 }} 章
+            </button>
+          </Tooltip>
         </template>
         <template #cell-title="{ row }">
           <Input v-if="renamingId === row.id" v-model="renameDraft" />
@@ -587,6 +590,9 @@ function goDetail(tnId: number) {
 .muted {
   color: var(--text-secondary);
   font-size: 12px;
+}
+.source-link {
+  color: inherit;
 }
 .cell-truncate {
   display: block;
