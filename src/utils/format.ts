@@ -77,6 +77,16 @@ export function formatWordCount(n: number): string {
 
 
 /// RFC3339 → "YYYY-MM-DD HH:mm:ss"(本地时区)。使用者看到的是本机时间;后端不参与日期计算,所以仅在渲染层转换。空值返回 "—" 避免展示原 ISO。
+/// 与 formatTime 同样的语义:本地时区,空值显示 "—"。
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+}
+
+/// RFC3339 → "YYYY-MM-DD HH:mm:ss"(本地时区)。使用者看到的是本机时间;后端不参与日期计算,所以仅在渲染层转换。空值返回 "—" 避免展示原 ISO。
 export function formatTime(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
