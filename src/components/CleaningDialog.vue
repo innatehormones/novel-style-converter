@@ -60,6 +60,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { useDebounceFn } from '@vueuse/core';
 import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
 import { previewCleaning } from '../ipc/commands';
@@ -91,18 +92,17 @@ const selectedRules = ref<RuleRow[]>(initialRules.map((r) => ({ ...r })));
 const preview = ref<{ cleaned_text: string; lines_delta: number; chars_delta: number } | null>(null);
 const error = ref<string | null>(null);
 
-let debounceHandle: number | null = null;
 let skipNextRulesWatch = false;
+
+/// 500ms 防抖预览 — vueuse useDebounceFn 自动随组件卸载清理。150/250ms 偏紧,快速勾规则时 preview IPC 还没跑完又触发下一轮,500ms 给后端留够时间。
+const debouncedRunPreview = useDebounceFn(() => { void runPreview(); }, 500);
 
 watch(selectedRules, () => {
   if (skipNextRulesWatch) {
     skipNextRulesWatch = false;
     return;
   }
-  if (debounceHandle !== null) window.clearTimeout(debounceHandle);
-  debounceHandle = window.setTimeout(() => {
-    void runPreview();
-  }, 150);
+  debouncedRunPreview();
 }, { deep: true });
 
 watch(open, (v) => {

@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { useDebounceFn } from '@vueuse/core';
 import { computed, ref } from 'vue';
 import type { ChapterSegment, ChapterInput } from '../ipc/types';
 import {
@@ -47,7 +48,7 @@ export const useChaptersStore = defineStore('chapters', () => {
   const searchQuery = ref<string>('');
   const currentHitIndex = ref<number>(0);
 
-  let debounceHandle: number | null = null;
+
   let requestToken = 0;
 
   const committed = computed(() => sourceKind.value === 'committed');
@@ -127,17 +128,13 @@ export const useChaptersStore = defineStore('chapters', () => {
     });
   }
 
-  function scheduleRecompute() {
-    if (debounceHandle !== null) clearTimeout(debounceHandle);
-    debounceHandle = window.setTimeout(() => {
-      void recompute();
-    }, 200);
-  }
-
   async function recompute() {
     const token = ++requestToken;
     await applyWorking(token);
   }
+
+  /// 200ms 防抖 — vueuse useDebounceFn 自动随 store 作用域销毁清理。
+  const debouncedRecompute = useDebounceFn(() => { void recompute(); }, 200);
 
   async function load(id: number) {
     uploadId.value = id;
@@ -151,10 +148,6 @@ export const useChaptersStore = defineStore('chapters', () => {
     titleOverrides.value = {};
     searchQuery.value = '';
     currentHitIndex.value = 0;
-    if (debounceHandle !== null) {
-      clearTimeout(debounceHandle);
-      debounceHandle = null;
-    }
     loading.value = true;
     error.value = null;
     ++requestToken;
@@ -199,13 +192,13 @@ export const useChaptersStore = defineStore('chapters', () => {
       suppressed.value = suppressed.value.filter((p) => p !== key);
     }
     markers.value = [...markers.value, key].sort();
-    scheduleRecompute();
+    debouncedRecompute();
   }
 
   function removeMarker(key: string) {
     if (!markers.value.includes(key)) return;
     markers.value = markers.value.filter((m) => m !== key);
-    scheduleRecompute();
+    debouncedRecompute();
   }
 
   function removeChapter(idx: number) {
@@ -214,7 +207,7 @@ export const useChaptersStore = defineStore('chapters', () => {
     const k = segmentKey(seg);
     if (!suppressed.value.includes(k)) {
       suppressed.value = [...suppressed.value, k].sort();
-      scheduleRecompute();
+      debouncedRecompute();
     }
   }
 
@@ -237,16 +230,12 @@ export const useChaptersStore = defineStore('chapters', () => {
     markers.value = [];
     suppressed.value = [];
     titleOverrides.value = {};
-    scheduleRecompute();
+    debouncedRecompute();
   }
 
   /// 离开 parse 页时调用:清掉 rawText/source/workingChapters 等大对象,避免 pinia store
   /// 持有旧小说数据驻内存(load 覆盖赋值会 GC,但显式 unload 更明确,也避免 watch 防抖悬挂)。
   function unload() {
-    if (debounceHandle !== null) {
-      clearTimeout(debounceHandle);
-      debounceHandle = null;
-    }
     uploadId.value = null;
     rawText.value = '';
     filename.value = '';
