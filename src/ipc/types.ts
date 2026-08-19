@@ -228,8 +228,14 @@ export interface UpdateTransformationNovelInput {
 }
 
 // === Workflow 宸ヤ綔娴?===
-/** 鍚庣 `BatchStatus` 鏀舵暃鍒颁袱鎬?`running` / `stopped`(spec 搂3.3)銆係topped 鍚庡彧鑳?retry 绌烘Ы銆?*/
-export type WorkflowStatus = 'running' | 'stopped';
+/**
+ * 后端 `BatchStatus` 全部 7 值。前端必须穷举映射中文,否则 UI 会甩原始字符串。
+ * - pending/running: 工作中。
+ * - stopped: spec §3.3 收尾态,只能 retry 空槽,不再回 running。
+ * - paused: 失败策略 = pause_and_review,批停在等用户决策(继续/终止/跳过)。
+ * - completed/terminated/cancelled: batch 的最终终态,含义不可逆。
+ */
+export type WorkflowStatus = 'pending' | 'running' | 'stopped' | 'paused' | 'completed' | 'terminated' | 'cancelled';
 
 /**
  * `list_workflows` / `get_workflow` 杩斿洖:宸ヤ綔娴佹眹鎬?+ 绔犺妭璁℃暟銆?
@@ -261,7 +267,7 @@ export interface WorkflowChapterRow {
   chapter_id: number;
   chapter_idx: number;
   chapter_title: string;
-  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+  status: TransformStatus;
   error: string | null;
   content_preview: string | null;
   is_empty_slot: boolean;
@@ -283,7 +289,7 @@ export interface ChapterWorkflowResultRow {
   batch_status: WorkflowStatus;
   batch_ended_at: string | null;
   content: string | null;
-  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+  status: TransformStatus;
 }
 
 /** `create_workflow` 鍏ュ弬:鍚庣 snake_case DTO,鎵€鏈夊瓧娈靛繀濉?spec 搂5.1)銆?*/
@@ -292,7 +298,6 @@ export interface ChapterWorkflowResultRow {
  *
  * `on_failure_policy` 鏄珷鑺傚け璐ユ椂鐨勫鐞嗙瓥鐣?
  * - `pause_and_review`: 澶辫触鏃?batch 杞?Paused,绛夌敤鎴峰湪 modal 閲屾墜鍔ㄥ喅绛?閲嶈瘯/璺宠繃/缁堟)
- * - `terminate`:        澶辫触鏃跺悓 batch 鍚庣画绔犺妭 cancelled + batch 杞?Terminated
  * - `skip_failed`:      澶辫触鏃惰绔犳爣 Skipped,缁х画娲句笅涓€绔?batch 鐣?Running)
  */
 export interface CreateWorkflowInput {
@@ -305,7 +310,7 @@ export interface CreateWorkflowInput {
   ctx_prev_original: number;
   ctx_prev_transformed: number;
   ctx_next_original: number;
-  on_failure_policy: 'pause_and_review' | 'terminate' | 'skip_failed';
+  on_failure_policy: 'pause_and_review' | 'skip_failed';
 }
 
 /**
