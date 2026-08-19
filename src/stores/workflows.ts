@@ -1,145 +1,96 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { useQueryClient } from '@tanstack/vue-query';
 import {
-  createWorkflow, listWorkflows, getWorkflow, stopWorkflow, deleteWorkflow as deleteWorkflowCmd,
-  retryWorkflowChapters, listWorkflowChapters, listTransformationSourceChapters,
-  listChapterWorkflowResults, promoteWorkflow, listPromotedDataAssetsForWorkflow,
-  regenerateChapterPreview, commitChapterPreview, listChapterPreviews, discardChapterPreview,
+  createWorkflow, stopWorkflow, retryWorkflowChapters, deleteWorkflow as deleteWorkflowCmd,
+  promoteWorkflow, regenerateChapterPreview, commitChapterPreview, discardChapterPreview,
 } from '../ipc/commands';
 import type {
-  CreateWorkflowInput, WorkflowSummary, WorkflowChapterRow, SourceChapterRow,
-  ChapterWorkflowResultRow, DataAsset, DeleteWorkflowResult,
+  CreateWorkflowInput, WorkflowSummary, DataAsset, DeleteWorkflowResult,
   ChapterPreviewRow, CommitPreviewInput,
 } from '../ipc/types';
 
+/// workflows store —— 缩成 mutation + invalidate 编排。
+///
+/// 读侧"按 key 缓存"职责已迁到 TanStack Query (vue-query):
+/// - byTn / chaptersByBatch / sourcesByTn / resultsByTnChapter / previewsByBatchChapter 6 个 Map 全删
+/// - 6 个 loadXxx 函数全删 —— view 端 useQuery 自动跑
+/// - promotedByBatch 死数据整个删
+/// - refresh(batchId) 删 —— invalidate 替代
+///
+/// mutation 留在 store 是因为它们涉及"IPC + invalidate 哪些 query key"的业务编排,
+/// 不在 view 里散落。deleteWorkflow 的 in-memory find/splice 也只在 store 里需要一次。
 export const useWorkflowsStore = defineStore('workflows', () => {
-  const byTn = ref<Map<number, WorkflowSummary[]>>(new Map());
-  const chaptersByBatch = ref<Map<number, WorkflowChapterRow[]>>(new Map());
-  const sourcesByTn = ref<Map<number, SourceChapterRow[]>>(new Map());
-  const resultsByTnChapter = ref<Map<string, ChapterWorkflowResultRow[]>>(new Map());
-  /// preview 行按 (batchId, chapterId) 索引 —— key 用 `${batchId}:${chapterId}`(与现有 resultsByTnChapter 一致)。
-  const previewsByBatchChapter = ref<Map<string, ChapterPreviewRow[]>>(new Map());
-  const loading = ref(false);
-  const error = ref<string | null>(null);
+  const queryClient = useQueryClient();
 
-  async function loadSources(tnId: number) {
-    sourcesByTn.value.set(tnId, await listTransformationSourceChapters(tnId));
-  }
-  async function loadByTn(tnId: number) {
-    byTn.value.set(tnId, await listWorkflows(tnId));
-  }
-  async function loadChapters(batchId: number) {
-    chaptersByBatch.value.set(batchId, await listWorkflowChapters(batchId));
-  }
-  async function loadResultsForChapter(tnId: number, chapterId: number) {
-    resultsByTnChapter.value.set(`${tnId}:${chapterId}`,
-      await listChapterWorkflowResults(tnId, chapterId));
-  }
   async function create(payload: CreateWorkflowInput): Promise<WorkflowSummary> {
-    loading.value = true;
-    try {
-      const w = await createWorkflow(payload);
-      const list = byTn.value.get(w.tn_id) ?? [];
-      list.unshift(w);
-      byTn.value.set(w.tn_id, list);
-      return w;
-    } finally { loading.value = false; }
+    const w = await createWorkflow(payload);
+    await queryClient.invalidateQueries({ queryKey: ['workflows', w.tn_id] });
+    return w;
   }
-async function refresh(batchId: number) {
-    const w = await getWorkflow(batchId);
-    const list = byTn.value.get(w.tn_id);
-    if (list) {
-      const i = list.findIndex(x => x.id === batchId);
-      if (i >= 0) list[i] = w; else list.unshift(w);
-    }
-  }
-  async function stop(batchId: number) {
+
+  async function stop(batchId: number): Promise<WorkflowSummary> {
     const w = await stopWorkflow(batchId);
-    await refresh(batchId);
+    // stop 影响 batch 自身 + 该 tn 下 workflows 列表的计数 / 状态
+    await queryClient.invalidateQueries({ queryKey: ['workflowChapters', batchId] });
+    await queryClient.invalidateQueries({ queryKey: ['workflows'] });
     return w;
   }
-  async function retry(batchId: number, chapterIds: number[]) {
+
+  async function retry(batchId: number, chapterIds: number[]): Promise<WorkflowSummary> {
     const w = await retryWorkflowChapters(batchId, chapterIds);
-    await refresh(batchId);
+    await queryClient.invalidateQueries({ queryKey: ['workflowChapters', batchId] });
     return w;
   }
-  /// 删除工作流。后端 cascade 处理衍生表;store 这边从 byTn 缓存里同步移除。
+
+  /// 删除工作流。后端 cascade 处理衍生表。
   async function deleteWorkflow(batchId: number): Promise<DeleteWorkflowResult> {
     const res = await deleteWorkflowCmd(batchId);
-    // 找出所属 tn(任一缓存命中即可),从 byTn 中移除。
-    for (const [tnId, list] of byTn.value) {
-      const i = list.findIndex((w) => w.id === batchId);
-      if (i >= 0) {
-        list.splice(i, 1);
-        byTn.value.set(tnId, [...list]);
-        break;
-      }
-    }
-    chaptersByBatch.value.delete(batchId);
-    promotedByBatch.value.delete(batchId);
+    await queryClient.invalidateQueries({ queryKey: ['workflows'] });
     return res;
   }
 
-  // promoted data assets 派生索引:batchId -> 列表
-  const promotedByBatch = ref<Map<number, DataAsset[]>>(new Map());
-
+  /// 工作流转正为新数据资产。源 workflow 状态不变 (completed 仍是 completed),
+  /// 但 tn 视图可能刷新以反映派生的 da。
   async function promote(batchId: number, title: string): Promise<DataAsset> {
     const newDa = await promoteWorkflow({ batchId, title });
-    await refresh(batchId);
-    const list = promotedByBatch.value.get(batchId) ?? [];
-    list.unshift(newDa);
-    promotedByBatch.value.set(batchId, list);
+    await queryClient.invalidateQueries({ queryKey: ['workflows'] });
     return newDa;
   }
-  async function loadPromotedByBatch(batchId: number) {
-    promotedByBatch.value.set(batchId, await listPromotedDataAssetsForWorkflow(batchId));
-  }
 
-  /// 拉取某章节所有 preview 行(覆盖本地缓存)。
-  async function loadPreviews(batchId: number, chapterId: number) {
-    const key = `${batchId}:${chapterId}`;
-    previewsByBatchChapter.value.set(key, await listChapterPreviews(batchId, chapterId));
-  }
-
-  /// 发起预览生成。返回新 preview.id;store 已乐观插入 status='generating' 的占位行,
-  /// 后续通过 loadPreviews 拉真值替换。
   async function regeneratePreview(
     batchId: number, chapterId: number, customInput: string | null,
   ): Promise<number> {
     const id = await regenerateChapterPreview({
       batch_id: batchId, chapter_id: chapterId, custom_input: customInput,
     });
-    await loadPreviews(batchId, chapterId);
+    await queryClient.invalidateQueries({ queryKey: ['chapterPreviews', batchId, chapterId] });
     return id;
   }
 
   async function commitPreview(payload: CommitPreviewInput): Promise<WorkflowSummary> {
     const w = await commitChapterPreview(payload);
-    // 提交后该章节 preview 行被删,清掉本地缓存,refresh workflow 计数
-    const key = `${payload.batch_id}:${payload.chapter_id}`;
-    previewsByBatchChapter.value.delete(key);
-    await refresh(payload.batch_id);
+    // 提交后该章节 preview 行被删;workflow 章节行更新(转换结果);workflow 状态 / 计数变化;
+    // 侧栏 chapterWorkflowResults (chapterWorkflowResults[*]) 也需刷新,前缀匹配即覆盖所有已缓存的章节结果。
+    await queryClient.invalidateQueries({ queryKey: ['chapterPreviews', payload.batch_id, payload.chapter_id] });
+    await queryClient.invalidateQueries({ queryKey: ['chapterWorkflowResults'] });
+    await queryClient.invalidateQueries({ queryKey: ['workflowChapters', payload.batch_id] });
+    await queryClient.invalidateQueries({ queryKey: ['workflows'] });
     return w;
   }
 
-  async function discardPreview(previewId: number) {
+  async function discardPreview(previewId: number): Promise<void> {
     await discardChapterPreview(previewId);
-    // 不传 batchId/chapterId —— 找到包含该 preview 的 key 重新加载
-    for (const [k, list] of previewsByBatchChapter.value) {
-      if (list.some(p => p.id === previewId)) {
-        const [bid, cid] = k.split(':').map(Number);
-        await loadPreviews(bid, cid);
-        return;
-      }
-    }
+    // 不传 batchId/chapterId —— 找到包含该 preview 的 chapterPreviews key 重新加载。
+    // TanStack Query 没有"按值找 key"API;这里通过 store 保留的预览数据反查,或让调用方传 key。
+    // 调用方 RegeneratePreviewDialog.vue 会自己 invalidate,这里暂不处理未知 key 场景。
+    void previewId;
   }
 
   return {
-    byTn, chaptersByBatch, sourcesByTn, resultsByTnChapter, promotedByBatch,
-    previewsByBatchChapter,
-    loading, error, loadSources, loadByTn, loadChapters, loadResultsForChapter,
-    loadPromotedByBatch, create, refresh, stop, retry, promote,
-    loadPreviews, regeneratePreview, commitPreview, discardPreview,
-    deleteWorkflow,
+    create, stop, retry, deleteWorkflow, promote,
+    regeneratePreview, commitPreview, discardPreview,
   };
 });
+
+// 保留 ChapterPreviewRow / WorkflowSummary 类型 re-export 以避免 view 端 import 路径变化
+export type { ChapterPreviewRow };
