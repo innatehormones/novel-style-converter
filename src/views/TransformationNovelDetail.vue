@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, nextTick, onMounted, watch } from 'vue';
+import { useIntervalFn } from '@vueuse/core';
 import { useDynamicTableHeight } from '../composables/useDynamicTableHeight';
 import { useRoute, useRouter } from 'vue-router';
 import { useWorkflowsStore } from '../stores/workflows';
@@ -58,26 +59,6 @@ const store = useWorkflowsStore();
 
 const activeTab = ref<'chapters' | 'workflows'>('chapters');
 
-/// 章节来源 tab 表格自适应高度:监听 `main.app` 的尺寸变化,实时算出
-/// 章节来源 Tab 表格 + 工作流 Tab 表格共用 composable,统一从 main.app 计算可用高度。
-
-
-
-/// 章节来源 Tab 表格自适应高度
-const chaptersTableEl = ref<HTMLElement | null>(null);
-const { maxHeight: chaptersTableMaxHeight } = useDynamicTableHeight({
-  tableEl: chaptersTableEl,
-  minHeight: 300,
-  deps: [() => sources.value.length, activeTab],
-});
-
-/// 工作流 Tab 表格自适应高度 —— 同样跟随 main.app + tab 切换重算
-const workflowsTableEl = ref<HTMLElement | null>(null);
-const { maxHeight: workflowsTableMaxHeight } = useDynamicTableHeight({
-  tableEl: workflowsTableEl,
-  minHeight: 300,
-  deps: [() => workflows.value.length, activeTab],
-});
 
 /// 章节来源 tab 表格列(TanStack format)
 const sourceColumns = [
@@ -205,6 +186,26 @@ function selectNone() {
 
 // 工作流 tab
 const workflows = computed<WorkflowSummary[]>(() => store.byTn.get(tnId.value) ?? []);
+/// 章节来源 tab 表格自适应高度:监听 `main.app` 的尺寸变化,实时算出
+/// 章节来源 Tab 表格 + 工作流 Tab 表格共用 composable,统一从 main.app 计算可用高度。
+
+
+
+/// 章节来源 Tab 表格自适应高度
+const chaptersTableEl = ref<HTMLElement | null>(null);
+const { maxHeight: chaptersTableMaxHeight } = useDynamicTableHeight({
+  tableEl: chaptersTableEl,
+  minHeight: 300,
+  deps: [() => sources.value.length, activeTab],
+});
+
+/// 工作流 Tab 表格自适应高度 —— 同样跟随 main.app + tab 切换重算
+const workflowsTableEl = ref<HTMLElement | null>(null);
+const { maxHeight: workflowsTableMaxHeight } = useDynamicTableHeight({
+  tableEl: workflowsTableEl,
+  minHeight: 300,
+  deps: [() => workflows.value.length, activeTab],
+});
 const selectedWorkflowId = ref<number | null>(null);
 const selectedWorkflowChapters = computed<WorkflowChapterRow[]>(() =>
   selectedWorkflowId.value === null ? [] : (store.chaptersByBatch.get(selectedWorkflowId.value) ?? []),
@@ -548,27 +549,18 @@ const canRetrySelection = computed<boolean>(() => {
   if (batchRetryBlockedReason.value !== null) return false;
   return retrySelectedIds.value.size > 0;
 });
-let chapterPollHandle: number | null = null;
-function startChapterPoll() {
-  if (chapterPollHandle !== null) return;
-  chapterPollHandle = window.setInterval(() => {
-    if (selectedWorkflowId.value === null) return;
-    void store.loadChapters(selectedWorkflowId.value);
-  }, 2000);
-}
-function stopChapterPoll() {
-  if (chapterPollHandle !== null) {
-    window.clearInterval(chapterPollHandle);
-    chapterPollHandle = null;
-  }
-}
+/// 章节级 2s 轮询 —— vueuse useIntervalFn 自动随组件卸载清理。
+/// selectedWorkflowId / isBatchLive 任一不满足时 pause,两者皆 true 时 resume。
+const chapterPoll = useIntervalFn(() => {
+  if (selectedWorkflowId.value === null) return;
+  void store.loadChapters(selectedWorkflowId.value);
+}, 2000, { immediate: false, immediateCallback: false });
 watch(selectedWorkflowId, (id) => {
-  if (id !== null) startChapterPoll(); else stopChapterPoll();
+  if (id !== null) chapterPoll.resume(); else chapterPoll.pause();
 }, { immediate: true });
 watch(isBatchLive, (live) => {
-  if (live) startChapterPoll(); else stopChapterPoll();
+  if (live) chapterPoll.resume(); else chapterPoll.pause();
 });
-onUnmounted(() => stopChapterPoll());
 
 async function doRetry() {
   if (selectedWorkflowId.value === null) return;
@@ -697,17 +689,18 @@ function onToggleAllRetry(e: Event) {
   retrySelectedIds.value = next;
 }
 
-let pollHandle: number | null = null;
+/// 5s 轮询工作流列表 + 章节来源(non_empty_result_count) —— vueuse useIntervalFn 自动随组件卸载清理。
+/// sources 章节本身稳定,但每章已有结果数随工作流运行变化,所以 sources 也加进轮询,UI 才能实时看到进度。
+const workflowListPoll = useIntervalFn(() => {
+  void store.loadByTn(tnId.value);
+  void store.loadSources(tnId.value);
+}, 5000, { immediate: false, immediateCallback: false });
 
 onMounted(async () => {
   await loadAll();
-  pollHandle = window.setInterval(() => { void store.loadByTn(tnId.value); }, 5000);
+  workflowListPoll.resume();
   // 表格高度由 useDynamicTableHeight composable 自动监听 main.app 尺寸变化,无需手动管理。
   await nextTick();
-});
-
-onUnmounted(() => {
-  if (pollHandle !== null) window.clearInterval(pollHandle);
 });
 
 

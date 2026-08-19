@@ -148,7 +148,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
+import { useIntervalFn } from '@vueuse/core';
 import { formatDate, formatTime } from '../utils/format';
 import Button from '../components/ui/Button.vue';
 import DataTable from '../components/ui/DataTable.vue';
@@ -232,17 +233,8 @@ const aiCallWidths: Record<string, number> = {
   actions: 90,
 };
 
-let aiCallPollHandle: number | null = null;
-function startAiCallPoll() {
-  if (aiCallPollHandle !== null) return;
-  aiCallPollHandle = window.setInterval(() => { void reload(); }, 3000);
-}
-function stopAiCallPoll() {
-  if (aiCallPollHandle !== null) {
-    window.clearInterval(aiCallPollHandle);
-    aiCallPollHandle = null;
-  }
-}
+/// AI 调用日志轮询 —— vueuse useIntervalFn 自动随组件卸载清理(immediate:false 让首次不立即触发,挂载期再 resume)。
+const aiCallPoll = useIntervalFn(() => { void reload(); }, 3000, { immediate: false, immediateCallback: false });
 
 /// 拉当前 page 的日志(offset = (page-1)*limit),刷新当前显示。
 /// 轮询、换 filter、换页码都走这里 —— 都是"刷当前页"。
@@ -352,10 +344,9 @@ function truncate(s: string, n: number): string {
 onMounted(async () => {
   // 拉模型列表 + 启动轮询 + 首屏数据 —— 并发即可,各自独立。
   void modelsStore.load().then(() => { models.value = modelsStore.models; });
-  startAiCallPoll();
+  aiCallPoll.resume();
   void reload();
 });
-onUnmounted(() => stopAiCallPoll());
 </script>
 
 <style scoped>

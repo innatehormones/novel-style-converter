@@ -63,7 +63,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, markRaw } from "vue";
+import { onMounted, ref, markRaw } from "vue";
+import { useIntervalFn } from "@vueuse/core";
 import { VueFlow, type Node, type Edge } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
@@ -97,7 +98,7 @@ const loading = ref(false);
 const flowNodes = ref<Node[]>([]);
 const flowEdges = ref<Edge[]>([]);
 let savedViewport: { x: number; y: number; zoom: number } | null = null;
-let pollTimer: number | null = null;
+/// 总览图自动 5s 刷新 —— vueuse useIntervalFn 自动随组件卸载清理。
 
 async function reload() {
   if (loading.value) return;
@@ -202,16 +203,12 @@ function edgeStyle(kind: ApiEdge["kind"]) {
   }
 }
 
+/// 5s 轮询 —— immediate:false 让首次不立即触发,挂载期 reload() 后再 resume() 启动。
+const overviewPoll = useIntervalFn(() => void reload(), 5000, { immediate: false, immediateCallback: false });
+
 onMounted(() => {
   void reload();
-  pollTimer = window.setInterval(() => void reload(), 5000);
-});
-
-onBeforeUnmount(() => {
-  if (pollTimer != null) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
+  overviewPoll.resume();
 });
 </script>
 
