@@ -100,3 +100,12 @@ pub struct ChapterPreviewRow {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// 用户在「新建工作流」试运行区满意的首章结果,作为创建工作流时的 seed。
+/// 后端事务内把 idx 最小那个 chapter 对应的 tc 标 done + 写 result_content。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewFirstChapter {
+    pub content: String,
+    pub tokens_in: i32,
+    pub tokens_out: i32,
+}
