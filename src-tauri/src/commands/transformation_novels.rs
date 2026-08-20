@@ -16,6 +16,10 @@ pub struct TransformationNovelSummary {
     pub chapters_count: i64,
     /// 用户填的备注。空串等价于"无备注"。详情页头部标题下面只读展示。
     pub note: String,
+    /// 该 TN 下的工作流(batch)总数。所有 status 之和。
+    pub workflow_count: i64,
+    /// 该 TN 下处于工作中状态的工作流数(running + paused)。
+    pub running_workflow_count: i64,
 }
 
 /// 创建 transformation_novel 的入参。inner DTO 字段保持 snake_case
@@ -48,6 +52,17 @@ fn to_summary(db: &Db, n: &TransformationNovel) -> TransformationNovelSummary {
         .list_by_data_asset(n.data_asset_id)
         .map(|v| v.len() as i64)
         .unwrap_or(0);
+    // 该 TN 下所有 status 的 batch 数累加 + running/paused 计工作中的工作流。
+    // count_by_status 单次 GROUP BY 拿到各 status 计数,这里累加。
+    let status = db.batches().count_by_status(n.id).unwrap_or_default();
+    let workflow_count = status.pending
+        + status.running
+        + status.paused
+        + status.stopped
+        + status.completed
+        + status.terminated
+        + status.cancelled;
+    let running_workflow_count = status.running + status.paused;
     TransformationNovelSummary {
         id: n.id,
         data_asset_id: n.data_asset_id,
@@ -55,6 +70,8 @@ fn to_summary(db: &Db, n: &TransformationNovel) -> TransformationNovelSummary {
         created_at: n.created_at.to_rfc3339(),
         chapters_count,
         note: n.note.clone(),
+        workflow_count,
+        running_workflow_count,
     }
 }
 

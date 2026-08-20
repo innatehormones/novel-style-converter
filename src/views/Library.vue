@@ -104,6 +104,7 @@
         :data="store.transformationNovels"
         :row-key="(row: TransformationNovelSummary) => row.id"
         :widths="tnWidths"
+        :numeric-columns="['workflow']"
         :truncate-columns="['source']"
         frozen-column="actions"
       >
@@ -113,6 +114,14 @@
               {{ sourceAssetTitle(row.data_asset_id) }} · {{ row.chapters_count ?? 0 }} 章
             </button>
           </Tooltip>
+        </template>
+                <template #cell-workflow="{ row }">
+          {{ row.workflow_count }}
+          <Tag
+            v-if="row.running_workflow_count > 0"
+            kind="warn"
+            :title="row.running_workflow_count + ' 个工作流进行中(running + paused)'"
+          >{{ row.running_workflow_count }} 工作中</Tag>
         </template>
         <template #cell-title="{ row }">
           <Input v-if="renamingId === row.id" v-model="renameDraft" />
@@ -345,12 +354,20 @@ const tnColumns = [
     enableSorting: true,
     cell: (info: any) => formatTime(info.getValue() as string),
   },
+  {
+    accessorKey: 'workflow_count',
+    id: 'workflow',
+    header: '工作流',
+    enableSorting: true,
+    numeric: true,
+  },
   { id: 'actions', header: '操作', enableSorting: false },
 ];
 const tnWidths: Record<string, number> = {
-  title: 280,
-  source: 280,
-  created: 180,
+  title: 260,
+  source: 260,
+  workflow: 160,
+  created: 170,
   actions: 200,
 };
 

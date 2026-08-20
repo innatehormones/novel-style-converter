@@ -206,6 +206,9 @@ export interface TransformationNovelSummary {
   title: string;
   created_at: string;
   chapters_count: number;
+  note: string;
+  workflow_count: number;
+  running_workflow_count: number;
 }
 
 /**
