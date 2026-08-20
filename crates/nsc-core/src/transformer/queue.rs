@@ -22,6 +22,7 @@ pub type ProviderFactory = Arc<dyn Fn(&ModelConfig) -> Box<dyn AiProvider> + Sen
 /// - `enqueue` → `(tid, false, None, "")`
 /// - Done → `(tid, true, None, <正文>)`
 /// - Failed (含 prep 失败) → `(tid, false, Some(err), "")`
+///
 /// 闭包在 worker 线程上执行 —— 不要在闭包里做重活或再次阻塞。
 pub type Notifier = Arc<dyn Fn(i64, bool, Option<String>, String) + Send + Sync>;
 
@@ -227,6 +228,11 @@ enum DbWrite {
     Failed { err: String },
 }
 
+// run_job 是异步 worker 的执行入口,9 个参数全是必需依赖:
+// shared / db / ai / sem / callbacks / recorder / close_thinking 是 worker 共享状态,
+// job 是任务负载,notify 是结果回流通道。这些参数的共同生命周期 = 单个 worker,
+// 打包成 ctx struct 会增加一层间接而无收益,故允许此 lint。
+#[allow(clippy::too_many_arguments)]
 async fn run_job(
     shared: super::job::Shared,
     db: Arc<Db>,
