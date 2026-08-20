@@ -15,7 +15,7 @@ pub use transformation::{ChapterPreviewRow, NewTransformationChapter, PreviewSta
 pub use prompt::{Prompt, PromptKind};
 pub use model_config::{ModelConfig, NewModelConfig};
 pub use data_asset::{DataAsset, NewDataAsset};
-pub use batch::{Batch, BatchStatus, NewBatch, OnFailurePolicy, ResumeAction};
+pub use batch::{Batch, BatchStatus, NewBatch, OnFailurePolicy};
 pub use ai_call_log::{AiCallBusiness, AiCallLog, AiCallLogFilter, AiCallStatus, NewAiCallLog};
 pub mod workflow_result;
 

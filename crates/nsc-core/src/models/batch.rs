@@ -43,13 +43,3 @@ pub struct NewBatch {
     pub on_failure_policy: OnFailurePolicy,
 }
 
-/// scheduler / IPC 共用的用户决策动作。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResumeAction {
-    /// 重试该章
-    Retry(i64),
-    /// 标 skipped,继续走完本 batch
-    Skip(i64),
-    /// 终止整批
-    Terminate,
-}

@@ -21,7 +21,7 @@ use crate::db::Db;
 use crate::error::{Error, Result};
 use crate::models::{
     Batch, BatchStatus, Chapter, ChapterPreviewRow, ModelConfig, OnFailurePolicy, Prompt,
-    PromptKind, ResumeAction, TransformationNovel,
+    PromptKind, TransformationNovel,
 };
 use crate::models::AiCallBusiness;
 use crate::recorder::AiCallRecorder;
@@ -351,103 +351,6 @@ impl BatchScheduler {
             rusqlite::params![now, batch_id],
         )?;
         Ok(())
-    }
-
-    /// 用户在 paused 时介入。三种动作:
-    ///   Retry(ch_id):    tc 重置为 pending + 立即 dispatch(从 tc 行读 prompt/model,不走任何 TN 默认)
-    ///   Skip(ch_id):     tc 标 skipped + dispatch 下一章
-    ///   Terminate:       同 batch 后续 pending → cancelled, batch Terminated
-    pub fn resume(&self, batch_id: i64, action: ResumeAction) -> Result<Batch> {
-        let batch = self.db.batches().get(batch_id)?
-            .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
-        if !matches!(batch.status, BatchStatus::Paused) {
-            return Err(Error::Validation(format!(
-                "batch {batch_id} 不是 Paused(当前 {:?}),不能 resume",
-                batch.status
-            )));
-        }
-
-        // 同 stop_workflow 的 std::sync::Mutex 二次 lock 死锁修法:
-        // 旧实现 _bsg 跨 commit 持续存活,接着 self.db.xxx().get(...) 触发第二次 lock(),
-        // std::sync::Mutex 非可重入 → 死锁(Retry / Skip / Terminate 三分支 + 回读全中招)。
-        // 新实现:Retry/Skip/Terminate 全在事务内完成 + 事务内 SELECT 最新 batch,
-        // commit 后 _bsg scope 末尾 drop,函数末尾回读也包在另一个事务里。
-        let now = Utc::now().to_rfc3339();
-        let dispatch_after = match action {
-            ResumeAction::Retry(ch_id) => {
-                let _bsg = self.db.lock();
-                let tx = _bsg.unchecked_transaction()?;
-                tx.execute(
-                    "UPDATE transformation_chapters                      SET status='pending', result_content=NULL, tokens_in=NULL, tokens_out=NULL,                          error=NULL, started_at=NULL, completed_at=NULL                      WHERE id=?1 AND batch_id=?2",
-                    rusqlite::params![ch_id, batch_id],
-                )?;
-                tx.execute(
-                    "UPDATE batches SET status='running', ended_at=NULL WHERE id=?1",
-                    rusqlite::params![batch_id],
-                )?;
-                // 事务内读 tc 行的 prompt_id / model_config_id,跟 create_workflow 派首章对齐。
-                let prompt_id: i64 = tx.query_row(
-                    "SELECT prompt_id FROM transformation_chapters WHERE id=?1",
-                    rusqlite::params![ch_id], |r| r.get(0),
-                )?;
-                let model_id: i64 = tx.query_row(
-                    "SELECT model_config_id FROM transformation_chapters WHERE id=?1",
-                    rusqlite::params![ch_id], |r| r.get(0),
-                )?;
-                tx.commit()?;
-                // _bsg 在 scope 末尾 drop —— 安全释放,后续 get 不再二次锁。
-                Some((ch_id, prompt_id, model_id))
-            }
-            ResumeAction::Skip(ch_id) => {
-                let _bsg = self.db.lock();
-                let tx = _bsg.unchecked_transaction()?;
-                tx.execute(
-                    "UPDATE transformation_chapters SET status='skipped', completed_at=?2                      WHERE id=?1 AND batch_id=?3",
-                    rusqlite::params![ch_id, now, batch_id],
-                )?;
-                tx.execute(
-                    "UPDATE batches SET status='running', ended_at=NULL WHERE id=?1",
-                    rusqlite::params![batch_id],
-                )?;
-                tx.commit()?;
-                None
-            }
-            ResumeAction::Terminate => {
-                let _bsg = self.db.lock();
-                let tx = _bsg.unchecked_transaction()?;
-                tx.execute(
-                    "UPDATE transformation_chapters SET status='cancelled'                      WHERE batch_id=?1 AND status='pending'",
-                    rusqlite::params![batch_id],
-                )?;
-                tx.execute(
-                    "UPDATE batches SET status='terminated', ended_at=?1 WHERE id=?2",
-                    rusqlite::params![now, batch_id],
-                )?;
-                tx.commit()?;
-                None
-            }
-        };
-
-        // Retry 分支:事务外 dispatch(worker 路径,不持锁);prompt / model / tn 各自短锁即拿即放。
-        if let Some((ch_id, prompt_id, model_id)) = dispatch_after {
-            let tn_id = batch.transformation_novel_id;
-            let tn = self.db.transformation_novels().get(tn_id)?
-                .ok_or_else(|| Error::NotFound(format!("tn {tn_id} 不存在")))?;
-            let prompt = self.db.prompts().get(prompt_id)?
-                .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
-            let model = self.db.model_configs().get(model_id)?
-                .ok_or_else(|| Error::NotFound(format!("model_config {model_id} 不存在")))?;
-            self.dispatch(&self.db, &tn, &prompt, &model, ch_id, 0, 0, 0)?;
-        } else if matches!(action, ResumeAction::Skip(_)) {
-            // Skip 分支需要派下一章。
-            self.advance_batch(&self.db, batch_id)?;
-        }
-        // Terminate 不需要再操作,直接回读。
-
-        // 函数末尾回读 batch(短锁即拿即放,事务外单次查询)。
-        let b = self.db.batches().get(batch_id)?
-            .ok_or_else(|| Error::NotFound("batch 回读失败".into()))?;
-        Ok(b)
     }
 
     /// 人工停止运行中的工作流(spec §6.1):事务里把全部 Pending 标 Skipped、结果槽保持空;
