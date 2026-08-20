@@ -21,7 +21,7 @@ use crate::db::Db;
 use crate::error::{Error, Result};
 use crate::models::{
     Batch, BatchStatus, Chapter, ChapterPreviewRow, ModelConfig, OnFailurePolicy, Prompt,
-    PromptKind, TransformationNovel,
+    PromptKind,
 };
 use crate::models::AiCallBusiness;
 use crate::recorder::AiCallRecorder;
@@ -179,8 +179,6 @@ impl BatchScheduler {
     /// 派发一个具体 tc(按 tid)。从 Db 读 chapter,构造 JobSpec 塞进 JobQueue。
     pub(crate) fn dispatch(
         &self,
-        _db: &Db,
-        _tn: &TransformationNovel,
         prompt: &Prompt,
         model: &ModelConfig,
         tid: i64,
@@ -255,6 +253,7 @@ impl BatchScheduler {
     /// 失败回调:按 batch.on_failure_policy 分流。
     /// - PauseAndReview: tc → failed,batch → paused(ended_at 设 NOW),不 advance。
     /// - SkipFailed:      tc → skipped,advance_batch 派下一章(batch 保持 running)。
+    ///
     /// batch 收尾交给 advance_batch → maybe_finalize_batch(skip_failed 走这条)。
     pub fn on_chapter_failed(&self, tid: i64, error: String) -> Result<()> {
         let tc = self.db.transformation_chapters().get(tid)?
@@ -297,9 +296,6 @@ impl BatchScheduler {
 
     /// 派下一章(若有);完成判据。
     fn advance_batch(&self, db: &Db, batch_id: i64) -> Result<()> {
-        let batch = self.db.batches().get(batch_id)?
-            .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
-
         // 取 batch 内第一个 pending 行(按 chapter_idx ASC)
         let next_tid: Option<i64> = {
         let _bsg = self.db.lock();
@@ -315,9 +311,6 @@ impl BatchScheduler {
             // 跟 create_workflow 派首章对齐:WorkflowCreate.prompt_id/model_config_id
             // 在事务里已经写进每个 tc 行(`INSERT ... prompt_id, model_config_id`),
             // 无需任何 TN 层 fallback。
-            let tn_id = batch.transformation_novel_id;
-            let tn = self.db.transformation_novels().get(tn_id)?
-                .ok_or_else(|| Error::NotFound(format!("tn {tn_id} 不存在")))?;
             let next_tc = self.db.transformation_chapters().get(tid)?
                 .ok_or_else(|| Error::NotFound(format!("tc {tid} 不存在")))?;
             let prompt_id = next_tc.prompt_id;
@@ -326,7 +319,7 @@ impl BatchScheduler {
                 .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
             let model = self.db.model_configs().get(model_cfg_id)?
                 .ok_or_else(|| Error::NotFound(format!("model_config {model_cfg_id} 不存在")))?;
-            return self.dispatch(db, &tn, &prompt, &model, tid, 0, 0, 0);
+            return self.dispatch(&prompt, &model, tid, 0, 0, 0);
         }
 
         // 没 pending 了 → 完成判据
@@ -451,8 +444,6 @@ impl BatchScheduler {
             first_tid
         };
         // 派首章(事务外):从 tc 行读固化好的 prompt/model(跟 create_workflow 对齐)。
-        let tn = self.db.transformation_novels().get(batch.transformation_novel_id)?
-            .ok_or_else(|| Error::NotFound(format!("tn {} 不存在", batch.transformation_novel_id)))?;
         let prompt_id: i64 = self.db.lock().query_row(
             "SELECT prompt_id FROM transformation_chapters WHERE id=?1",
             rusqlite::params![first_tid], |r| r.get(0),
@@ -465,7 +456,7 @@ impl BatchScheduler {
             .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
         let model = self.db.model_configs().get(model_id)?
             .ok_or_else(|| Error::NotFound(format!("model {model_id} 不存在")))?;
-        self.dispatch(&self.db, &tn, &prompt, &model, first_tid, 0, 0, 0)?;
+        self.dispatch(&prompt, &model, first_tid, 0, 0, 0)?;
         let updated = self.db.batches().get(batch_id)?
             .ok_or_else(|| Error::NotFound("batch 回读失败".into()))?;
         Ok(updated)
