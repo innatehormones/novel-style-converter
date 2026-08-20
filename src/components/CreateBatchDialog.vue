@@ -178,6 +178,8 @@ async function onSubmit() {
       ctx_prev_transformed: ctxPrevTransformed.value ?? 0,
       ctx_next_original: ctxNextOriginal.value ?? 0,
       on_failure_policy: onFailurePolicy.value,
+      // 试运行首章结果(spec §3.1):Task 6 dialog 改造时改成绑定 previewFirstChapter() 的输出。
+      preview_first_chapter: null,
     });
     open.value = false;
   } catch (e: unknown) {

@@ -21,6 +21,7 @@ import type {
   UploadDeletePreview,
   AiCallLog, AiCallLogFilter, AiCallLogPage,
   ChapterPreviewRow, CommitPreviewInput, RegeneratePreviewInput,
+  PreviewFirstChapterInput, PreviewFirstChapterOutput, PreviewFirstChapter,
 } from './types';
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -382,4 +383,13 @@ export async function catalogReadActive(): Promise<string> {
 /// 后端限制只接受 http/https 协议,其他(比如 javascript:)直接拒绝。
 export function openExternalUrl(url: string): Promise<void> {
   return invoke<void>('open_external_url', { url });
+}
+
+/// 「新建工作流」试运行区 IPC wrapper(spec §3.4 / §5.1)。
+/// 调一次 AI 跑 idx 最小的章节,返回 preview 结果;不写 batch / tc / wrc 行。
+/// 用户满意后再通过 `createWorkflow({ ..., preview_first_chapter })` 把结果作为 seed 传入。
+export function previewFirstChapter(
+  input: PreviewFirstChapterInput,
+): Promise<PreviewFirstChapterOutput> {
+  return invoke<PreviewFirstChapterOutput>('preview_first_chapter', { input });
 }

@@ -314,6 +314,8 @@ export interface CreateWorkflowInput {
   ctx_prev_transformed: number;
   ctx_next_original: number;
   on_failure_policy: 'pause_and_review' | 'skip_failed';
+  /// 试运行首章结果(spec §3.1 / §4.2)。用户满意后由 dialog 状态传入 create_workflow,后端事务内把 idx 最小那个 chapter 的 tc 标 done;为 null 时与原行为一致(所有 tc pending)。
+  preview_first_chapter: PreviewFirstChapter | null;
 }
 
 /**
@@ -593,4 +595,33 @@ export interface OverviewGraph {
   /** 当前节点总数(未截断)。 */
   total_nodes_raw: number;
   truncated: boolean;
+}
+
+/// 「新建工作流」试运行区 IPC 入参(spec §5.1)。
+export interface PreviewFirstChapterInput {
+  tn_id: number;
+  chapter_id: number;
+  prompt_id: number;
+  model_config_id: number;
+  /// true 时取最近 1 章原文作前文参考;false 时不取(对应 ctx_prev_original=0, ctx_prev_transformed=0)。
+  include_prev: boolean;
+  /// true 时取最近 1 章原文作后文参考;false 时不取(对应 ctx_next_original=0)。
+  include_next: boolean;
+  /// 「附加指令」(本期 UI 不暴露,留 TODO)。非空字符串时拼到 system prompt 文末。
+  custom_input: string | null;
+}
+
+/// `preview_first_chapter` 出参(spec §5.1)。
+export interface PreviewFirstChapterOutput {
+  content: string;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+/// 用户在「新建工作流」试运行区满意的首章结果,作为 create_workflow 的 seed(spec §3.1 / §4.2)。
+/// 后端事务内把 idx 最小那个 chapter 对应的 tc 标 done + 写 result_content + tokens。
+export interface PreviewFirstChapter {
+  content: string;
+  tokens_in: number;
+  tokens_out: number;
 }

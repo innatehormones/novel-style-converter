@@ -350,7 +350,7 @@ git commit -m "feat(commands): 加 preview_first_chapter IPC 命令"
 - Modify: `src/ipc/types.ts` (在 `CreateWorkflowInput` 后加 preview 类型)
 - Modify: `src/ipc/commands.ts` (末尾加 wrapper)
 
-- [ ] **Step 1: 加类型**
+- [x] **Step 1: 加类型**
 
 `src/ipc/types.ts` 末尾:
 
@@ -381,7 +381,7 @@ export interface PreviewFirstChapter {
 }
 ```
 
-- [ ] **Step 2: 给 CreateWorkflowInput 加 preview_first_chapter 字段**
+- [x] **Step 2: 给 CreateWorkflowInput 加 preview_first_chapter 字段**
 
 ```typescript
 export interface CreateWorkflowInput {
@@ -390,7 +390,7 @@ export interface CreateWorkflowInput {
 }
 ```
 
-- [ ] **Step 3: 加 IPC wrapper**
+- [x] **Step 3: 加 IPC wrapper**
 
 `src/ipc/commands.ts` 末尾:
 
@@ -402,17 +402,23 @@ export function previewFirstChapter(
 }
 ```
 
-- [ ] **Step 4: 跑 vue-tsc**
+- [x] **Step 4: 跑 vue-tsc**
 
 Run: `cd src && pnpm vue-tsc --noEmit`
 Expected: 0 error
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add src/ipc/types.ts src/ipc/commands.ts
+git add src/ipc/types.ts src/ipc/commands.ts src/components/CreateBatchDialog.vue
 git commit -m "feat(ipc): 加 previewFirstChapter 类型 + wrapper"
 ```
+
+### 实际改动补充
+
+- `CreateBatchDialog.vue` 第 180 行附近补 `preview_first_chapter: null`(临时),
+  让 `vue-tsc` 通过。Task 6 dialog 改造时这块会改成绑定 `previewFirstChapter()` 的输出,
+  而不是写死 null。
 
 ---
 
