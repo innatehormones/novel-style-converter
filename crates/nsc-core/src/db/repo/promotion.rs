@@ -3,6 +3,8 @@ use chrono::Utc;
 use rusqlite::params;
 use crate::error::{Error, Result};
 use crate::models::{DataAsset, DataAssetKind};
+/// promotion 一次 SELECT 读出的行:(tc_id, chapter_id, tc_status, idx, title, body, word_count, wrc_content)。
+type PromotionRow = (i64, i64, String, i32, String, String, i32, Option<String>);
 
 pub struct PromotionRepo<'a> { pub(crate) conn: MutexGuard<'a, rusqlite::Connection> }
 
@@ -40,7 +42,7 @@ impl<'a> PromotionRepo<'a> {
         )?;
 
         // 3. 读所有 tc + chapter + wrc
-        let rows: Vec<(i64, i64, String, i32, String, String, i32, Option<String>)> = {
+        let rows: Vec<PromotionRow> = {
             let mut stmt = tx.prepare(
                 "SELECT tc.id, tc.chapter_id, tc.status,
                         c.idx, c.title, c.body, c.word_count,

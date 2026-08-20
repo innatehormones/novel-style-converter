@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 /// 一次 AI 调用的业务归类。
 /// - `TransformChapter` = `DefaultTransformer::transform` 路径,转换小说的某章节。
 /// - `TestModel` = `commands::models::test_model` 路径,用户点模型"测试连通性"按钮。
+///
 /// 未来可加 Embedding / Summarize / ... —— enum 扩展点是这里。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

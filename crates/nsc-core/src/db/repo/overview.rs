@@ -13,6 +13,7 @@ use crate::models::DataAssetKind;
 ///  - {source,promoted}_da -> transformation_novel
 ///  - transformation_novel  -> batch
 ///  - batch         -> promoted_da    (工作流存在时才有的"转换路径"边)
+///
 /// promoted_da 自身可以再次成为 transformation_novel 的源,所以图天然支持多代派生,
 /// 结构是 DAG(不会形成环):upload 是 sink-less 起点,batch 是有入无出的中间节点,
 /// da / tn 是中继节点;upload 既连 source_da 也连 promoted_da,但都向下,无回环。
@@ -319,18 +320,17 @@ impl<'a> OverviewRepo<'a> {
     }
 
     fn compute_stats(&self) -> Result<OverviewStats> {
-        let mut stats = OverviewStats::default();
-        stats.upload_count = self.conn.query_row("SELECT COUNT(*) FROM uploads", [], |r| r.get(0))?;
-        stats.data_asset_count = self.conn.query_row("SELECT COUNT(*) FROM data_assets", [], |r| r.get(0))?;
-        stats.transformation_novel_count = self.conn.query_row("SELECT COUNT(*) FROM transformation_novels", [], |r| r.get(0))?;
-        stats.running_batch_count = self.conn.query_row(
+        let upload_count: i64 = self.conn.query_row("SELECT COUNT(*) FROM uploads", [], |r| r.get(0))?;
+        let data_asset_count: i64 = self.conn.query_row("SELECT COUNT(*) FROM data_assets", [], |r| r.get(0))?;
+        let transformation_novel_count: i64 = self.conn.query_row("SELECT COUNT(*) FROM transformation_novels", [], |r| r.get(0))?;
+        let running_batch_count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM batches WHERE status IN ('running','paused')",
             [],
             |r| r.get(0),
         )?;
         // 仅 "Terminated" 算失败:失败策略触发系统终止。
         // "Stopped" 是用户主动停止/启动失败/启动恢复的收口,非失败;"Cancelled" 当前死状态。
-        let failed_count: i64 = self.conn.query_row(
+        let failed_recent_count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM batches
              WHERE status = 'terminated'
                AND ended_at IS NOT NULL
@@ -338,8 +338,13 @@ impl<'a> OverviewRepo<'a> {
             [],
             |r| r.get(0),
         ).unwrap_or(0);
-        stats.failed_recent_count = failed_count;
-        Ok(stats)
+        Ok(OverviewStats {
+            upload_count,
+            data_asset_count,
+            transformation_novel_count,
+            running_batch_count,
+            failed_recent_count,
+        })
     }
 }
 
