@@ -80,10 +80,10 @@
 
     <ConfirmDialog
       v-model:open="deleteConfirmOpen"
-      title="删除提示词"
+      title="归档提示词"
       :message="deleteConfirmMessage"
       kind="danger"
-      confirm-text="删除"
+      confirm-text="归档"
       @confirm="doDelete"
     />
 

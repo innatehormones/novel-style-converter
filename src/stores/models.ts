@@ -43,7 +43,8 @@ export const useModelsStore = defineStore('models', () => {
     return id;
   }
 
-  /// 软删：后端把 archived=1 + api_key=''。前端直接 filter 掉该行（含归档视图下也隐藏）。
+  /// 软删：后端把 archived=1 + api_key=''。前端从当前视图 filter 掉该行；
+  /// 切到"显示已归档"视图再 load() 即可恢复。
   async function remove(id: number): Promise<void> {
     await ipcDeleteModel(id);
     models.value = models.value.filter((m) => m.id !== id);
