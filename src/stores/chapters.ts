@@ -168,7 +168,7 @@ export const useChaptersStore = defineStore('chapters', () => {
         segs = await ipcListCommittedSegments(ownedDataAssetId);
         kind = 'committed';
       } else {
-        segs = await ipcListChapterSegments(id, [], []);
+        segs = await ipcListChapterSegments(id);
         kind = 'fresh';
       }
       if (token !== requestToken) return;
@@ -251,7 +251,7 @@ export const useChaptersStore = defineStore('chapters', () => {
     const id = uploadId.value;
     const token = ++requestToken;
     try {
-      const fresh = await ipcListChapterSegments(id, [], []);
+      const fresh = await ipcListChapterSegments(id);
       if (token !== requestToken) return;
       source.value = fresh;
       sourceKind.value = 'fresh';

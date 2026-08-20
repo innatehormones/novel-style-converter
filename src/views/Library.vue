@@ -203,6 +203,7 @@ import AlertDialog from '../components/ui/AlertDialog.vue';
 import { useLibraryStore } from '../stores/library';
 import { formatSize, formatTime, formatWordCount } from '../utils/format';
 import type { UploadSummary, TransformationNovelSummary } from '../ipc/types';
+import { previewUploadDeletion } from '../ipc/commands';
 
 const route = useRoute();
 const router = useRouter();
@@ -396,7 +397,7 @@ async function onUpload(input: { filePath: string; filename: string }) {
 async function onDeleteUpload(id: number, filename: string) {
   deleteUploadId.value = id;
   try {
-    const preview = await ipcPreviewUploadDeletion(id);
+    const preview = await previewUploadDeletion(id);
     const list = preview.derived_data_assets;
     if (list.length === 0) {
       deleteUploadMessage.value = 'Confirm delete upload "' + filename + '"?';

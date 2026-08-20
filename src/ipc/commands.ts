@@ -204,7 +204,7 @@ export const createWorkflow = (payload: CreateWorkflowInput): Promise<WorkflowSu
 // ── Workflow → DataAsset 转正 ──────────────────────────────────────
 /// 把 Stopped workflow 的结果物化为新的 promoted data_asset。
 export const promoteWorkflow = (input: PromoteWorkflowInput): Promise<DataAsset> =>
-  invoke<DataAsset>('promote_workflow', input);
+  invoke<DataAsset>('promote_workflow', { batchId: input.batchId, title: input.title });
 
 /// 统计指定 workflow 已派生出多少 promoted da(给 UI badge 用)。
 export const countPromotedDataAssetsByWorkflow = (batchId: number): Promise<number> =>
