@@ -651,10 +651,91 @@ impl BatchScheduler {
         self.db.batches().get(batch_id)?
             .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))
     }
+    /// 「新建工作流」试运行区 —— 调一次 AI 跑指定章节,返回 preview 结果(spec §3.4 / §5.1)。
+    /// 不写 batch / tc / wrc 行;仅写一条 ai_call_logs(business=RegeneratePreview,
+    /// context_type=transformation_chapter + context_id=tn_id)。
+    /// 用户满意后通过 `create_workflow` 的 `preview_first_chapter` 入参传入此结果。
+    ///
+    /// ## 入参语义
+    /// - `tn_id`:定位 data_asset_id(章节范围必须落在同一 da 下)。
+    /// - `chapter_id`:要预览的章节(spec 默认 = selectedChapterIds 中 idx 最小那个)。
+    /// - `include_prev` / `include_next`:从 toggle 转的 boolean —— true 时分别取最近 1 章原文。
+    /// - `custom_input`:「附加指令」(本期 UI 不暴露,留 TODO)。
+    ///
+    /// ## 实现要点
+    /// - `prev_transformed` 始终空:试运行时还没工作流,没有转换结果可拿。
+    /// - 直接调 `DefaultTransformer::transform_with_business(req, RegeneratePreview)`,
+    ///   不走 queue / worker(没 batch_id 可 dispatch)。
+    pub async fn preview_first_chapter(
+        &self,
+        input: crate::models::transformation::PreviewFirstChapterInput,
+    ) -> Result<crate::models::transformation::PreviewFirstChapterOutcome> {
+        // 1. 校验 tn + chapter + 范围归属
+        let tn = self.db.transformation_novels().get(input.tn_id)?
+            .ok_or_else(|| Error::NotFound(format!("tn {} 不存在", input.tn_id)))?;
+        let chapter = self.db.chapters().get(input.chapter_id)?
+            .ok_or_else(|| Error::NotFound(format!("chapter {} 不存在", input.chapter_id)))?;
+        if chapter.data_asset_id != tn.data_asset_id {
+            return Err(Error::Validation(format!(
+                "chapter {}(da={}) 不属于 tn {}(da={})",
+                chapter.id, chapter.data_asset_id, tn.id, tn.data_asset_id,
+            )));
+        }
+        // 2. 读 prompt + model_config(挡 archived:防止空 api_key 进 AI 调用)。
+        let prompt = self.db.prompts().get(input.prompt_id)?
+            .ok_or_else(|| Error::NotFound(format!("prompt {} 不存在", input.prompt_id)))?;
+        let model = self.db.model_configs().get(input.model_config_id)?
+            .ok_or_else(|| Error::NotFound(format!("model_config {} 不存在", input.model_config_id)))?;
+        if model.archived != 0 {
+            return Err(Error::Validation(format!(
+                "model_config {} 已归档,无法预览", input.model_config_id,
+            )));
+        }
+        // 3. 按 include_prev/include_next 拼前后文(N=1)。
+        let prev_original: Vec<(String, String)> = if input.include_prev {
+            let chs = self.db.chapters().prev_n(chapter.data_asset_id, chapter.idx, 1)?;
+            chs.into_iter().map(|c| (c.title, c.body)).collect()
+        } else {
+            Vec::new()
+        };
+        let next_original: Vec<(String, String)> = if input.include_next {
+            let chs = self.db.chapters().next_n(chapter.data_asset_id, chapter.idx, 1)?;
+            chs.into_iter().map(|c| (c.title, c.body)).collect()
+        } else {
+            Vec::new()
+        };
+        let prev_transformed: Vec<(String, String)> = Vec::new();
+        // 4. 组装 TransformRequest 调 transformer。
+        let req = TransformRequest {
+            transformation_id: input.tn_id,
+            chapter: chapter.clone(),
+            chapter_content: chapter.body.clone(),
+            novel_context: TransformationNovelContext {
+                transformation_novel: tn.clone(),
+                prev_original,
+                prev_transformed,
+                next_original,
+            },
+            prompt: prompt.clone(),
+            model_config: model.clone(),
+            custom_input: input.custom_input.clone(),
+            preview_id: None,
+        };
+        let provider = (self.provider_factory)(&model);
+        let recorder = self.recorder.clone();
+        let close_thinking = self.close_thinking.clone();
+        let outcome = DefaultTransformer::new(provider.into(), recorder, close_thinking)
+            .transform_with_business(req, AiCallBusiness::RegeneratePreview)
+            .await?;
+        Ok(crate::models::transformation::PreviewFirstChapterOutcome {
+            content: outcome.result_content,
+            tokens_in: outcome.tokens_in,
+            tokens_out: outcome.tokens_out,
+        })
+    }
 }
 
 /// frontier 章节 id(spec §5.3):仅读当前工作流结果集里的最近非空 slot。
-/// 跨工作流读取被禁止;失败/跳过的 slot 不计入。
 fn frontier_chapter_id_in_workflow(guard: &rusqlite::Connection,
     batch_id: i64,
     chapter_id: i64,

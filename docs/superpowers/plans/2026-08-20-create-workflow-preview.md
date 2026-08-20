@@ -219,11 +219,11 @@ git commit -m "feat(core): create_workflow 加 preview_first_chapter 路径"
 - Modify: `src-tauri/src/commands/workflows.rs` (末尾加新 tauri command)
 - Modify: `src-tauri/src/lib.rs:150-160` (`invoke_handler` 注册)
 
-- [ ] **Step 1: 看现有 commands/workflows.rs 的命令模式**
+- [x] **Step 1: 看现有 commands/workflows.rs 的命令模式**
 
 Read first 80 lines,理解 `list_workflows` / `create_workflow` 的 DTO 转换模式。
 
-- [ ] **Step 2: 加 DTO + 命令**
+- [x] **Step 2: 加 DTO + 命令**
 
 在 `commands/workflows.rs` 末尾加:
 
@@ -315,21 +315,32 @@ pub async fn preview_first_chapter(
 - `db.chapters().prev_n` / `next_n` 已有(看 `crates/nsc-core/src/db/repo/chapter.rs`)
 - 若 `prev_n` / `next_n` 签名不同,调整为现有签名
 
-- [ ] **Step 3: 注册命令**
+- [x] **Step 3: 注册命令**
 
 在 `src-tauri/src/lib.rs` 的 `invoke_handler` builder 加 `commands::workflows::preview_first_chapter,`。
 
-- [ ] **Step 4: 跑编译**
+- [x] **Step 4: 跑编译**
 
 Run: `cargo check --manifest-path src-tauri/Cargo.toml`
 Expected: 编译通过(可能需要微调 type / import)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add src-tauri/src/commands/workflows.rs src-tauri/src/lib.rs
+git add src-tauri/src/commands/workflows.rs src-tauri/src/lib.rs crates/nsc-core/src/models/transformation.rs crates/nsc-core/src/transformer/batch_scheduler.rs
 git commit -m "feat(commands): 加 preview_first_chapter IPC 命令"
 ```
+
+### 实际实现偏差
+
+- 组装逻辑**不在 IPC 命令里**,放在 `BatchScheduler::preview_first_chapter`(`pub async fn`)。
+  原因:组装需要 access `provider_factory` / `recorder` / `close_thinking`,这些都是 BatchScheduler 的私有字段;
+  放在 impl 方法里更内聚,避免把这些字段 pub 出来。
+- `PreviewFirstChapterInput` / `Outcome` 结构体放 `crate::models::transformation`(与 `PreviewFirstChapter` 同模块),
+  IPC 层做单独的 DTO(避免让 core 模型直接 derive `Deserialize` 给前端用)。
+- `prev_transformed` 始终空:试运行时还没工作流,没有转换结果可拿(plan 没明说,实际没必要 query)。
+- 业务类型用 `AiCallBusiness::RegeneratePreview` + `preview_id: None`(recorder 写 ai_call_logs 时
+  context_type=transformation_chapter + context_id=tn_id,跟 TransformChapter 业务对齐)。
 
 ---
 

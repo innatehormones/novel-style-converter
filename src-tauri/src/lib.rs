@@ -172,6 +172,7 @@ pub fn run() {
             commands::workflows::list_chapter_workflow_results,
             commands::workflows::regenerate_chapter_preview,
             commands::workflows::commit_chapter_preview,
+            commands::workflows::preview_first_chapter,
             commands::workflows::list_chapter_previews,
             commands::workflows::discard_chapter_preview,            commands::workflows::delete_workflow,
 

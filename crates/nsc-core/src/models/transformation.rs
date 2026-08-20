@@ -109,3 +109,26 @@ pub struct PreviewFirstChapter {
     pub tokens_in: i32,
     pub tokens_out: i32,
 }
+
+/// 「新建工作流」试运行区预览首章的入参(spec §3.4 / §5.1)。
+/// 后端按 `include_prev` / `include_next` 计算实际的前后文片段;`custom_input`
+/// 是「附加指令」(本期 UI 不暴露,留 TODO 接入)。
+/// `tn_id` 用于定位 data_asset 范围(章节在同一 da 下,不能跨 da 拿前文)。
+#[derive(Debug, Clone)]
+pub struct PreviewFirstChapterInput {
+    pub tn_id: i64,
+    pub chapter_id: i64,
+    pub prompt_id: i64,
+    pub model_config_id: i64,
+    pub include_prev: bool,
+    pub include_next: bool,
+    pub custom_input: Option<String>,
+}
+
+/// 试运行结果(IPC 边界 DTO 由 commands 层另起,这里只承载后端内部结果)。
+#[derive(Debug, Clone)]
+pub struct PreviewFirstChapterOutcome {
+    pub content: String,
+    pub tokens_in: i32,
+    pub tokens_out: i32,
+}

@@ -438,3 +438,53 @@ pub fn discard_chapter_preview(
     let sched = scheduler.inner().clone();
     sched.discard_preview(preview_id).map_err(|e| e.to_string())
 }
+
+/// 「新建工作流」试运行区 IPC 入参(spec §5.1)。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PreviewFirstChapterInput {
+    pub tn_id: i64,
+    pub chapter_id: i64,
+    pub prompt_id: i64,
+    pub model_config_id: i64,
+    pub include_prev: bool,
+    pub include_next: bool,
+    pub custom_input: Option<String>,
+}
+
+/// 试运行结果(IPC 出参)。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PreviewFirstChapterOutput {
+    pub content: String,
+    pub tokens_in: i32,
+    pub tokens_out: i32,
+}
+
+/// 调一次 AI 跑 idx 最小那个章节,返回 preview 结果(spec §3.4 / §5.1)。
+/// 不写 batch / tc / wrc 行;仅写一条 ai_call_logs(business=RegeneratePreview,
+/// context_type=transformation_chapter + context_id=tn_id)。
+/// 用户满意后通过 `create_workflow` 的 `preview_first_chapter` 入参传入此结果。
+#[tauri::command]
+pub async fn preview_first_chapter(
+    scheduler: State<'_, Arc<BatchScheduler>>,
+    input: PreviewFirstChapterInput,
+) -> Result<PreviewFirstChapterOutput, String> {
+    let sched = scheduler.inner().clone();
+    let core_input = nsc_core::models::transformation::PreviewFirstChapterInput {
+        tn_id: input.tn_id,
+        chapter_id: input.chapter_id,
+        prompt_id: input.prompt_id,
+        model_config_id: input.model_config_id,
+        include_prev: input.include_prev,
+        include_next: input.include_next,
+        custom_input: input.custom_input,
+    };
+    let outcome = sched.preview_first_chapter(core_input).await
+        .map_err(|e| e.to_string())?;
+    Ok(PreviewFirstChapterOutput {
+        content: outcome.content,
+        tokens_in: outcome.tokens_in,
+        tokens_out: outcome.tokens_out,
+    })
+}
