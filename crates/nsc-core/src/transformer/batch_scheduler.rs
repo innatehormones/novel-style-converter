@@ -60,6 +60,9 @@ pub struct WorkflowCreate {
     /// - Terminate: 同 batch 后续 pending → cancelled,batch → Terminated。
     /// - SkipFailed: 当前 tc → Skipped,继续派下一章(batch 留 Running)。
     pub on_failure_policy: OnFailurePolicy,
+    /// 试运行首章结果(由「新建工作流」对话框传入)。Some → 事务内把 idx 最小那个
+    /// chapter 对应的 tc 标 done;None → 全部 tc pending(原行为)。
+    pub preview_first_chapter: Option<crate::models::transformation::PreviewFirstChapter>,
 }
 
 impl BatchScheduler {

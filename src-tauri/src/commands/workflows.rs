@@ -50,6 +50,7 @@ impl CreateWorkflowPayload {
             ctx_prev_transformed: self.ctx_prev_transformed,
             ctx_next_original: self.ctx_next_original,
             on_failure_policy,
+            preview_first_chapter: None,
         })
     }
 }

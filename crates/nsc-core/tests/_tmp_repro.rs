@@ -129,6 +129,7 @@ fn reproduce_busy_lock() {
         ctx_prev_transformed: 0,
         ctx_next_original: 0,
         on_failure_policy: OnFailurePolicy::SkipFailed,
+        preview_first_chapter: None,
     }).unwrap();
 
     let deadline = Instant::now() + Duration::from_secs(10);
