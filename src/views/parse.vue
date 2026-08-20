@@ -1,6 +1,6 @@
 <template>
   <section class="chapters">
-    <PageHeader title="章节解析" subtitle="调整章节 marker,提交为数据资产">
+    <PageHeader title="章节解析" subtitle="调整章节 marker，提交为数据资产">
       <template #back>
         <Button aria-label="返回" @click="onBack">
           <IconArrowLeft :size="16" :stroke-width="1.5" />
@@ -19,7 +19,7 @@
 
     <div v-if="store.error" class="alert">{{ store.error }}</div>
     <div v-else-if="store.committed && !store.dirty" class="info">
-      当前是已保存的章节。如需重新解析,请在 DataAsset 页先删除已有数据资产。
+      当前是已保存的章节。如需重新解析，请在 DataAsset 页先删除已有数据资产。
     </div>
 
     <div class="panes">

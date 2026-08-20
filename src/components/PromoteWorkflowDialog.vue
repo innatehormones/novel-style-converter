@@ -27,7 +27,7 @@
       </div>
       <div v-if="error" class="error">{{ error }}</div>
       <div class="hint">
-        转正后会生成一份新的 <code>promoted</code> 数据资产,与源数据资产互相独立。
+        转正后会生成一份新的 <code>promoted</code> 数据资产，与源数据资产互相独立。
         多次转正可保留不同版本。
       </div>
     </div>

@@ -147,7 +147,7 @@ const store = useDataAssetStore();
 const library = useLibraryStore();
 
 const confirmOpen = ref(false);
-const confirmMessage = computed(() => `确认删除数据资产 "${store.title}"?解析出的章节将一并删除,删除后可重新解析。`);
+const confirmMessage = computed(() => `确认删除数据资产 "${store.title}"？解析出的章节将一并删除，删除后可重新解析。`);
 const alertOpen = ref(false);
 const alertMessage = ref('');
 

@@ -481,7 +481,7 @@ async function onSaveRename(id: number) {
 
 async function onDeleteTn(id: number, title: string) {
   deleteTnId.value = id;
-  deleteTnMessage.value = `确认删除转换小说 "${title}"?历史转换结果一并删除。`;
+  deleteTnMessage.value = `确认删除转换小说 "${title}"？历史转换结果一并删除。`;
   deleteTnConfirmOpen.value = true;
 }
 
@@ -498,11 +498,11 @@ async function doDeleteTn() {
 async function onDeleteDa(id: number, title: string, tnCount: number) {
   deleteDaId.value = id;
   if (tnCount > 0) {
-    deleteDaMessage.value = `确认删除数据资产 "${title}"?
+    deleteDaMessage.value = `确认删除数据资产 "${title}"？
 
-该资产被 ${tnCount} 个转换工程引用,删除将会连带删除这些工程及其全部工作流结果。为避免误删,请先去转换工程页删除。`;
+该资产被 ${tnCount} 个转换工程引用，删除将会连带删除这些工程及其全部工作流结果。为避免误删，请先去转换工程页删除。`;
   } else {
-    deleteDaMessage.value = `确认删除数据资产 "${title}"?解析出的章节将一并删除。`;
+    deleteDaMessage.value = `确认删除数据资产 "${title}"？解析出的章节将一并删除。`;
   }
   deleteDaConfirmOpen.value = true;
 }

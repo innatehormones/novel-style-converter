@@ -494,7 +494,7 @@ const deleteConfirmMessage = computed<string>(() => {
   const label = deleteTargetLabel.value;
   const base = `确认删除 ${label}?\n此操作不可撤销 —— 工作流、所有章节结果、转换记录都会被删除。`;
   if (n > 0) {
-    return base + `\n已有 ${n} 份数据资产从此工作流派生,删除后它们的来源字段会被清空(数据资产本身保留)。`;
+    return base + `\n已有 ${n} 份数据资产从此工作流派生，删除后它们的来源字段会被清空(数据资产本身保留)。`;
   }
   return base + (deleteError.value ? `\n\n${deleteError.value}` : '');
 });
@@ -1342,7 +1342,6 @@ watch(() => sources.value, (list) => {
   height: 8px;
   margin-right: 6px;
   border-radius: 50%;
-  vertical-align: middle;
 }
 .dot-running { background: var(--color-cinnabar); animation: pulse 1.2s ease-in-out infinite; }
 .dot-pending { background: var(--text-muted); opacity: 0.55; }

@@ -2,7 +2,7 @@
   <section class="overview">
     <PageHeader
       title="总览"
-      subtitle="上传原文 · 数据资产 · 转换工程 · 工作流 一张图,数据 5 秒自动刷新"
+      subtitle="上传原文 · 数据资产 · 转换工程 · 工作流 一张图，数据 5 秒自动刷新"
     >
     </PageHeader>
 
