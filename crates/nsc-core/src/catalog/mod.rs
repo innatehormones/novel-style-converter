@@ -102,11 +102,10 @@ impl CatalogStore {
     /// 启动时调一次,拿到当前在用的 source。
     /// 优先级:cache (有且 meta 合法) → bundle (永远兜底)。
     pub fn load_active_source(&self) -> CatalogSource {
-        if self.cache_json().exists() && self.cache_meta().exists() {
-            if self.read_cache_meta().is_ok() {
+        if self.cache_json().exists() && self.cache_meta().exists()
+            && self.read_cache_meta().is_ok() {
                 return CatalogSource::Cache;
             }
-        }
         CatalogSource::Bundled
     }
 

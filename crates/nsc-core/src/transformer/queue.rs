@@ -422,7 +422,7 @@ async fn push_running(
 ) {
     let mut s = shared.inner.lock().await;
     s.running.push(JobInfo {
-        tc_id: tid, tn_id: tn_id,
+        tc_id: tid, tn_id,
         chapter_title, chapter_idx,
         status: JobStatus::Running,
         error: None, tokens_in: None, tokens_out: None,
@@ -439,7 +439,7 @@ async fn push_done(
 ) {
     let mut s = shared.inner.lock().await;
     s.done.push(JobInfo {
-        tc_id: tid, tn_id: tn_id,
+        tc_id: tid, tn_id,
         chapter_title, chapter_idx,
         status: JobStatus::Done,
         error: None, tokens_in: Some(tokens_in), tokens_out: Some(tokens_out),
@@ -456,7 +456,7 @@ async fn push_failed(
 ) {
     let mut s = shared.inner.lock().await;
     s.failed.push(JobInfo {
-        tc_id: tid, tn_id: tn_id,
+        tc_id: tid, tn_id,
         chapter_title, chapter_idx,
         status: JobStatus::Failed,
         error: Some(err),

@@ -68,7 +68,7 @@ impl<'a> ChapterPreviewRepo<'a> {
         let mut stmt = self.conn.prepare(&format!(
             "{SELECT_SQL} WHERE batch_id = ?1 AND chapter_id = ?2 ORDER BY id DESC"
         ))?;
-        let rows = stmt.query_map(params![batch_id, chapter_id], |row| from_row(row))?;
+        let rows = stmt.query_map(params![batch_id, chapter_id], from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 

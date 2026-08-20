@@ -53,7 +53,7 @@ impl<'a> WorkflowResultRepo<'a> {
             "SELECT id, workflow_result_id, chapter_id, content, created_at, updated_at \
              FROM workflow_result_chapters WHERE workflow_result_id = ?1 ORDER BY chapter_id ASC",
         )?;
-        let rows = stmt.query_map(params![result_id], |r| row_to_chapter(r))?
+        let rows = stmt.query_map(params![result_id], row_to_chapter)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }

@@ -107,7 +107,7 @@ impl BatchScheduler {
         // model_config 只用来校验存在性;create_workflow 事务提交后立刻按 tc 行的 model_config_id 派首章。
         let _model = self.db.model_configs().get(spec.model_config_id)?
             .ok_or_else(|| Error::NotFound(format!("model_config {} 不存在", spec.model_config_id)))?;
-        if PromptKind::from(prompt.kind) != spec.mode {
+        if prompt.kind != spec.mode {
             return Err(Error::Validation("prompt kind 与 mode 不一致".into()));
         }
 
@@ -418,9 +418,7 @@ impl BatchScheduler {
         match batch.status {
             BatchStatus::Stopped => {}
             BatchStatus::Running | BatchStatus::Paused if in_flight == 0 => {}
-            _ => return Err(Error::Validation(format!(
-                "当前 batch 状态不可重试（仅允许 Stopped 或无 in-flight 的 Running/Paused）"
-            ))),
+            _ => return Err(Error::Validation("当前 batch 状态不可重试（仅允许 Stopped 或无 in-flight 的 Running/Paused）".to_string())),
         }
         if chapter_ids.is_empty() {
             return Err(Error::Validation("必须至少选择一个章节".into()));
@@ -529,7 +527,7 @@ impl BatchScheduler {
             ctx_prev_transformed,
             ctx_next_original,
         };
-        let prep = read_context(&self.db, &job).map_err(|e| Error::Other(e))?;
+        let prep = read_context(&self.db, &job).map_err(Error::Other)?;
 
         let req = TransformRequest {
             transformation_id: batch.transformation_novel_id,

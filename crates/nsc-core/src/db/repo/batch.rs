@@ -35,7 +35,7 @@ impl<'a> BatchRepo<'a> {
             "SELECT id, transformation_novel_id, label, on_failure_policy, status, created_at, started_at, ended_at \
              FROM batches WHERE transformation_novel_id = ?1 ORDER BY id DESC",
         )?;
-        let rows = stmt.query_map(params![tn_id], |row| batch_from_row(row))?;
+        let rows = stmt.query_map(params![tn_id], batch_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 

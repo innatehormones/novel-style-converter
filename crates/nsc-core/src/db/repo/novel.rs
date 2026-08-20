@@ -40,7 +40,7 @@ impl<'a> UploadRepo<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, sha256, filename, byte_size, uploaded_at, file_path, original_text, word_count              FROM uploads ORDER BY id DESC"
         )?;
-        let rows = stmt.query_map([], |row| from_row(row))?;
+        let rows = stmt.query_map([], from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
@@ -160,7 +160,7 @@ impl<'a> TransformationNovelRepo<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, data_asset_id, title, note, created_at              FROM transformation_novels ORDER BY id DESC"
         )?;
-        let rows = stmt.query_map([], |row| novel_from_row(row))?;
+        let rows = stmt.query_map([], novel_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
@@ -176,7 +176,7 @@ impl<'a> TransformationNovelRepo<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, data_asset_id, title, note, created_at              FROM transformation_novels WHERE data_asset_id = ?1 ORDER BY id DESC"
         )?;
-        let rows = stmt.query_map(params![data_asset_id], |row| novel_from_row(row))?;
+        let rows = stmt.query_map(params![data_asset_id], novel_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 

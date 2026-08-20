@@ -126,7 +126,7 @@ impl<'a> AiCallLogRepo<'a> {
             where_sql, limit, offset
         );
         let mut stmt = self.conn.prepare(&list_sql)?;
-        let rows = stmt.query_map(params_from_iter(bind_refs), |row| from_row(row))?;
+        let rows = stmt.query_map(params_from_iter(bind_refs), from_row)?;
         let logs: Vec<AiCallLog> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
         Ok((logs, total))
     }

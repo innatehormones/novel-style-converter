@@ -44,7 +44,7 @@ impl<'a> TransformationChapterRepo<'a> {
         let mut stmt = self.conn.prepare(&format!(
             "{SELECT_SQL} WHERE chapter_id = ?1 ORDER BY id DESC"
         ))?;
-        let rows = stmt.query_map(params![chapter_id], |row| from_row(row))?;
+        let rows = stmt.query_map(params![chapter_id], from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
@@ -56,7 +56,7 @@ impl<'a> TransformationChapterRepo<'a> {
         let mut stmt = self.conn.prepare(&format!(
             "{SELECT_SQL} WHERE transformation_novel_id = ?1 ORDER BY id ASC"
         ))?;
-        let rows = stmt.query_map(params![transformation_novel_id], |row| from_row(row))?;
+        let rows = stmt.query_map(params![transformation_novel_id], from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
@@ -65,7 +65,7 @@ impl<'a> TransformationChapterRepo<'a> {
         let mut stmt = self.conn.prepare(&format!(
             "{SELECT_SQL} WHERE status = ?1 ORDER BY id ASC"
         ))?;
-        let rows = stmt.query_map(params![s], |row| from_row(row))?;
+        let rows = stmt.query_map(params![s], from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
@@ -73,8 +73,7 @@ impl<'a> TransformationChapterRepo<'a> {
     /// 排序列 idx 在重排序时稳定;同 idx 用 tc.id 兜底。
     pub fn list_by_batch(&self, batch_id: i64) -> Result<Vec<TransformationChapter>> {
         // 显式列前缀避免 SELECT id 歧义(chapters / transformation_chapters 都有 id)。
-        let sql = format!(
-            "SELECT transformation_chapters.id, transformation_chapters.transformation_novel_id, \
+        let sql = "SELECT transformation_chapters.id, transformation_chapters.transformation_novel_id, \
                     transformation_chapters.chapter_id, transformation_chapters.mode, \
                     transformation_chapters.prompt_id, transformation_chapters.model_config_id, \
                     transformation_chapters.ctx_prev_original, \
@@ -88,10 +87,9 @@ impl<'a> TransformationChapterRepo<'a> {
              FROM transformation_chapters \
              JOIN chapters c ON c.id = transformation_chapters.chapter_id \
              WHERE transformation_chapters.batch_id = ?1 \
-             ORDER BY c.idx ASC, transformation_chapters.id ASC"
-        );
+             ORDER BY c.idx ASC, transformation_chapters.id ASC".to_string();
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![batch_id], |row| from_row(row))?;
+        let rows = stmt.query_map(params![batch_id], from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 

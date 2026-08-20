@@ -171,7 +171,7 @@ async fn write_one(db: &Arc<Db>, event: &AiCallEvent) -> Result<()> {
         system_preview: sys_prev,
         user_preview: user_prev,
         system_size: sys_size,
-        user_size: user_size,
+        user_size,
         estimated_tokens_in: event.estimated_tokens_in,
         actual_tokens_in: event.actual_tokens_in,
         actual_tokens_out: event.actual_tokens_out,

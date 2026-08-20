@@ -30,7 +30,7 @@ impl<'a> PromptRepo<'a> {
              FROM prompts WHERE archived = 0 ORDER BY id ASC"
         };
         let mut stmt = self.conn.prepare(sql)?;
-        let rows = stmt.query_map([], |row| from_row(row))?;
+        let rows = stmt.query_map([], from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
