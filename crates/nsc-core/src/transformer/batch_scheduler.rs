@@ -152,6 +152,11 @@ impl BatchScheduler {
                     rusqlite::params![result_id, cid, now],
                 )?;
             }
+            // 试运行首章 seed(spec §3.1):Some → 把 idx 最小那个 chapter 对应的 tc 标 done,
+            // wrc.content 同步写。scheduler 后续 advance_batch 跳过该 tc,自然派 idx 次小章节。
+            if let Some(preview) = &spec.preview_first_chapter {
+                apply_preview_in_tx(&tx, batch_id, &spec.chapter_ids, preview, &now)?;
+            }
             tx.commit()?;
             batch_id
         };
@@ -676,5 +681,195 @@ fn mode_str(m: PromptKind) -> &'static str {
     match m {
         PromptKind::Compress => "compress",
         PromptKind::Style => "style",
+    }
+}
+
+/// 把试运行首章结果落库(在 `create_workflow` 事务内 INSERT 完所有 tc + wrc 之后调用)。
+///   - 找 idx 最小那个 chapter 对应的 tc,标 done + 写 result_content + tokens + completed_at
+///   - workflow_result_chapters 对应行的 content 同步写
+///   - scheduler 后续 advance_batch 跳过 idx 最小那个 tc,自然派 idx 次小的章节。
+pub(crate) fn apply_preview_in_tx(
+    tx: &rusqlite::Transaction,
+    batch_id: i64,
+    chapter_ids: &[i64],
+    preview: &crate::models::transformation::PreviewFirstChapter,
+    now: &str,
+) -> Result<()> {
+    if chapter_ids.is_empty() {
+        return Ok(());
+    }
+    // 1. 找 idx 最小那个 chapter_id
+    let placeholders = std::iter::repeat_n("?", chapter_ids.len()).collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT id FROM chapters WHERE id IN ({}) ORDER BY idx ASC, id ASC LIMIT 1",
+        placeholders,
+    );
+    let mut stmt = tx.prepare(&sql)?;
+    let first_chapter_id: i64 = stmt
+        .query_row(rusqlite::params_from_iter(chapter_ids.iter()), |r| r.get(0))
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows =>
+                Error::Validation("preview seed: 章节列表为空".into()),
+            other => other.into(),
+        })?;
+    // 2. UPDATE tc:标 done + 写 result_content + tokens + completed_at
+    tx.execute(
+        "UPDATE transformation_chapters SET status='done', result_content=?1, tokens_in=?2, tokens_out=?3, completed_at=?4 WHERE batch_id=?5 AND chapter_id=?6",
+        rusqlite::params![preview.content, preview.tokens_in, preview.tokens_out, now, batch_id, first_chapter_id],
+    )?;
+    // 3. UPDATE wrc:写 content + updated_at
+    tx.execute(
+        "UPDATE workflow_result_chapters SET content=?1, updated_at=?2 WHERE workflow_result_id=(SELECT id FROM workflow_results WHERE batch_id=?3) AND chapter_id=?4",
+        rusqlite::params![preview.content, now, batch_id, first_chapter_id],
+    )?;
+    Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use crate::db::Db;
+    use crate::models::transformation::PreviewFirstChapter;
+    use crate::models::{
+        NewChapter, NewDataAsset, NewTransformationNovel, NewUpload,
+        Prompt, PromptKind, TransformStatus,
+    };
+    use crate::models::model_config::NewModelConfig;
+
+    fn fresh_db() -> Arc<Db> {
+        let dir = tempfile::tempdir().unwrap();
+        crate::db::Db::open(&dir.path().join("test.db")).unwrap()
+    }
+
+    /// 最小可运行环境:1 upload + 1 da + 3 chapter(idx 0..2) + 1 tn + 1 prompt + 1 model。
+    /// 返回 (tn_id, c0, c1, c2, prompt_id, model_id)。
+    fn seed_env(db: &Db) -> (i64, i64, i64, i64, i64, i64) {
+        let upload_id = db.uploads().insert(&NewUpload {
+            sha256: "x".into(), filename: "f.txt".into(), byte_size: 10,
+            file_path: "/tmp/f.txt".into(), original_text: "原文".into(), word_count: 4,
+        }).unwrap();
+        let da_id = db.data_assets().insert(&NewDataAsset {
+            upload_id, title: "源".into(), source_filename: "f.txt".into(),
+            ..Default::default()
+        }).unwrap();
+        let tn_id = db.transformation_novels().insert(&NewTransformationNovel {
+            data_asset_id: da_id, title: "tn".into(), note: "".into(),
+        }).unwrap();
+        let c0 = db.chapters().insert(&NewChapter {
+            data_asset_id: da_id, idx: 0, title: "c0".into(),
+            body: "正文0".into(), word_count: 5, ..Default::default()
+        }).unwrap();
+        let c1 = db.chapters().insert(&NewChapter {
+            data_asset_id: da_id, idx: 1, title: "c1".into(),
+            body: "正文1".into(), word_count: 5, ..Default::default()
+        }).unwrap();
+        let c2 = db.chapters().insert(&NewChapter {
+            data_asset_id: da_id, idx: 2, title: "c2".into(),
+            body: "正文2".into(), word_count: 5, ..Default::default()
+        }).unwrap();
+        let prompt_id = db.prompts().insert(&Prompt {
+            id: 0, name: "test".into(), kind: PromptKind::Style,
+            template: "压缩".into(), is_builtin: false, archived: 0,
+        }).unwrap();
+        let model_id = db.model_configs().insert(&NewModelConfig {
+            name: "m".into(), base_url: "http://127.0.0.1:1".into(), api_key: "k".into(),
+            model: "m".into(), max_tokens: None, max_context: None,
+            temperature: None, disable_thinking: false, concurrency: 1,
+        }).unwrap();
+        (tn_id, c0, c1, c2, prompt_id, model_id)
+    }
+
+    /// 在 db 上手动建 batch + 3 个 tc(pending),跳过 BatchScheduler::create_workflow(避免派发副作用)。
+    /// 返回 batch_id。
+    fn seed_batch_with_tcs(
+        db: &Db, tn_id: i64, c0: i64, c1: i64, c2: i64, prompt_id: i64, model_id: i64,
+    ) -> i64 {
+        let now = Utc::now().to_rfc3339();
+        let _bsg = db.lock();
+        let tx = _bsg.unchecked_transaction().unwrap();
+        tx.execute(
+            "INSERT INTO batches (transformation_novel_id, label, on_failure_policy, status, created_at, started_at) \
+             VALUES (?1, ?2, ?3, \"running\", ?4, ?4)",
+            rusqlite::params![
+                tn_id, "test", "pause_and_review", now,
+            ],
+        ).unwrap();
+        let batch_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO workflow_results (batch_id, created_at) VALUES (?1, ?2)",
+            rusqlite::params![batch_id, now],
+        ).unwrap();
+        let result_id: i64 = tx.query_row(
+            "SELECT id FROM workflow_results WHERE batch_id = ?1",
+            rusqlite::params![batch_id], |r| r.get(0),
+        ).unwrap();
+        for cid in &[c0, c1, c2] {
+            tx.execute(
+                "INSERT INTO transformation_chapters \
+                 (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
+                  ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
+                  batch_id, style_ref_chapter_id, status) \
+                 VALUES (?1, ?2, \"style\", ?3, ?4, 0, 0, 0, ?5, NULL, \"pending\")",
+                rusqlite::params![tn_id, *cid, prompt_id, model_id, batch_id],
+            ).unwrap();
+            tx.execute(
+                "INSERT INTO workflow_result_chapters \
+                 (workflow_result_id, chapter_id, content, created_at, updated_at) \
+                 VALUES (?1, ?2, NULL, ?3, ?3)",
+                rusqlite::params![result_id, *cid, now],
+            ).unwrap();
+        }
+        tx.commit().unwrap();
+        drop(_bsg);
+        batch_id
+    }
+
+    #[test]
+    fn apply_preview_seeds_first_chapter_done() {
+        let db = fresh_db();
+        let (tn_id, c0, c1, c2, prompt_id, model_id) = seed_env(&db);
+        let batch_id = seed_batch_with_tcs(&db, tn_id, c0, c1, c2, prompt_id, model_id);
+        let preview = PreviewFirstChapter {
+            content: "preview result".into(),
+            tokens_in: 100,
+            tokens_out: 200,
+        };
+        let now = Utc::now().to_rfc3339();
+        let _bsg = db.lock();
+        let tx = _bsg.unchecked_transaction().unwrap();
+        apply_preview_in_tx(&tx, batch_id, &[c0, c1, c2], &preview, &now).unwrap();
+        tx.commit().unwrap();
+        drop(_bsg);
+        let tcs = db.transformation_chapters().list_by_batch(batch_id).unwrap();
+        let tc0 = tcs.iter().find(|t| t.chapter_id == c0).unwrap();
+        let tc1 = tcs.iter().find(|t| t.chapter_id == c1).unwrap();
+        let tc2 = tcs.iter().find(|t| t.chapter_id == c2).unwrap();
+        assert_eq!(tc0.status, TransformStatus::Done);
+        assert_eq!(tc0.result_content.as_deref(), Some("preview result"));
+        assert_eq!(tc0.tokens_in, Some(100));
+        assert_eq!(tc0.tokens_out, Some(200));
+        assert_eq!(tc1.status, TransformStatus::Pending);
+        assert_eq!(tc2.status, TransformStatus::Pending);
+        let wrc0 = db.workflow_results().get_content_by_batch_and_chapter(batch_id, c0).unwrap();
+        assert_eq!(wrc0.as_deref(), Some("preview result"));
+        let wrc1 = db.workflow_results().get_content_by_batch_and_chapter(batch_id, c1).unwrap();
+        assert!(wrc1.is_none());
+    }
+
+    #[test]
+    fn apply_preview_noop_when_preview_is_none_path() {
+        // 模拟"create_workflow 不传 preview"的路径:不调 apply_preview_in_tx。
+        // 断言:所有 tc 保持 Pending,wrc 全空。
+        let db = fresh_db();
+        let (tn_id, c0, c1, c2, prompt_id, model_id) = seed_env(&db);
+        let batch_id = seed_batch_with_tcs(&db, tn_id, c0, c1, c2, prompt_id, model_id);
+        let tcs = db.transformation_chapters().list_by_batch(batch_id).unwrap();
+        for t in &tcs {
+            assert_eq!(t.status, TransformStatus::Pending);
+        }
+        for cid in &[c0, c1, c2] {
+            let wrc = db.workflow_results().get_content_by_batch_and_chapter(batch_id, *cid).unwrap();
+            assert!(wrc.is_none());
+        }
     }
 }

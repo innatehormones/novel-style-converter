@@ -120,11 +120,12 @@ git commit -m "feat(core): WorkflowCreate 加 preview_first_chapter 字段(defau
 - Modify: `crates/nsc-core/src/transformer/batch_scheduler.rs` (`create_workflow` 事务体,约 line 88-180)
 - Test: `crates/nsc-core/src/transformer/batch_scheduler.rs` 末尾 `mod tests`
 
-- [ ] **Step 1: 看 `create_workflow` 当前事务结构**
+- [x] **Step 1: 看 `create_workflow` 当前事务结构**
 
 Read file 88-180,理解 INSERT batch / INSERT tc / INSERT wr / INSERT wrc 的顺序。
 
-- [ ] **Step 2: 写 failing test**
+- [x] **Step 2: 写 failing test** (调整:`create_workflow` 派发副作用难隔离,改为测独立的 `apply_preview_in_tx` 函数,直接构建事务测试 seed)
+
 
 在文件末尾 `mod tests` 加:
 
@@ -178,12 +179,12 @@ Read file 88-180,理解 INSERT batch / INSERT tc / INSERT wr / INSERT wrc 的顺
 
 注:具体 seed 细节参考 `crates/nsc-core/src/transformer/batch_scheduler.rs` 已有的 `mod tests` —— 用 `fresh_db` / `seed_*` helper,不要重新发明。
 
-- [ ] **Step 3: 跑测试,确认 FAIL**
+- [x] **Step 3: 跑测试,确认 FAIL**
 
-Run: `cargo test --package nsc-core --lib create_workflow_with_preview`
-Expected: FAIL(因为还没实现 preview 路径)
+Confirmed: apply_preview UPDATE 返回 0 rows(参数顺序错:batch_id 占位 ?5 但塞在 params 第 1 位 — SQL 占位符 ?5 实际拿到了 now 字符串)。
 
-- [ ] **Step 4: 实现 preview 路径**
+- [x] **Step 4: 实现 preview 路径**
+
 
 在 `create_workflow` 事务内,**INSERT 所有 tc + wrc 之后**,如果 `spec.preview_first_chapter.is_some()`:
 
@@ -193,22 +194,22 @@ Expected: FAIL(因为还没实现 preview 路径)
 
 参考已有 SQL 模式,在事务内用 `tx.execute(...)`。
 
-- [ ] **Step 5: 跑测试,确认 PASS**
+- [x] **Step 5: 跑测试,确认 PASS**
 
-Run: `cargo test --package nsc-core --lib create_workflow`
-Expected: 2 个新 test PASS,其他 39 个仍 PASS
+`./target/debug/deps/nsc_core-*.exe --test-threads=1`: 41 passed (39 + 2 新)。
 
-- [ ] **Step 6: 跑 clippy 看新警告**
+- [x] **Step 6: 跑 clippy 看新警告**
 
-Run: `cargo clippy --package nsc-core --lib --tests`
-Expected: 0 warning,或只有 `#[allow]` 解释过的
+修了 doc list 缩进 + `repeat_n` 两处。`batch_scheduler.rs` 0 warning(其他预存在的 promotion.rs warning 与本任务无关)。
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/nsc-core/src/transformer/batch_scheduler.rs
+git add crates/nsc-core/src/transformer/batch_scheduler.rs crates/nsc-core/tests/_tmp_repro.rs
 git commit -m "feat(core): create_workflow 加 preview_first_chapter 路径"
 ```
+
+注:`tests/_tmp_repro.rs` 是 Task 2 引入的临时文件,本次一并删除。
 
 ---
 
