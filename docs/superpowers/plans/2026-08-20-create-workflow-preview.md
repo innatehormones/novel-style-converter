@@ -427,18 +427,18 @@ git commit -m "feat(ipc): 加 previewFirstChapter 类型 + wrapper"
 **Files:**
 - Modify: `src/components/CreateBatchDialog.vue`
 
-- [ ] **Step 1: 备份现状,理清要改的字段**
+- [x] **Step 1: 备份现状,理清要改的字段**
 
 `ref` 状态清单:
 - `ctxPrevOriginal` / `ctxPrevTransformed` / `ctxNextOriginal` → 删除,改为 `includePrev: bool` / `includeNext: bool`
 - 新增 `previewFirstChapter: PreviewFirstChapter | null` (用户满意缓存)
 - 新增 preview 状态: `previewLoading`, `previewError`, `previewOriginalText` (第一次进 dialog 时读)
 
-- [ ] **Step 2: Dialog width 540 → 880**
+- [x] **Step 2: Dialog width 540 → 880**
 
 `Dialog v-model:open="open" title="新建工作流" :width="880"`
 
-- [ ] **Step 3: 改成 grid 2 列布局**
+- [x] **Step 3: 改成 grid 2 列布局**
 
 包裹内容在 `<div class="dialog-grid">`,CSS:
 
@@ -457,7 +457,7 @@ git commit -m "feat(ipc): 加 previewFirstChapter 类型 + wrapper"
 }
 ```
 
-- [ ] **Step 4: 把原 3 个 ctx NumberInput 替换为 2 个 toggle**
+- [x] **Step 4: 把原 3 个 ctx NumberInput 替换为 2 个 toggle**
 
 ```html
 <div class="row ctx-toggles">
@@ -474,28 +474,36 @@ git commit -m "feat(ipc): 加 previewFirstChapter 类型 + wrapper"
 
 删除 `.ctx-hint` 段。
 
-- [ ] **Step 5: 移除 NumberInput import**
+- [x] **Step 5: 移除 NumberInput import**
 
 如果 toggle 替换后不再用,清理 import。
 
-- [ ] **Step 6: 跑 vue-tsc**
+- [x] **Step 6: 跑 vue-tsc**
 
 Run: `cd src && pnpm vue-tsc --noEmit`
 Expected: 0 error
 
-- [ ] **Step 7: 启动 dev 肉眼检查布局**
+- [x] **Step 7: 启动 dev 肉眼检查布局**
 
 Run: `npm run tauri dev`
 - 打开任一转换工程的「新建工作流」
 - 确认左右分栏、ctx toggle 位置正确
 - 还没加试运行区,先 commit 这一阶段
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/components/CreateBatchDialog.vue
 git commit -m "refactor(ui): CreateBatchDialog 改左右分栏 + ctx 改为 toggle"
 ```
+
+### 实际改动补充
+
+- 移了 NumberInput import(后面彻底没用,只保留 toggle)。
+- `includePrev.value ? 1 : 0` 这种三元把 bool 转 0/1,目前后端 schema 是 i32。
+  spec §3.2 说"前后文为 1 章" —— 后面看 Task 8 是否要扩成 N(目前简单实现)。
+- `.toggle:has(input:checked)` 用现代 CSS 让 toggle 选中状态高亮,不用 JS。
+- `.preview-placeholder` 占位框后续 Task 7 替换为试运行区组件。
 
 ---
 
