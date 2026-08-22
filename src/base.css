@@ -87,6 +87,12 @@
   --bg-section: var(--color-paper);
   --bg-active: var(--color-cinnabar-light);
 
+  /* Scrollbar — 细墨线,透明 track,克制 */
+  --scrollbar-width: 8px;
+  --scrollbar-thumb: var(--color-fog);
+  --scrollbar-thumb-hover: var(--color-graphite);
+  --scrollbar-track: transparent;
+
   --text-primary: var(--color-ink);
   --text-secondary: var(--color-graphite);
   --text-muted: var(--color-fog);
@@ -142,6 +148,10 @@
   --bg-card: var(--color-sheet);
   --bg-sidebar: var(--color-paper-mist);
   --bg-hover: var(--color-sheet);
+
+  --scrollbar-thumb: var(--color-slate);
+  --scrollbar-thumb-hover: var(--color-graphite);
+  --scrollbar-track: transparent;
   --bg-section: var(--color-paper);
 
   --text-primary: var(--color-ink);
@@ -185,6 +195,31 @@ input,
 select,
 textarea {
   font-family: inherit;
+}
+
+/* 滚动条 —— 全局统一,WebView2/Chromium + Firefox 双兜底 */
+::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+  height: var(--scrollbar-width);
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 120ms ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 /* 行内文本链按钮 — 表格操作列专用,无边框/无背景的浅色下划线链 */
