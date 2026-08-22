@@ -203,21 +203,26 @@ function scrollToActiveHit() {
 
 // 路由 uploadId 变化时重新拉数据;immediate:true 让首次挂载也跑。
 // 用 watch 而非 onMounted:同组件复用(路由 param 变)onMounted 不会再触发。
+// 仅触发 store.load;mount 在 rawText 落地后再挂(下方第二个 watch)。
 watch(
   () => Number(route.params.uploadId),
   (id) => {
     if (Number.isFinite(id) && id > 0) {
       void store.load(id);
-      void nextTick(() => {
-        const text = store.rawText;
-        if (text) {
-          void cmEditor.mount(text);
-          cmEditor.setMarkers(new Set(store.markers.map((m) => Number(m))));
-        }
-      });
     }
   },
   { immediate: true },
+);
+
+// rawText 一旦从 IPC 拉回来 → 挂 EditorView。原先的 nextTick 检查
+// 永远跑不到 mount,因为 IPC 比 nextTick 慢一拍,那时 rawText 还是 ''。
+watch(
+  () => store.rawText,
+  (text) => {
+    if (!text) return;
+    void cmEditor.mount(text);
+    cmEditor.setMarkers(new Set(store.markers.map((m) => Number(m))));
+  },
 );
 
 watch(
