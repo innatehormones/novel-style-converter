@@ -384,47 +384,13 @@ async function confirmCommit() {
   flex: 1;
   overflow-y: auto;
 }
+/* Container for the EditorView; CM6-child CSS lives in the composable's
+   EditorView.theme() so Vue's scoped attribute doesn't shadow it. */
 .cm-host {
   flex: 1;
   min-height: 0;
   border-top: 1px solid var(--border-color);
   overflow: hidden;
-}
-.cm-host .cm-editor {
-  height: 100%;
-}
-/* Marked-line background (driven by RangeSet<Decoration>). */
-.cm-marker-line {
-  background-color: var(--bg-hover);
-}
-/* Marker gutter column — flex-centered for the stamp. */
-.cm-gutter.cm-marker-stamp {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  background: transparent;
-  cursor: default;
-}
-.cm-marker-stamp {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  background: var(--color-sheet);
-  border: 1px solid var(--color-cinnabar);
-  color: var(--color-cinnabar);
-  font-family: var(--font-serif);
-  font-size: 14px;
-  font-weight: var(--font-weight-medium);
-  line-height: 20px;
-  cursor: pointer;
-  border-radius: 2px;
-  letter-spacing: 0;
-  transition: background 0.1s, color 0.1s;
-}
-.cm-marker-stamp:hover {
-  background: var(--color-cinnabar);
-  color: #faf6ee;
 }
 .seg-row {
   display: flex;

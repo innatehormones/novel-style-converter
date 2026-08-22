@@ -159,6 +159,40 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
         borderRight: '1px solid var(--border-color)',
         color: 'var(--text-muted)',
       },
+      // Marker gutter column: stamps live here. Width matches the stamp.
+      '.cm-gutter.cm-marker-stamp': {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '24px',
+        background: 'transparent',
+        cursor: 'default',
+      },
+      // Marked-line background (driven by RangeSet<Decoration>).
+      '.cm-marker-line': {
+        backgroundColor: 'var(--bg-hover)',
+      },
+      // Per-line stamp button (visually mirrors the retired MarkerButton.vue).
+      '.cm-marker-stamp': {
+        width: '22px',
+        height: '22px',
+        padding: '0',
+        background: 'var(--color-sheet)',
+        border: '1px solid var(--color-cinnabar)',
+        color: 'var(--color-cinnabar)',
+        fontFamily: 'var(--font-serif)',
+        fontSize: '14px',
+        fontWeight: 'var(--font-weight-medium)',
+        lineHeight: '20px',
+        cursor: 'pointer',
+        borderRadius: '2px',
+        letterSpacing: '0',
+        transition: 'background 0.1s, color 0.1s',
+      },
+      '.cm-marker-stamp:hover': {
+        background: 'var(--color-cinnabar)',
+        color: '#faf6ee',
+      },
     }, { dark: false });
 
     view.value = new EditorView({
