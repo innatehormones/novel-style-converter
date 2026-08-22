@@ -53,7 +53,13 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
   const markerLineDeco = (state: EditorStateType): DecorationSetType => {
     const set = state.field(markerField, false) ?? new Set<number>();
     const builder = new RangeSetBuilder<Decoration>();
-    for (const line1based of set) {
+    // RangeSetBuilder requires ranges added in (non-overlapping) order by
+    // rom position. Set iteration is insertion order, not numeric, and
+    // the chapters store sorts markers lexicographically (so "12" < "9" in
+    // Set order) — explicit numeric sort before add() avoids CM6's internal
+    // tree code throwing "a[i].compare is not a function".
+    const sortedLines = Array.from(set).sort((a, b) => a - b);
+    for (const line1based of sortedLines) {
       try {
         const line = state.doc.line(line1based);
         builder.add(line.from, line.from, Decoration.line({ attributes: { class: 'cm-marker-line' } }));
