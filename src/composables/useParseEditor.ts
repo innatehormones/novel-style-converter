@@ -31,6 +31,10 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
     view.value?.destroy();
     view.value = null;
   }
+  // Module references to CM6 runtime modules, populated in mount().
+  let cmSearchMod: typeof import('@codemirror/search') | null = null;
+  let cmViewEditor: typeof import('@codemirror/view').EditorView | null = null;
+
 
   // Marker StateField is built once per mount.
   const markerEffect = StateEffect.define<ReadonlySet<number>>();
@@ -59,6 +63,29 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
     return builder.finish();
   };
   void markerLineDeco; // referenced in Task 5
+
+  // Substring-based hit cursor (mirrors the previous useChapterSearch semantics:
+  // plain string contains, literal mode). Drives hitCount / currentHitIndex.
+  // CM's search() extension handles its own highlighting in parallel via
+  // setSearchQuery below; the substring cursor only feeds the toolbar counter.
+  let currentQuery = '';
+  let searchLines: string[] = [];
+  let searchHits: number[] = [];
+  let searchCursor = 0;
+
+  function rebuildSearchIndex(doc: string): void {
+    searchLines = doc.split('\n');
+    searchHits = [];
+    if (currentQuery) {
+      for (let i = 0; i < searchLines.length; i++) {
+        if (searchLines[i].includes(currentQuery)) searchHits.push(i);
+      }
+    }
+    searchCursor = 0;
+    hitCount.value = searchHits.length;
+    currentHitIndex.value = searchHits.length === 0 ? 0 : 1;
+  }
+
   let stampNode: HTMLElement | null = null;
   function ensureStamp(): HTMLElement {
     if (stampNode) return stampNode;
@@ -103,13 +130,20 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
       { EditorState },
       { EditorView, drawSelection, lineNumbers, gutter },
       cmCommands,
-      cmSearch,
+      _cmSearch,
     ] = await Promise.all([
       import('@codemirror/state'),
       import('@codemirror/view'),
       import('@codemirror/commands'),
       import('@codemirror/search'),
-    ]);
+    ]) as [
+      typeof import('@codemirror/state'),
+      typeof import('@codemirror/view'),
+      typeof import('@codemirror/commands'),
+      typeof import('@codemirror/search'),
+    ];
+    cmViewEditor = EditorView;
+    cmSearchMod = _cmSearch;
 
     const themeExt = EditorView.theme({
       '&': {
@@ -148,11 +182,12 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
           // marker gutter: stamp on each marked line; click toggles via store
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (gutter(markerGutter as any) as any),
-          cmSearch.search({ top: true }),
+          cmSearchMod!.search({ top: true }),
         ],
       }),
       parent: host,
     });
+    rebuildSearchIndex(doc);
   }
 
   function replaceDoc(text: string): void {
@@ -161,6 +196,7 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
     v.dispatch({
       changes: { from: 0, to: v.state.doc.length, insert: text },
     });
+    rebuildSearchIndex(text);
   }
 
   onBeforeUnmount(destroy);
@@ -173,9 +209,41 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
       v.dispatch({ effects: markerEffect.of(new Set(lines1based)) });
     },
     scrollToLine: (_line0based: number) => { /* Task 7 */ },
-    runSearch: (_query: string) => { /* Task 6 */ },
-    nextHit: () => { /* Task 6 */ },
-    prevHit: () => { /* Task 6 */ },
+    runSearch: (query: string) => {
+      const v = view.value;
+      if (!v || !cmSearchMod) return;
+      currentQuery = query;
+      rebuildSearchIndex(v.state.doc.toString());
+      // Drive CM's internal highlight via setSearchQuery. Empty clears.
+      v.dispatch({
+        effects: cmSearchMod.setSearchQuery.of(new cmSearchMod.SearchQuery({ search: query })),
+      });
+    },
+    nextHit: () => {
+      const v = view.value;
+      if (!v || !cmSearchMod || !cmViewEditor || searchHits.length === 0) return;
+      searchCursor = (searchCursor + 1) % searchHits.length;
+      currentHitIndex.value = searchCursor + 1;
+      const pos = v.state.doc.line(searchHits[searchCursor] + 1).from;
+      v.dispatch({
+        selection: { anchor: pos },
+        effects: cmViewEditor!.scrollIntoView(pos, { y: 'start' }),
+      });
+      // Move CM's internal match-selection forward too, for visual parity.
+      cmSearchMod.findNext(v);
+    },
+    prevHit: () => {
+      const v = view.value;
+      if (!v || !cmSearchMod || !cmViewEditor || searchHits.length === 0) return;
+      searchCursor = (searchCursor - 1 + searchHits.length) % searchHits.length;
+      currentHitIndex.value = searchCursor + 1;
+      const pos = v.state.doc.line(searchHits[searchCursor] + 1).from;
+      v.dispatch({
+        selection: { anchor: pos },
+        effects: cmViewEditor!.scrollIntoView(pos, { y: 'start' }),
+      });
+      cmSearchMod.findPrevious(v);
+    },
     hitCount,
     currentHitIndex,
     replaceDoc,
