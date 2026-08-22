@@ -1,7 +1,7 @@
 /// 状态枚举值的中文映射 —— 后端 enum 与 UI 展示的中间层。
 ///
 /// 为什么放 utils 不放 composables:
-/// composables 暗示会用到响应式 ref / 副作用(参见 useChapterSearch.ts)。
+/// composables 暗示会用到响应式 ref / 副作用。
 /// 这两个函数是 pure switch —— 同样的输入同样的输出,无副作用。
 ///
 /// WorkflowStatus / TransformStatus 是后端 enum 的 TS 类型(见 ipc/types.ts),

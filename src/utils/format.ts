@@ -16,7 +16,7 @@
 
 /// 全部 pure 函数,不依赖 Vue / Tauri / DOM;放在 `utils/` 而不是 `composables/`
 
-/// 因为 composables 暗示会用到响应式 ref(参见现有 `useChapterSearch.ts`)。
+/// 因为 composables 暗示会用到响应式 ref。
 
 
 
