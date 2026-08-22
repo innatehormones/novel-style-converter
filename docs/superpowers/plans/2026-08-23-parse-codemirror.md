@@ -1,5 +1,7 @@
 # Parse Right Pane CodeMirror 6 Implementation Plan
 
+> **Status:** COMPLETED (2026-08-23). All 11 implementation commits landed (9eff1e2 docs + e263329 .. 3b4a171). vue-tsc passes, pnpm build succeeds. Manual smoke (S1-S8 in Task 12 Step 2) is deferred to the engineer running pnpm dev + a real 10+ MB upload — see plan file for checklist.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the right pane of `src/views/parse.vue` (a `vue-virtual-scroller` `RecycleScroller` with fixed `:item-size="24"` that ellipsizes long lines) with a CodeMirror 6 read-only editor, so that long paragraphs wrap at viewport width and 10+ MB Chinese novels render without UI freeze.
