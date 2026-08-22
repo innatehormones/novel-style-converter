@@ -33,6 +33,12 @@ pub fn run() {
         .expect("startup safe-recovery failed");
     nsc_core::startup_cleanup::run(&db.lock())
         .expect("startup cleanup failed");
+    // builtin prompt 同步 —— 启动期把 builtin.rs 源码的 template 同步到 DB,
+    // 让用户在 UI 里看到的 builtin 模板跟源码一致(否则改了 builtin.rs 不会生效,
+    // 历史上 0014/0028 的 migration 都是为了同样目的 —— 改 seed 之后就不再需要为每次模板改动写 migration)。
+    // 见 db/repo/prompt.rs::seed_builtin_if_empty:count=0 INSERT,count>0 UPDATE。
+    db.seed_builtin_prompts()
+        .expect("seed builtin prompts failed");
 
     // 鈹€鈹€ AI 璋冪敤 recorder 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     // Channel 瀹归噺 4096;婊℃椂 drop new(涓嶉樆濉?hot path)銆俉riter 浠诲姟鎸?db_path 閲嶅紑

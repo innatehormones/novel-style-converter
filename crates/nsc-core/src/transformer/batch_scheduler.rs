@@ -184,15 +184,16 @@ impl BatchScheduler {
         Ok(batch)
     }
 
-    /// 派发一个具体 tc(按 tid)。从 Db 读 chapter,构造 JobSpec 塞进 JobQueue。
+    /// 派发一个具体 tc(按 tid)。从 Db 读 tc + chapter,构造 JobSpec 塞进 JobQueue。
+    /// ctx_* 从 tc 行读取 —— tc 行是权威来源(`create_workflow` 在 INSERT 时
+    /// 已从 `WorkflowCreate.ctx_*` 写入)。调用方不应再传 ctx 参数,避免与 tc 行不同步:
+    /// 此前的 bug 就是因为两个调用点写死 0,0,0,永远丢掉了用户在 dialog 上 toggle
+    /// 的「带前文/带后文」配置(spec §3.2)。
     pub(crate) fn dispatch(
         &self,
         prompt: &Prompt,
         model: &ModelConfig,
         tid: i64,
-        ctx_prev_original: i32,
-        ctx_prev_transformed: i32,
-        ctx_next_original: i32,
     ) -> Result<()> {
         let tc = self.db.transformation_chapters().get(tid)?
             .ok_or_else(|| Error::NotFound(format!("tc {tid} 不存在")))?;
@@ -219,9 +220,11 @@ impl BatchScheduler {
             },
             prompt: prompt.clone(),
             model_config: model.clone(),
-            ctx_prev_original,
-            ctx_prev_transformed,
-            ctx_next_original,
+            // ctx_* 来自 `WorkflowCreate`,`create_workflow` 已经写入 tc 行,
+            // 这里从 tc 行读 —— JobSpec 和 tc 行保持单一来源,不会再因为参数错传丢上下文。
+            ctx_prev_original: tc.ctx_prev_original,
+            ctx_prev_transformed: tc.ctx_prev_transformed,
+            ctx_next_original: tc.ctx_next_original,
         };
         self.job_queue.enqueue(spec);
         Ok(())
@@ -327,7 +330,7 @@ impl BatchScheduler {
                 .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
             let model = self.db.model_configs().get(model_cfg_id)?
                 .ok_or_else(|| Error::NotFound(format!("model_config {model_cfg_id} 不存在")))?;
-            return self.dispatch(&prompt, &model, tid, 0, 0, 0);
+            return self.dispatch(&prompt, &model, tid);
         }
 
         // 没 pending 了 → 完成判据
@@ -464,7 +467,7 @@ impl BatchScheduler {
             .ok_or_else(|| Error::NotFound(format!("prompt {prompt_id} 不存在")))?;
         let model = self.db.model_configs().get(model_id)?
             .ok_or_else(|| Error::NotFound(format!("model {model_id} 不存在")))?;
-        self.dispatch(&prompt, &model, first_tid, 0, 0, 0)?;
+        self.dispatch(&prompt, &model, first_tid)?;
         let updated = self.db.batches().get(batch_id)?
             .ok_or_else(|| Error::NotFound("batch 回读失败".into()))?;
         Ok(updated)

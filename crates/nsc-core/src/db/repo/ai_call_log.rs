@@ -26,13 +26,10 @@ pub fn truncate_preview(s: &str) -> (Option<String>, i64) {
     if s.len() <= PREVIEW_BYTES {
         (Some(s.to_string()), total)
     } else {
-        // 字节截断要保证落在 char 边界,不能简单地 &s[..N]
-        let mut end = PREVIEW_BYTES;
-        for (i, (b, _)) in s.char_indices().enumerate() {
-            if i == PREVIEW_BYTES {
-                end = b;
-                break;
-            }
+        // 字节截断要保证落在 char 边界 —— 不能简单地 &s[..N] 多字节字符(汉字 3B / emoji 4B)会被劈开 panic。`is_char_boundary` 从 PREVIEW_BYTES 向前找最近的合法切点。`end == 0` 不可能(分支已保证 s.len() > PREVIEW_BYTES >= 1)。
+        let mut end = PREVIEW_BYTES.min(s.len());
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
         }
         (Some(s[..end].to_string()), total)
     }
@@ -317,7 +314,23 @@ mod tests {
         assert_eq!(n, 0);
     }
 
+    /// 生产 panic 复现：5000 个 3-byte 中文字符 = 15000 字节 > PREVIEW_BYTES,
+    /// 但 chars count = 5000 < PREVIEW_BYTES。修复前循环条件 `i == PREVIEW_BYTES`
+    /// 永不命中,end 保持 10240(在 `衣` 字符内 10238..10241),panic。
+    /// 修复后 `is_char_boundary` 从 10240 向前找,落到上一个字符结尾。
     #[test]
+    fn truncate_preview_handles_chars_below_byte_boundary() {
+        let s = "衣".repeat(5_000);
+        assert!(s.len() > PREVIEW_BYTES);
+        assert!(s.chars().count() < PREVIEW_BYTES);
+        let (p, n) = truncate_preview(&s);
+        let p = p.expect("non-empty");
+        assert!(p.len() <= PREVIEW_BYTES);
+        assert!(p.chars().all(|c| c == '衣'));
+        assert_eq!(n, 5_000);
+    }
+
+        #[test]
     fn truncate_preview_caps_at_10kb_char_boundary() {
         // 100 个中文字 = 300 字节,远小于 10KB —— 应原样
         let s = "测".repeat(100);
@@ -325,12 +338,14 @@ mod tests {
         assert_eq!(p.as_deref().unwrap().chars().count(), 100);
         assert_eq!(n, 100);
 
-        // 20000 个中文字 = 60000 字节,远超 10KB —— 应截到 10240 字符(每个汉字 3 字节)
+        // 20000 个中文字 = 60000 字节,远超 10KB —— 应截到字节数 <= PREVIEW_BYTES(真实契约是字节上限,不是字符数 = PREVIEW_BYTES,见 truncate_preview_handles_chars_below_byte_boundary)
         let s = "测".repeat(20_000);
         let (p, n) = truncate_preview(&s);
-        assert_eq!(p.as_ref().unwrap().chars().count(), PREVIEW_BYTES);
+        let p = p.unwrap();
         assert_eq!(n, 20_000);
         // 截断后仍是合法 UTF-8(不会在字符中间切)
-        assert!(p.unwrap().ends_with("测"));
+        // 尽可能贴近上限 —— 下一个字符会让字节数 > PREVIEW_BYTES(每字符 3 字节)
+        assert!(p.len() + 3 > PREVIEW_BYTES);
+        assert!(p.ends_with("测"));
     }
 }

@@ -31,7 +31,7 @@ use crate::error::Result;
 use crate::models::{AiCallBusiness, AiCallStatus, NewAiCallLog};
 
 /// 单次 AI 调用的 recorder 入参 —— 字段语义与 `NewAiCallLog` 一致;
-/// recorder 内部负责调用 `truncate_preview` + 落库。
+/// recorder 落 ai_call_logs 时存全文(不截断 —— 截断是 transformer 侧 max_context 校验的责任)。
 /// `created_at` 不在这里 —— 落库时由 repo 填当前 UTC,保证顺序与 wall-clock 同步。
 #[derive(Debug, Clone)]
 pub struct AiCallEvent {
@@ -43,13 +43,13 @@ pub struct AiCallEvent {
     pub base_url: String,
     pub temperature: Option<f32>,
     pub max_tokens: Option<i32>,
-    pub system_full: String,           // 完整 system 消息,recorder 内部截 10KB
-    pub user_full: String,             // 完整 user 消息
+    pub system_full: String,           // 完整 system 消息 —— recorder 落 ai_call_logs 时存全文
+    pub user_full: String,             // 完整 user 消息 —— recorder 落 ai_call_logs 时存全文
     pub estimated_tokens_in: Option<i32>,
     pub actual_tokens_in: Option<i32>,
     pub actual_tokens_out: Option<i32>,
     pub status: AiCallStatus,
-    pub response_full: String,         // 完整 response,recorder 内部截 10KB
+    pub response_full: String,         // 完整 response —— recorder 落 ai_call_logs 时存全文
     pub latency_ms: i64,
     pub error: Option<String>,
 }
@@ -105,7 +105,9 @@ impl AiCallRecorder for ChannelRecorder {
                 eprintln!("[recorder] channel full, dropping event");
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
-                // background task 死了,接受丢事件
+                // writer thread 已死(rx 已被 drop)。这里 eprintln 显式上报,
+                // 不静默丢 —— recorder 断了就再也追不到 ai_call_logs 为啥缺记录。
+                eprintln!("[recorder] writer thread 已死(channel Closed),events 不再落库;pending={}", self.pending.load(Ordering::Relaxed));
             }
         }
     }
@@ -129,18 +131,33 @@ pub fn spawn_writer(
     recorder: ChannelRecorder,
     mut rx: mpsc::Receiver<AiCallEvent>,
 ) -> std::thread::JoinHandle<()> {
+    // 用 catch_unwind 包住整个 writer body —— writer thread panic(例如 db.lock() 拿到 poisoned)
+    // 不能让 spawn 的 JoinHandle 直接吞掉;panic 信息 eprintln 上报,符合
+    // "哪里出错就在哪里报错" 原则。运行时 fail-fast,这里只负责把错报出来。
     thread::spawn(move || {
-        let rt = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(e) => {
-                eprintln!("[recorder] failed to build tokio runtime: {e}");
-                return;
-            }
-        };
-        rt.block_on(run_writer(db, &mut rx, &recorder));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("[recorder] failed to build tokio runtime: {e}");
+                    return;
+                }
+            };
+            rt.block_on(run_writer(db, &mut rx, &recorder));
+        }));
+        if let Err(payload) = result {
+            let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
+                (*s).to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic payload".to_string()
+            };
+            eprintln!("[recorder] writer thread panic: {msg} —— ai_call_logs 不再落库,重启 app 才能恢复");
+        }
     })
 }
 
@@ -155,10 +172,13 @@ pub async fn run_writer(db: Arc<Db>, rx: &mut mpsc::Receiver<AiCallEvent>, recor
 }
 
 async fn write_one(db: &Arc<Db>, event: &AiCallEvent) -> Result<()> {
-    use crate::db::repo::truncate_preview;
-    let (sys_prev, sys_size) = truncate_preview(&event.system_full);
-    let (user_prev, user_size) = truncate_preview(&event.user_full);
-    let (resp_prev, resp_size) = truncate_preview(&event.response_full);
+    // ai_call_logs 是排查用字段 —— 必须存全文,不能静默截断。截断是 transformer 侧
+    // max_context 校验的责任(见 DefaultTransformer::transform_with_business);
+    // 真触发了再让 LLM 拒收 + 业务层 Error::Validation 透给用户,而不是日志悄悄丢关键 section。
+    // size 字段仍记字符数,供 UI 列表展示用量。
+    let sys_size = event.system_full.chars().count() as i64;
+    let user_size = event.user_full.chars().count() as i64;
+    let resp_size = event.response_full.chars().count() as i64;
     let new = NewAiCallLog {
         business: event.business,
         context_type: event.context_type.clone(),
@@ -168,15 +188,15 @@ async fn write_one(db: &Arc<Db>, event: &AiCallEvent) -> Result<()> {
         base_url: event.base_url.clone(),
         temperature: event.temperature,
         max_tokens: event.max_tokens,
-        system_preview: sys_prev,
-        user_preview: user_prev,
+        system_preview: Some(event.system_full.clone()),
+        user_preview: Some(event.user_full.clone()),
         system_size: sys_size,
         user_size,
         estimated_tokens_in: event.estimated_tokens_in,
         actual_tokens_in: event.actual_tokens_in,
         actual_tokens_out: event.actual_tokens_out,
         status: event.status,
-        response_preview: resp_prev,
+        response_preview: Some(event.response_full.clone()),
         response_size: resp_size,
         latency_ms: event.latency_ms,
         error: event.error.clone(),
@@ -241,5 +261,49 @@ mod tests {
         // 第二条会因 channel 满被 try_send 拒绝,eprintln 但不阻塞、不 panic
         rec.record(dummy_event());
         assert_eq!(rec.pending(), 1);
+    }
+
+    /// `Closed` 分支显式 eprintln —— 不是静默丢(违反 "哪里出错就在哪里报错" 原则)。
+    /// 测试只验证不 panic,eprintln 内容由读 stderr 的人工核查。
+    #[test]
+    fn channel_closed_logs_and_does_not_panic_on_send() {
+        let (rec, rx) = ChannelRecorder::new(8);
+        drop(rx); // 模拟 writer thread 已死,channel Closed
+        rec.record(dummy_event());
+        rec.record(dummy_event());
+    }
+
+    /// writer thread 干净退出路径:drop rx 让 recv() 拿 None → run_writer 直接 return(非 panic)。
+    /// spawn_writer 内的 catch_unwind 对 panic 路径有 eprintln 兜底;此 case 验证正常退出。
+    /// ai_call_logs 是排查字段 —— 不允许回退到静默截断。
+    /// 验证 write_one 把 15KB 的 user_full 完整落库(无截断、无 silent data loss)。
+    #[tokio::test]
+    async fn write_one_stores_user_full_without_truncation() {
+        use crate::db::Db;
+        let db = Arc::new(Db::open_in_memory().expect("open in-memory"));
+        // 15KB 中文 payload —— 远超旧 PREVIEW_BYTES(10KB 字节)。
+        let big_user = "衣".repeat(15_000);
+        let mut ev = dummy_event();
+        ev.user_full = big_user.clone();
+        write_one(&db, &ev).await.expect("write_one");
+        let (logs, _) = db.ai_call_logs().list(&Default::default()).expect("list");
+        assert_eq!(logs.len(), 1);
+        // 全文保留 —— 字节数和字符数都不被截断
+        let stored = logs[0].user_preview.as_ref().expect("non-empty");
+        assert_eq!(stored.chars().count(), big_user.chars().count());
+        assert_eq!(stored.len(), big_user.len());
+        assert!(stored.chars().all(|c| c == '衣'));
+    }
+
+        #[test]
+    fn spawn_writer_returns_cleanly_when_receiver_dropped() {
+        use std::sync::Arc;
+        use crate::db::Db;
+        let db = Arc::new(Db::open_in_memory().expect("open in-memory db"));
+        let (rec_for_writer, rx_for_writer) = ChannelRecorder::new(8);
+        drop(rec_for_writer);
+        let handle = spawn_writer(db, ChannelRecorder::new(8).0, rx_for_writer);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(handle.join().is_ok());
     }
 }

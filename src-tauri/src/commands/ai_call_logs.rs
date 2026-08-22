@@ -19,11 +19,13 @@ pub struct AiCallLogFilterDto {
 }
 
 impl AiCallLogFilterDto {
-    fn into_filter(self) -> Result<AiCallLogFilter, String> {
+    /// pub(super) 仅给同 crate 的测试用 —— IPC 入口还是 `list_ai_call_logs` 那个 wrapper。
+    pub(super) fn into_filter(self) -> Result<AiCallLogFilter, String> {
         let business = match self.business.as_deref() {
             None => None,
             Some("transform_chapter") => Some(AiCallBusiness::TransformChapter),
             Some("test_model") => Some(AiCallBusiness::TestModel),
+            Some("regenerate_preview") => Some(AiCallBusiness::RegeneratePreview),
             Some(other) => return Err(format!("unknown business: {other}")),
         };
         let status = match self.status.as_deref() {
@@ -78,4 +80,38 @@ pub fn clear_ai_call_logs(
     db: State<'_, Arc<Db>>,
 ) -> Result<usize, String> {
     db.ai_call_logs().clear().map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nsc_core::models::AiCallBusiness;
+
+    #[test]
+    fn into_filter_accepts_all_three_businesses() {
+        for (raw, expected) in [
+            (Some("transform_chapter"), Some(AiCallBusiness::TransformChapter)),
+            (Some("test_model"), Some(AiCallBusiness::TestModel)),
+            (Some("regenerate_preview"), Some(AiCallBusiness::RegeneratePreview)),
+        ] {
+            let dto = AiCallLogFilterDto { business: raw.map(|s| s.to_string()), ..Default::default() };
+            let f = dto.into_filter().expect("must accept");
+            assert_eq!(f.business, expected, "business={:?}", raw);
+        }
+    }
+
+    #[test]
+    fn into_filter_rejects_unknown_business_with_error() {
+        let dto = AiCallLogFilterDto { business: Some("nonsense".into()), ..Default::default() };
+        assert!(dto.into_filter().is_err());
+    }
+
+    /// 负数 offset 被 filter 过滤成 None,list() 内部 unwrap_or(0) —— 与"视为 0"行为一致。
+    /// 这里验证中间层不再保留负数,而不是直接断言 Some(0)。
+    #[test]
+    fn into_filter_drops_negative_offset() {
+        let dto = AiCallLogFilterDto { offset: Some(-5), ..Default::default() };
+        let f = dto.into_filter().expect("must accept");
+        assert_eq!(f.offset, None);
+    }
 }

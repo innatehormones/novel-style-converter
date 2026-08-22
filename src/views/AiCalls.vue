@@ -14,6 +14,7 @@
           <option value="">全部</option>
           <option value="transform_chapter">transform_chapter</option>
           <option value="test_model">test_model</option>
+          <option value="regenerate_preview">regenerate_preview</option>
         </select>
       </label>
       <label class="filter">
@@ -61,8 +62,8 @@
         </div>
       </template>
       <template #cell-business="{ row }">
-        <Tag :kind="row.business === 'transform_chapter' ? 'info' : 'warn'">
-          {{ row.business === 'transform_chapter' ? '章节转换' : '模型测试' }}
+        <Tag :kind="row.business === 'transform_chapter' ? 'info' : row.business === 'regenerate_preview' ? 'success' : 'warn'">
+          {{ row.business === 'transform_chapter' ? '章节转换' : row.business === 'regenerate_preview' ? '试运行预览' : '模型测试' }}
         </Tag>
       </template>
       <template #cell-model="{ row }">
@@ -163,7 +164,7 @@ import {
   clearAiCallLogs,
   listAiCallLogs,
 } from '../ipc/commands';
-import type { AiCallLog, AiCallLogFilter, ModelConfig } from '../ipc/types';
+import type { AiCallBusiness, AiCallLog, AiCallLogFilter, ModelConfig } from '../ipc/types';
 
 const logs = ref<AiCallLog[]>([]);
 const loading = ref(false);
@@ -299,7 +300,7 @@ function applyFilter(): void {
 }
 
 function onBusinessChange(v: string) {
-  filter.business = v === '' ? null : (v as 'transform_chapter' | 'test_model');
+  filter.business = v === '' ? null : (v as AiCallBusiness);
   applyFilter();
 }
 

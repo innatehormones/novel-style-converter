@@ -118,7 +118,11 @@ function formatLatency(ms: number): string {
 }
 
 function businessLabel(b: AiCallBusiness): string {
-  return b === 'transform_chapter' ? 'transform_chapter (章节转换)' : 'test_model (模型测试)';
+  return b === 'transform_chapter'
+    ? 'transform_chapter (章节转换)'
+    : b === 'regenerate_preview'
+    ? 'regenerate_preview (试运行预览)'
+    : 'test_model (模型测试)';
 }
 </script>
 

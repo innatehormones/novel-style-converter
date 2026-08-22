@@ -140,6 +140,16 @@ const sourcesQuery = useQuery({
 const sources = computed<SourceChapterRow[]>(() => sourcesQuery.data.value ?? []);
 const selectedCount = computed(() => selectedChapterIds.value.size);
 
+/// 预览章节 id(selectedChapterIds 中 idx 最小的那个)。spec §6.2:固定为 idx 最小者,
+/// 不暴露切换 UI(idx=0 没有前文是"空前文"场景,与 idx>0 时不一致——是有意取舍)。
+const previewChapterId = computed<number | null>(() => {
+  const ids = selectedChapterIds.value;
+  if (ids.size === 0) return null;
+  // sources 已是 idx ASC 顺序
+  const match = sources.value.find((s) => ids.has(s.chapter_id));
+  return match ? match.chapter_id : null;
+});
+
 function toggleSelect(chapterId: number, on: boolean) {
   const next = new Set(selectedChapterIds.value);
   if (on) next.add(chapterId); else next.delete(chapterId);
@@ -1138,6 +1148,7 @@ watch(() => sources.value, (list) => {
       :default-model-config-id="createBatchDefaults.default_model_config_id"
       :default-mode="createBatchDefaults.default_mode"
       :selected-chapter-ids="Array.from(selectedChapterIds)"
+      :preview-chapter-id="previewChapterId"
       @submit="onCreateBatch"
     />
 

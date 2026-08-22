@@ -23,6 +23,8 @@ pub struct CreateWorkflowPayload {
     pub ctx_prev_transformed: i32,
     pub ctx_next_original: i32,
     pub on_failure_policy: String,
+    /// 试运行首章 seed(spec §3.1 / §4.2)。Some → 事务内把 idx 最小那个 chapter 的 tc 标 done;None → 全部 tc pending。
+    pub preview_first_chapter: Option<PreviewFirstChapter>,
 }
 
 impl CreateWorkflowPayload {
@@ -50,7 +52,11 @@ impl CreateWorkflowPayload {
             ctx_prev_transformed: self.ctx_prev_transformed,
             ctx_next_original: self.ctx_next_original,
             on_failure_policy,
-            preview_first_chapter: None,
+            preview_first_chapter: self.preview_first_chapter.map(|p| nsc_core::models::transformation::PreviewFirstChapter {
+                content: p.content,
+                tokens_in: p.tokens_in,
+                tokens_out: p.tokens_out,
+            }),
         })
     }
 }
@@ -456,6 +462,17 @@ pub struct PreviewFirstChapterInput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct PreviewFirstChapterOutput {
+    pub content: String,
+    pub tokens_in: i32,
+    pub tokens_out: i32,
+}
+
+/// 用户在「新建工作流」试运行区满意的首章结果(IPC 入参),作为 create_workflow 的 seed。
+/// 字段名和核心层 nsc_core::models::transformation::PreviewFirstChapter 一致;这里只作为
+/// IPC 边界 DTO,在 into_core 中映射到核心类型。spec §5.2「IPC 边界透传」。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PreviewFirstChapter {
     pub content: String,
     pub tokens_in: i32,
     pub tokens_out: i32,

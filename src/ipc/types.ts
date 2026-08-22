@@ -438,7 +438,7 @@ export type PromptInput = Omit<Prompt, 'id' | 'is_builtin' | 'archived'> & { id:
 /// - business = transform_chapter | test_model(鐪嬩袱鏉?AI璋冪敤 璺緞)
 /// - preview 瀛楁鏄墠 10KB,瀹屾暣鍐呭鐪?transformation_chapters.result_content / 璋冪敤鏂逛笂涓嬫枃
 /// - estimated_tokens_in 鐢?chars/2 鍚彂寮?zh-aware 绮椾及),UI 鏍囨敞绮椾及
-export type AiCallBusiness = "transform_chapter" | "test_model";
+export type AiCallBusiness = "transform_chapter" | "test_model" | "regenerate_preview";
 export type AiCallStatus = "success" | "failed";
 
 export interface AiCallLog {

@@ -67,8 +67,48 @@
             </label>
           </div>
         </div>
-        <!-- 试运行区占位 —— Task 7 填充 -->
-        <div class="preview-placeholder">试运行区(TODO Task 7)</div>
+        <div class="preview-pane">
+          <div class="preview-header">
+            预览章节
+            <span v-if="previewMeta">#{{ previewMeta.idx }} · {{ previewMeta.title }} · {{ previewMeta.wordCount }} 字</span>
+            <span v-else>未选章节</span>
+          </div>
+          <label class="preview-label">原文</label>
+          <textarea
+            class="preview-original"
+            :value="previewOriginal"
+            readonly
+            placeholder="(切换预览章节时自动加载)"
+            rows="6"
+          ></textarea>
+          <div class="preview-actions">
+            <Button
+              kind="default"
+              :loading="previewLoading"
+              :disabled="!canPreview"
+              @click="onGeneratePreview"
+            >{{ previewOutput ? '重新生成' : '生成预览' }}</Button>
+            <Button
+              v-if="previewOutput && !previewAccepted"
+              kind="primary"
+              @click="onAcceptPreview"
+            >满意,使用此结果</Button>
+            <Button
+              v-else-if="previewAccepted"
+              kind="primary"
+              @click="onReselectPreview"
+            >已选 ✓ 重新选</Button>
+          </div>
+          <div v-if="previewError" class="preview-error">{{ previewError }}</div>
+          <label class="preview-label">转换预览</label>
+          <textarea
+            class="preview-output"
+            :value="previewOutput"
+            readonly
+            placeholder="(点上方按钮生成)"
+            rows="10"
+          ></textarea>
+        </div>
       </div>
     </div>
     <div v-if="error" class="error">{{ error }}</div>
@@ -90,8 +130,8 @@ import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
 import IconPauseCircle from '~icons/lucide/pause-circle';
 import IconSkipForward from '~icons/lucide/skip-forward';
-import { listModels, listPrompts } from '../ipc/commands';
-import type { ModelConfig, Prompt, CreateWorkflowInput } from '../ipc/types';
+import { listModels, listPrompts, previewFirstChapter, getChapter } from '../ipc/commands';
+import type { ModelConfig, Prompt, CreateWorkflowInput, PreviewFirstChapter } from '../ipc/types';
 
 const props = defineProps<{
   tnId: number;
@@ -99,6 +139,8 @@ const props = defineProps<{
   defaultModelConfigId?: number | null;
   defaultMode?: 'compress' | 'style' | null;
   selectedChapterIds: number[];
+  /// 预览章节 id:selectedChapterIds 中 idx 最小者的 chapter_id;父组件负责算。
+  previewChapterId: number | null;
 }>();
 const open = defineModel<boolean>('open', { required: true });
 const emit = defineEmits<{
@@ -113,6 +155,19 @@ const label = ref('');
 const labelError = ref<string | null>(null);
 const includePrev = ref(false);
 const includeNext = ref(false);
+/// 试运行区状态(spec §3.4 / §6.1):用户点「生成预览」→ 调 previewFirstChapter →
+/// 结果暂存 previewOutput,满意后 cache 进 previewFirstChapterRef 传给 create_workflow。
+const previewFirstChapterRef = ref<PreviewFirstChapter | null>(null);
+/// 最近一次 previewFirstChapter IPC 的成功返回(含 tokens_in/out)。
+/// previewLatest 在生成成功时就写入;previewFirstChapterRef 仅在用户点「满意」后从 previewLatest 复制。
+/// spec §6.1:create_workflow 的 preview_first_chapter 入参只能在用户明确确认后携带。
+const previewLatest = ref<PreviewFirstChapter | null>(null);
+const previewLoading = ref(false);
+const previewError = ref<string | null>(null);
+const previewOriginal = ref('');
+const previewOutput = ref('');
+const previewAccepted = ref(false);
+const previewMeta = ref<{ idx: number; title: string; wordCount: number } | null>(null);
 const onFailurePolicy = ref<CreateWorkflowInput['on_failure_policy']>('pause_and_review');
 const submitting = ref(false);
 const error = ref<string | null>(null);
@@ -128,7 +183,16 @@ const canSubmit = computed(() =>
   modelConfigId.value !== 0 &&
   label.value.trim() !== '' &&
   props.selectedChapterIds.length > 0 &&
+  (previewAccepted.value || !props.previewChapterId) &&
   !submitting.value,
+);
+
+/// 「生成预览」按钮可用的条件:有预览章节 + 选了 prompt/model + 不在加载中。
+const canPreview = computed(() =>
+  props.previewChapterId !== null &&
+  promptId.value !== 0 &&
+  modelConfigId.value !== 0 &&
+  !previewLoading.value,
 );
 
 watch(open, async (v) => {
@@ -141,6 +205,13 @@ watch(open, async (v) => {
   labelError.value = null;
   includePrev.value = false;
   includeNext.value = false;
+  previewFirstChapterRef.value = null;
+  previewLatest.value = null;
+  previewOutput.value = '';
+  // previewOriginal / previewMeta 由 previewChapterId watcher 管理,不在这里 reset:
+  // dialog 挂载时 watcher 已 immediate 触发拉过原文,open 切换不应清掉。
+  previewError.value = null;
+  previewAccepted.value = false;
   onFailurePolicy.value = 'pause_and_review';
   try {
     const [pRes, mRes] = await Promise.all([listPrompts(), listModels()]);
@@ -150,6 +221,75 @@ watch(open, async (v) => {
     error.value = e instanceof Error ? e.message : String(e);
   }
 }, { immediate: true });
+
+/// 监听 previewChapterId 变化:切换预览章节时清旧输出 + 拉新原文。
+/// immediate: dialog 挂载时 sources 已经加载好,previewChapterId 已有值,需立即拉原文。
+watch(() => props.previewChapterId, async (id) => {
+  // 切换预览章节:丢掉旧预览结果(否则用户可能带着上一个章节的"满意"误传)
+  previewFirstChapterRef.value = null;
+  previewLatest.value = null;
+  previewOutput.value = '';
+  previewAccepted.value = false;
+  previewError.value = null;
+  if (id === null) {
+    previewOriginal.value = '';
+    previewMeta.value = null;
+    return;
+  }
+  try {
+    const ch = await getChapter(id);
+    previewOriginal.value = ch.body;
+    previewMeta.value = { idx: ch.idx, title: ch.title, wordCount: ch.word_count };
+  } catch (e: unknown) {
+    previewError.value = e instanceof Error ? e.message : String(e);
+    previewOriginal.value = '';
+    previewMeta.value = null;
+  }
+}, { immediate: true });
+
+async function onGeneratePreview() {
+  if (props.previewChapterId === null) return;
+  if (promptId.value === 0 || modelConfigId.value === 0) {
+    previewError.value = '请先选择 prompt 和 model';
+    return;
+  }
+  // 新一次生成让旧 acceptance 失效(spec §6.1:cache 只能由「满意」按钮写入)。
+  previewFirstChapterRef.value = null;
+  previewAccepted.value = false;
+  previewLatest.value = null;
+  previewOutput.value = '';
+  previewLoading.value = true;
+  previewError.value = null;
+  try {
+    const out = await previewFirstChapter({
+      tn_id: props.tnId,
+      chapter_id: props.previewChapterId,
+      prompt_id: promptId.value,
+      model_config_id: modelConfigId.value,
+      include_prev: includePrev.value,
+      include_next: includeNext.value,
+      custom_input: null,
+    });
+    previewLatest.value = out;
+    previewOutput.value = out.content;
+  } catch (e: unknown) {
+    previewError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    previewLoading.value = false;
+  }
+}
+
+function onAcceptPreview() {
+  if (previewLatest.value === null) return;
+  previewFirstChapterRef.value = previewLatest.value;
+  previewAccepted.value = true;
+}
+
+function onReselectPreview() {
+  previewAccepted.value = false;
+  previewFirstChapterRef.value = null;
+  // previewLatest 保留,用户可以再次点「满意」直接复用最近一次生成结果(含 tokens)。
+}
 
 async function onSubmit() {
   if (!canSubmit.value) {
@@ -177,8 +317,8 @@ async function onSubmit() {
       ctx_prev_transformed: includePrev.value ? 1 : 0,
       ctx_next_original: includeNext.value ? 1 : 0,
       on_failure_policy: onFailurePolicy.value,
-      // 试运行首章结果(spec §3.1):Task 6 dialog 改造时改成绑定 previewFirstChapter() 的输出。
-      preview_first_chapter: null,
+      // 试运行首章结果(spec §3.1 / §3.4):用户点「满意,使用此结果」后 cache 的 PreviewFirstChapter。
+      preview_first_chapter: previewFirstChapterRef.value,
     });
     open.value = false;
   } catch (e: unknown) {
@@ -254,15 +394,56 @@ async function onSubmit() {
 .toggle input[type='checkbox'] {
   position: absolute; opacity: 0; pointer-events: none; width: 0; height: 0;
 }
-.preview-placeholder {
+.preview-pane {
   flex: 1;
-  display: flex; align-items: center; justify-content: center;
-  border: 1px dashed var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+.preview-header {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.preview-header > span {
+  margin-left: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.preview-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.preview-original,
+.preview-output {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-pin);
   background: var(--bg-section);
-  color: var(--text-muted);
+  color: var(--text-primary);
+  resize: vertical;
+  min-height: 60px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.preview-original { max-height: 180px; }
+.preview-output { flex: 1; min-height: 140px; }
+.preview-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.preview-error {
+  color: var(--danger);
   font-size: 12px;
-  padding: 16px;
+  padding: 6px 8px;
+  background: var(--color-cinnabar-light);
+  border-radius: var(--radius-pin);
 }
 .row.policy-row { align-items: flex-start; }
 .policy-options { display: flex; flex-direction: column; gap: 8px; flex: 1; }

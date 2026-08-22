@@ -75,6 +75,9 @@ const STYLE_DEFAULT: &str = "\
 # 上一章改写后(若有)
 {{prev_transformed}}
 
+# 下一章原文(若有)
+{{next_original}}
+
 # 当前章节
 {{chapter_title}}
 {{chapter_content}}
