@@ -1,5 +1,6 @@
 import { onBeforeUnmount, shallowRef, type Ref } from 'vue';
-import type { EditorView as EditorViewType } from '@codemirror/view';
+import type { EditorView as EditorViewType, DecorationSet as DecorationSetType } from '@codemirror/view';
+import type { EditorState as EditorStateType } from '@codemirror/state';
 import { StateField, StateEffect, RangeSetBuilder } from '@codemirror/state';
 import { Decoration } from '@codemirror/view';
 
@@ -44,12 +45,12 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
   });
 
   // Decoration builder: rebuild RangeSet of "marked line" decorations on marker change.
-  const markerLineDeco = (view: EditorViewType) => {
-    const set = view.state.field(markerField, false) ?? new Set<number>();
+  const markerLineDeco = (state: EditorStateType): DecorationSetType => {
+    const set = state.field(markerField, false) ?? new Set<number>();
     const builder = new RangeSetBuilder<Decoration>();
     for (const line1based of set) {
       try {
-        const line = view.state.doc.line(line1based);
+        const line = state.doc.line(line1based);
         builder.add(line.from, line.from, Decoration.line({ attributes: { class: 'cm-marker-line' } }));
       } catch {
         // line out of range (e.g. doc shrunk); skip
@@ -58,6 +59,39 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
     return builder.finish();
   };
   void markerLineDeco; // referenced in Task 5
+  let stampNode: HTMLElement | null = null;
+  function ensureStamp(): HTMLElement {
+    if (stampNode) return stampNode;
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'cm-marker-stamp';
+    el.title = '取消标记';
+    el.textContent = '章';
+    stampNode = el;
+    return el;
+  }
+  const markerGutter = {
+    class: 'cm-marker-stamp',
+    domEventHandlers: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      click(_view: EditorViewType, lineView: any) {
+        const v = view.value;
+        if (!v || !opts.onMarkerToggle) return false;
+        const line1based = v.state.doc.lineAt(lineView.from).number;
+        opts.onMarkerToggle(line1based);
+        return true;
+      },
+    },
+    lineMarker(_view: EditorViewType, lineBlock: { from: number }) {
+      const v = view.value;
+      if (!v) return null;
+      const set = v.state.field(markerField, false);
+      if (!set) return null;
+      const line1based = v.state.doc.lineAt(lineBlock.from).number;
+      if (!set.has(line1based)) return null;
+      return ensureStamp();
+    },
+  } as const;
 
   async function mount(doc: string): Promise<void> {
     const host = opts.host.value;
@@ -67,7 +101,7 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
 
     const [
       { EditorState },
-      { EditorView, drawSelection, lineNumbers },
+      { EditorView, drawSelection, lineNumbers, gutter },
       cmCommands,
       cmSearch,
     ] = await Promise.all([
@@ -108,6 +142,12 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
           lineNumbers(),
           themeExt,
           cmCommands.history(),
+          markerField,
+          // marked-line background (driven by RangeSet<Decoration>)
+          EditorView.decorations.compute([markerField], (v) => markerLineDeco(v)),
+          // marker gutter: stamp on each marked line; click toggles via store
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (gutter(markerGutter as any) as any),
           cmSearch.search({ top: true }),
         ],
       }),
