@@ -87,15 +87,15 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
     currentHitIndex.value = searchHits.length === 0 ? 0 : 1;
   }
 
-  let stampNode: HTMLElement | null = null;
-  function ensureStamp(): HTMLElement {
-    if (stampNode) return stampNode;
+  /// 每行一份独立的章按钮 DOM — CM6 不允许同一份节点跨多个 gutter slot 复用。
+  /// marker 状态不在 DOM 上区分,而是改由 RangeSet<Decoration> 在已盖行画背景(`.cm-marker-line`),
+  /// 与原版 MarkerButton.vue 行为等价:每行可点,已点的行加底色。
+  function makeStamp(): HTMLElement {
     const el = document.createElement('button');
     el.type = 'button';
     el.className = 'cm-marker-stamp';
-    el.title = '取消标记';
+    el.title = '在此拆分 / 取消标记';
     el.textContent = '章';
-    stampNode = el;
     return el;
   }
   const markerGutter = {
@@ -110,14 +110,8 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
         return true;
       },
     },
-    lineMarker(_view: EditorViewType, lineBlock: { from: number }) {
-      const v = view.value;
-      if (!v) return null;
-      const set = v.state.field(markerField, false);
-      if (!set) return null;
-      const line1based = v.state.doc.lineAt(lineBlock.from).number;
-      if (!set.has(line1based)) return null;
-      return ensureStamp();
+    lineMarker(_view: EditorViewType, _lineBlock: { from: number }) {
+      return makeStamp();
     },
   } as const;
 
