@@ -3,7 +3,7 @@
     subject = 中文长篇小说处理工具. 视觉语言搬自手稿编辑:浅米纸底,
     红线 hairline 替代灰,主色 = 朱砂红 (single committed accent).
     字体 = 思源宋体(标题) + 思源黑体(正文) + Mono(id/计数).
-    装饰集中在 "做标记" 这一处:MarkerButton = 朱红印章 "章".
+    装饰集中在 "做标记" 这一处:CM6 gutter 章 stamp (parse.vue .cm-marker-stamp) = 朱红印章 "章".
 */
 
 :root,

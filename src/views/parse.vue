@@ -145,7 +145,6 @@ import Dialog from '../components/ui/Dialog.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
-import MarkerButton from '../components/MarkerButton.vue';
 import { useChaptersStore } from '../stores/chapters';
 import { useParseEditor } from '../composables/useParseEditor';
 import { formatWordCount } from '../utils/format';
