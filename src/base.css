@@ -120,9 +120,10 @@
 }
 
 :root[data-theme='dark'] {
-  --color-paper: #181613;
-  --color-sheet: #221f1b;
-  --color-paper-mist: #1f1c18;
+  /* 暗色 —— 暖暗纸,非 OLED 纯黑;抬一档亮度保证层级/线条/激活态可读 */
+  --color-paper: #1d1a16;
+  --color-sheet: #292420;
+  --color-paper-mist: #221e19;
 
   --color-ink: #efeae0;
   --color-graphite: #d8d2c8;
@@ -130,19 +131,19 @@
   --color-fog: #847c70;
   --color-silver: #5c564f;
 
-  --color-rule-soft: #2a2622;
-  --color-rule: #3a3530;
-  --color-rule-rouge: #4a2a22;
+  --color-rule-soft: #3a342c;
+  --color-rule: #4d4338;
+  --color-rule-rouge: #5e3424;
 
   --color-cinnabar: #e36b50;
   --color-cinnabar-deep: #c4533a;
-  --color-cinnabar-light: #3a1f17;
+  --color-cinnabar-light: #4d2a20;
 
-  --color-soft-mint: #1a2a1e;
+  --color-soft-mint: #233d2a;
   --color-vivid-green: #6fa874;
-  --color-soft-yellow: #3a2e15;
+  --color-soft-yellow: #4a3a18;
   --color-tangerine: #d68840;
-  --color-soft-red: #3a1f17;
+  --color-soft-red: #4a2820;
 
   --bg-app: var(--color-paper);
   --bg-card: var(--color-sheet);
