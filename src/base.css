@@ -93,6 +93,9 @@
   --scrollbar-thumb-hover: var(--color-graphite);
   --scrollbar-track: transparent;
 
+  /* Overlay —— 弹窗/loading 遮罩背景,纸色 + alpha */
+  --overlay-bg: rgba(250, 246, 238, 0.85);
+
   --text-primary: var(--color-ink);
   --text-secondary: var(--color-graphite);
   --text-muted: var(--color-fog);
@@ -153,6 +156,7 @@
   --scrollbar-thumb: var(--color-slate);
   --scrollbar-thumb-hover: var(--color-graphite);
   --scrollbar-track: transparent;
+  --overlay-bg: rgba(29, 26, 22, 0.85);
   --bg-section: var(--color-paper);
 
   --text-primary: var(--color-ink);

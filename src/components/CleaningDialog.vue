@@ -39,7 +39,12 @@
         </div>
         <div class="pane">
           <h4 class="pane-title">预览结果</h4>
-          <div ref="previewCmHost" class="cm-readonly-host" />
+          <div class="pane-body">
+            <div ref="previewCmHost" class="cm-readonly-host" />
+            <div v-if="cleaning" class="cleaning-overlay" role="status" aria-live="polite">
+              <span class="cleaning-label">清洗中</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -88,6 +93,8 @@ const initialRules: RuleRow[] = [
 const selectedRules = ref<RuleRow[]>(initialRules.map((r) => ({ ...r })));
 const preview = ref<{ cleaned_text: string; lines_delta: number; chars_delta: number } | null>(null);
 const error = ref<string | null>(null);
+/// IPC 在飞时遮罩预览面板,避免大文件清洗卡顿让用户误以为是 bug。
+const cleaning = ref(false);
 
 /// 两个只读 CM6 视图 —— 同样用动态 import 拆 chunk,只在打开此弹窗时才下载。
 let sourceCmView: EditorViewType | null = null;
@@ -139,12 +146,15 @@ async function runPreview() {
     error.value = null;
     return;
   }
+  cleaning.value = true;
   try {
     const result = await previewCleaning(props.sourceText, enabled);
     preview.value = result;
     error.value = null;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    cleaning.value = false;
   }
 }
 
@@ -256,6 +266,34 @@ function setCmText(view: EditorViewType | null, text: string): void {
 .error { font-size: 12px; color: var(--danger); }
 .previews { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 0; }
 .pane { display: flex; flex-direction: column; min-height: 0; }
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+.cleaning-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pin);
+  pointer-events: none;
+  z-index: 1;
+}
+.cleaning-label {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  color: var(--text-secondary);
+  letter-spacing: 0.1em;
+  animation: cleaning-pulse 1.5s ease-in-out infinite;
+}
+@keyframes cleaning-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
 .pane-title { margin: 0 0 6px; font-size: 12px; color: var(--text-secondary); }
 .cm-readonly-host {
   flex: 1;
