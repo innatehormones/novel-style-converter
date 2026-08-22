@@ -1,13 +1,8 @@
 import { onBeforeUnmount, shallowRef, type Ref } from 'vue';
 import type { EditorView as EditorViewType } from '@codemirror/view';
 
-/// Composable that owns a CodeMirror 6 EditorView lifecycle.
-/// Pattern mirrors Upload.vue / CleaningDialog.vue: dynamic-import all CM6
-/// chunks, build a read-only view attached to a host <div>, expose the
-/// public surface other tasks extend, destroy on unmount.
 export interface UseParseEditorOptions {
   host: Ref<HTMLElement | null>;
-  /// 0-based line numbers of marked lines.
   onMarkerToggle?: (line1based: number) => void;
 }
 
@@ -34,8 +29,68 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
     view.value = null;
   }
 
-  async function mount(_doc: string): Promise<void> {
-    // Full implementation lands in Task 3.
+  async function mount(doc: string): Promise<void> {
+    const host = opts.host.value;
+    if (!host) return;
+    view.value?.destroy();
+    view.value = null;
+
+    const [
+      { EditorState },
+      { EditorView, drawSelection, lineNumbers },
+      cmCommands,
+      cmSearch,
+    ] = await Promise.all([
+      import('@codemirror/state'),
+      import('@codemirror/view'),
+      import('@codemirror/commands'),
+      import('@codemirror/search'),
+    ]);
+
+    const themeExt = EditorView.theme({
+      '&': {
+        height: '100%',
+        fontSize: '13px',
+        fontFamily: 'var(--font-mono), ui-monospace, monospace',
+        color: 'var(--text-primary)',
+        backgroundColor: 'var(--color-sheet)',
+      },
+      '&.cm-focused': { outline: 'none' },
+      '.cm-content': {
+        padding: '8px 12px',
+        caretColor: 'var(--color-cinnabar)',
+      },
+      '.cm-scroller': { fontFamily: 'inherit' },
+      '.cm-gutters': {
+        backgroundColor: 'transparent',
+        borderRight: '1px solid var(--border-color)',
+        color: 'var(--text-muted)',
+      },
+    }, { dark: false });
+
+    view.value = new EditorView({
+      state: EditorState.create({
+        doc,
+        extensions: [
+          EditorState.readOnly.of(true),
+          drawSelection(),
+          EditorView.lineWrapping,
+          lineNumbers(),
+          themeExt,
+          cmCommands.history(),
+          cmSearch.search({ top: true }),
+        ],
+      }),
+      parent: host,
+    });
+  }
+
+  function replaceDoc(text: string): void {
+    const v = view.value;
+    if (!v) return;
+    v.dispatch({
+      changes: { from: 0, to: v.state.doc.length, insert: text },
+    });
   }
 
   onBeforeUnmount(destroy);
@@ -49,7 +104,7 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
     prevHit: () => { /* Task 6 */ },
     hitCount,
     currentHitIndex,
-    replaceDoc: (_text: string) => { /* Task 3 */ },
+    replaceDoc,
     destroy,
     mount,
   } as unknown as UseParseEditorApi;
