@@ -35,15 +35,11 @@
       <div class="previews">
         <div class="pane">
           <h4 class="pane-title">原文本</h4>
-          <textarea class="text" readonly :value="sourceText"></textarea>
+          <div ref="sourceCmHost" class="cm-readonly-host" />
         </div>
         <div class="pane">
           <h4 class="pane-title">预览结果</h4>
-          <textarea
-            class="text"
-            readonly
-            :value="preview?.cleaned_text ?? ''"
-          ></textarea>
+          <div ref="previewCmHost" class="cm-readonly-host" />
         </div>
       </div>
     </div>
@@ -59,7 +55,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import type { EditorView as EditorViewType } from '@codemirror/view';
 import { useDebounceFn } from '@vueuse/core';
 import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
@@ -92,6 +89,12 @@ const selectedRules = ref<RuleRow[]>(initialRules.map((r) => ({ ...r })));
 const preview = ref<{ cleaned_text: string; lines_delta: number; chars_delta: number } | null>(null);
 const error = ref<string | null>(null);
 
+/// 两个只读 CM6 视图 —— 同样用动态 import 拆 chunk,只在打开此弹窗时才下载。
+let sourceCmView: EditorViewType | null = null;
+let previewCmView: EditorViewType | null = null;
+const sourceCmHost = ref<HTMLDivElement | null>(null);
+const previewCmHost = ref<HTMLDivElement | null>(null);
+
 let skipNextRulesWatch = false;
 
 /// 500ms 防抖预览 — vueuse useDebounceFn 自动随组件卸载清理。150/250ms 偏紧,快速勾规则时 preview IPC 还没跑完又触发下一轮,500ms 给后端留够时间。
@@ -105,15 +108,29 @@ watch(selectedRules, () => {
   debouncedRunPreview();
 }, { deep: true });
 
-watch(open, (v) => {
+watch(open, async (v) => {
   if (v) {
     skipNextRulesWatch = true;
     selectedRules.value = initialRules.map((r) => ({ ...r }));
     preview.value = null;
     error.value = null;
+    // Dialog 用 v-if 切 overlay,open=true 后才挂上 cm-host,需 nextTick 等 DOM 落地再 new EditorView
+    await nextTick();
+    await mountReadOnlyEditors();
     void runPreview();
+  } else {
+    // Dialog 关闭时 DOM 即将被 v-if 卸载,先 destroy cmView 避免引用脱离的 DOM
+    destroyReadOnlyEditors();
   }
 }, { immediate: true });
+
+// 监听 props.sourceText / preview.cleaned_text 变化 -> 同步推到 cmView
+watch(() => props.sourceText, (next) => { setCmText(sourceCmView, next); });
+watch(() => preview.value?.cleaned_text ?? '', (next) => { setCmText(previewCmView, next); });
+
+onUnmounted(() => {
+  destroyReadOnlyEditors();
+});
 
 async function runPreview() {
   const enabled = selectedRules.value.filter((r) => r.enabled).map((r) => r.id);
@@ -157,6 +174,63 @@ function onConfirm() {
 function onCancel() {
   open.value = false;
 }
+
+/// 构造两个只读 EditorView —— 只读意味着不需要 history / keymap(无法编辑/撤销);
+/// 仍保留 drawSelection 让用户能选中对比复制,lineWrapping 让长行折行。
+async function mountReadOnlyEditors(): Promise<void> {
+  if (sourceCmView || previewCmView) return;  // 重复挂载防护
+  const [{ EditorState }, { EditorView, drawSelection }] = await Promise.all([
+    import('@codemirror/state'),
+    import('@codemirror/view'),
+  ]);
+  const themeExt = EditorView.theme({
+    '&': {
+      height: '100%',
+      fontSize: '12px',
+      fontFamily: 'var(--font-mono), ui-monospace, monospace',
+      color: 'var(--text-primary)',
+      backgroundColor: 'var(--color-sheet)',
+    },
+    '.cm-content': { padding: '8px 10px' },
+    '.cm-scroller': { fontFamily: 'inherit' },
+    '.cm-gutters': { display: 'none' },
+  });
+  const baseExts = [
+    EditorState.readOnly.of(true),
+    drawSelection(),
+    EditorView.lineWrapping,
+    themeExt,
+  ];
+  if (sourceCmHost.value) {
+    sourceCmView = new EditorView({
+      state: EditorState.create({ doc: props.sourceText, extensions: baseExts }),
+      parent: sourceCmHost.value,
+    });
+  }
+  if (previewCmHost.value) {
+    previewCmView = new EditorView({
+      state: EditorState.create({
+        doc: preview.value?.cleaned_text ?? '',
+        extensions: baseExts,
+      }),
+      parent: previewCmHost.value,
+    });
+  }
+}
+
+function destroyReadOnlyEditors(): void {
+  sourceCmView?.destroy();
+  sourceCmView = null;
+  previewCmView?.destroy();
+  previewCmView = null;
+}
+
+function setCmText(view: EditorViewType | null, text: string): void {
+  if (!view) return;
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: text },
+  });
+}
 </script>
 
 <style scoped>
@@ -183,16 +257,12 @@ function onCancel() {
 .previews { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 0; }
 .pane { display: flex; flex-direction: column; min-height: 0; }
 .pane-title { margin: 0 0 6px; font-size: 12px; color: var(--text-secondary); }
-.text {
+.cm-readonly-host {
   flex: 1;
-  padding: 8px 10px;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-  background: var(--color-sheet);
+  min-height: 0;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-pin);
-  resize: none;
-  outline: none;
-  color: var(--text-primary);
+  overflow: hidden;
+  background: var(--color-sheet);
 }
 </style>
