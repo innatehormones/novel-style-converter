@@ -78,37 +78,14 @@
           <input
             class="search-input"
             placeholder="全文搜索"
-            v-model="searchQuery"
+            :value="searchQuery"
+            @input="onSearchInput(($event.target as HTMLInputElement).value)"
           />
           <span class="search-counter">{{ counterText }}</span>
           <Button size="small" :disabled="hitCount === 0" @click="onPrevHit">‹</Button>
           <Button size="small" :disabled="hitCount === 0" @click="onNextHit">›</Button>
         </div>
-        <RecycleScroller
-          ref="textScrollerRef"
-          class="scroller"
-          :items="store.rawLines"
-          :item-size="24"
-          :key-field="'line'"
-        >
-          <template #default="{ item, index }">
-            <div
-              class="line-row"
-              :class="{
-                marked: markerSet.has(String(item.line)),
-                hit: hitLineIndicesSet.has(index),
-                'active-hit': index === currentHitLineIndex,
-              }"
-            >
-              <MarkerButton
-                :title="markerSet.has(String(item.line)) ? '取消标记' : '在此拆分'"
-                @mark="onMarkLine(String(item.line))"
-              />
-              <span class="line-no">{{ index + 1 }}</span>
-              <span class="line-text" :title="item.text">{{ item.text }}</span>
-            </div>
-          </template>
-        </RecycleScroller>
+        <div ref="cmHost" class="cm-host" />
       </div>
     </div>
 
@@ -161,7 +138,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import IconArrowLeft from '~icons/lucide/arrow-left';
-import { DynamicScroller, DynamicScrollerItem, RecycleScroller } from 'vue-virtual-scroller';
+import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller';
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
 import Button from '../components/ui/Button.vue';
 import Dialog from '../components/ui/Dialog.vue';
@@ -170,7 +147,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import AlertDialog from '../components/ui/AlertDialog.vue';
 import MarkerButton from '../components/MarkerButton.vue';
 import { useChaptersStore } from '../stores/chapters';
-import { useChapterSearch } from '../composables/useChapterSearch';
+import { useParseEditor } from '../composables/useParseEditor';
 import { formatWordCount } from '../utils/format';
 import type { ChapterSegment } from '../ipc/types';
 
@@ -179,7 +156,6 @@ const router = useRouter();
 const store = useChaptersStore();
 
 const committing = ref(false);
-const textScrollerRef = ref<InstanceType<typeof RecycleScroller> | null>(null);
 const pendingMerge = ref<number | null>(null);
 const mergeDialogOpen = computed({
   get: () => pendingMerge.value !== null,
@@ -204,22 +180,26 @@ const chaptersWithIdx = computed(() =>
 const markerSet = computed(() => new Set(store.markers.map((m) => String(m))));
 
 const searchQuery = ref<string>('');
-const search = useChapterSearch(searchQuery, () => store.rawLines);
-const { hitLineIndices, hitCount, currentHitLineIndex, next, prev } = search;
-const hitLineIndicesSet = computed(() => new Set(hitLineIndices.value));
+const cmHost = ref<HTMLDivElement | null>(null);
+const cmEditor = useParseEditor({
+  host: cmHost,
+  onMarkerToggle: (line1based) => {
+    const key = String(line1based - 1); // CM6 1-based → store 0-based
+    if (markerSet.value.has(key)) store.removeMarker(key);
+    else store.addMarker(key);
+  },
+});
+const hitCount = computed(() => cmEditor.hitCount.value);
+const currentHitIndex = computed(() => cmEditor.currentHitIndex.value);
 
 const counterText = computed(() => {
-  if (hitCount.value === 0) return '0 / 0';
-  const cursor = hitLineIndices.value.indexOf(currentHitLineIndex.value);
-  return `${cursor + 1} / ${hitCount.value}`;
+  const total = hitCount.value;
+  if (total === 0) return '0 / 0';
+  return `${currentHitIndex.value} / ${total}`;
 });
 
 function scrollToActiveHit() {
-  void nextTick(() => {
-    if (currentHitLineIndex.value >= 0) {
-      textScrollerRef.value?.scrollToItem(currentHitLineIndex.value);
-    }
-  });
+  // composable's nextHit/prevHit already scrollIntoView; nothing to do here.
 }
 
 // 路由 uploadId 变化时重新拉数据;immediate:true 让首次挂载也跑。
@@ -229,13 +209,29 @@ watch(
   (id) => {
     if (Number.isFinite(id) && id > 0) {
       void store.load(id);
+      void nextTick(() => {
+        const text = store.rawText;
+        if (text) {
+          void cmEditor.mount(text);
+          cmEditor.setMarkers(new Set(store.markers.map((m) => Number(m))));
+        }
+      });
     }
   },
   { immediate: true },
 );
 
+watch(
+  () => store.markers,
+  (markers) => {
+    cmEditor.setMarkers(new Set(markers.map((m) => Number(m))));
+  },
+  { deep: false },
+);
+
 /// 离开 parse 页时清空 store:释放 rawText 等大对象内存,避免 watch 防抖悬挂。
 onUnmounted(() => {
+  cmEditor.destroy();
   store.unload();
 });
 
@@ -256,9 +252,7 @@ function onMarkLine(lineKey: string) {
 function onChapterClick(item: ChapterSegment) {
   const line = store.startLineOf(item);
   if (line < 0) return;
-  void nextTick(() => {
-    textScrollerRef.value?.scrollToItem(line);
-  });
+  void nextTick(() => { cmEditor.scrollToLine(line); });
 }
 
 function onTitleEdit(idx: number, value: string) {
@@ -294,18 +288,11 @@ function segIdx(item: ChapterSegment | null | undefined): number {
 
 function onSearchInput(value: string) {
   searchQuery.value = value;
-  scrollToActiveHit();
+  cmEditor.runSearch(value);
 }
 
-function onNextHit() {
-  next();
-  scrollToActiveHit();
-}
-
-function onPrevHit() {
-  prev();
-  scrollToActiveHit();
-}
+function onNextHit() { cmEditor.nextHit(); }
+function onPrevHit() { cmEditor.prevHit(); }
 
 function onReset() {
   store.reset();
@@ -393,6 +380,48 @@ async function confirmCommit() {
   flex: 1;
   overflow-y: auto;
 }
+.cm-host {
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid var(--border-color);
+  overflow: hidden;
+}
+.cm-host .cm-editor {
+  height: 100%;
+}
+/* Marked-line background (driven by RangeSet<Decoration>). */
+.cm-marker-line {
+  background-color: var(--bg-hover);
+}
+/* Marker gutter column — flex-centered for the stamp. */
+.cm-gutter.cm-marker-stamp {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  background: transparent;
+  cursor: default;
+}
+.cm-marker-stamp {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: var(--color-sheet);
+  border: 1px solid var(--color-cinnabar);
+  color: var(--color-cinnabar);
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  line-height: 20px;
+  cursor: pointer;
+  border-radius: 2px;
+  letter-spacing: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.cm-marker-stamp:hover {
+  background: var(--color-cinnabar);
+  color: #faf6ee;
+}
 .seg-row {
   display: flex;
   align-items: center;
@@ -477,30 +506,6 @@ async function confirmCommit() {
   font-size: 13px;
   font-style: italic;
   font-family: var(--font-serif);
-}
-.line-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 24px;
-  padding: 0 12px;
-  font-size: 13px;
-}
-.line-row.marked { background: var(--bg-hover); }
-.line-row.hit { background: var(--color-paper-mist); }
-.line-row.active-hit { background: var(--color-cinnabar); color: #faf6ee; }
-.line-no {
-  color: var(--text-secondary);
-  font-size: 11px;
-  min-width: 40px;
-  text-align: right;
-  flex-shrink: 0;
-}
-.line-text {
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .hint {
   margin: 12px 0 0;

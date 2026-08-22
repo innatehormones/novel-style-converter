@@ -19,6 +19,7 @@ export interface UseParseEditorApi {
   hitCount: Readonly<Ref<number>>;
   currentHitIndex: Readonly<Ref<number>>;
   replaceDoc: (text: string) => void;
+  mount: (doc: string) => Promise<void>;
   destroy: () => void;
 }
 
