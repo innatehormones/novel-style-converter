@@ -30,13 +30,8 @@
       </span>
     </div>
     <div class="body">
-      <textarea
-        v-if="textLoaded"
-        v-model="rawText"
-        class="raw"
-        spellcheck="false"
-      />
-      <div v-else class="raw raw-loading">
+      <div v-if="textLoaded" ref="cmContainer" class="cm-host" />
+      <div v-else class="cm-host cm-host--loading">
         <span v-if="error">{{ error }}</span>
         <span v-else-if="totalBytes > 0">
           原文加载中... {{ Math.floor((loadedBytes / totalBytes) * 100) }}%
@@ -59,7 +54,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
+import type { EditorView as EditorViewType } from '@codemirror/view';
 import { useRoute, useRouter } from 'vue-router';
 import Button from '../components/ui/Button.vue';
 import Tag from '../components/ui/Tag.vue';
@@ -80,6 +76,11 @@ const sha256 = ref('');
 const byteSize = ref(0);
 const uploadMeta = ref<UploadSummary | null>(null);
 // rawText 可能十几 MB,用 shallowRef 跳过 Vue deep proxy,赋值/读取都直接走原生 string,省掉逐字符响应式追踪。
+/// CodeMirror 6 view -- textarea not virtualized, lags on 1M+ chars.
+/// EditorView renders only visible lines + buffer, DOM decoupled from text size.
+let cmView: EditorViewType | null = null;
+const cmContainer = ref<HTMLDivElement | null>(null);
+
 const rawText = shallowRef('');
 const textLoaded = ref(false);
 // 大文件分块加载的进度反馈
@@ -115,7 +116,7 @@ onMounted(async () => {
     return;
   }
   // 大文本分块拉:meta 已先出,原文按 256 KB / 块串行拉,进度条同步更新。
-  // 全部到位后一次性 join + 单次 textarea 渲染(避免 57 次 O(n^2) 拼接),这一步本身会卡几秒刲十几秒,是浏览器硬件限制。
+  // 全部到位后一次性 join + 单次 cmView 渲染(避免 57 次 O(n^2) 拼接),这一步本身会卡几秒到十几秒,是浏览器硬件限制。
   totalBytes.value = byteSize.value;
   loadedBytes.value = 0;
   rawText.value = '';
@@ -123,6 +124,9 @@ onMounted(async () => {
   try {
     await loadUploadTextInChunks(id);
     textLoaded.value = true;
+    // wait for v-if to mount cmContainer before constructing EditorView
+    await nextTick();
+    await mountEditor(rawText.value);
     // 程序赋值(rawText 从 '' → 完整原文)也会触发 dirty watcher,加载完成后重置,
     // 避免一进页面"保存"按钮就亮起。
     dirty.value = false;
@@ -131,7 +135,7 @@ onMounted(async () => {
   }
 });
 
-/// 串行按字节区间拉原文,先积到数组里不触发 textarea 重渲染,
+/// 串行按字节区间拉原文,先积到数组里不触发 cmView 重渲染,
 /// 全部到位后再一次性 join 写入 rawText(避免 57 次字符串拼接变 O(n^2))。
 async function loadUploadTextInChunks(id: number): Promise<void> {
   let offset = 0;
@@ -197,8 +201,73 @@ async function openCleaning() {
 
 function onCleaningConfirm(cleanedText: string) {
   rawText.value = cleanedText;
+  replaceEditorText(cleanedText);
   // watch(rawText) 触发 → dirty 置 true;与手动编辑走同一保存路径。
 }
+
+/// 构造 EditorView —— 仅引 state / view / commands 三个包,无高亮/搜索/补全。
+/// 主题用 CSS 变量,亮/暗主题切换无需 JS 干预。
+async function mountEditor(initialText: string): Promise<void> {
+  if (!cmContainer.value) return;
+  cmView?.destroy();
+  // 动态 import —— Vite 把 CM6 拆为独立 chunk,只在进入此页时才下载。
+  const [{ EditorState }, { EditorView, keymap, drawSelection }, { defaultKeymap, history, historyKeymap }] = await Promise.all([
+    import('@codemirror/state'),
+    import('@codemirror/view'),
+    import('@codemirror/commands'),
+  ]);
+  cmView = new EditorView({
+    state: EditorState.create({
+      doc: initialText,
+      extensions: [
+        history(),
+        keymap.of([...defaultKeymap, ...historyKeymap]),
+        drawSelection(),
+        EditorView.lineWrapping,
+        EditorView.theme({
+          '&': {
+            height: '100%',
+            fontSize: '13px',
+            fontFamily: 'var(--font-mono), ui-monospace, monospace',
+            color: 'var(--text-primary)',
+            backgroundColor: 'var(--color-sheet)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-pin)',
+          },
+          '&.cm-focused': {
+            outline: 'none',
+            borderColor: 'var(--border-strong)',
+          },
+          '.cm-content': {
+            padding: '12px',
+            caretColor: 'var(--color-cinnabar)',
+          },
+          '.cm-scroller': { fontFamily: 'inherit' },
+          '.cm-gutters': { display: 'none' },
+        }),
+        EditorView.updateListener.of((u) => {
+          if (u.docChanged && cmView) {
+            rawText.value = cmView.state.doc.toString();
+          }
+        }),
+      ],
+    }),
+    parent: cmContainer.value,
+  });
+}
+
+/// 一次性把新文本塞回 EditorView(等价于给 textarea v-model 赋整段值)
+function replaceEditorText(next: string): void {
+  if (!cmView) return;
+  cmView.dispatch({
+    changes: { from: 0, to: cmView.state.doc.length, insert: next },
+  });
+}
+
+onUnmounted(() => {
+  cmView?.destroy();
+  cmView = null;
+});
 </script>
 
 <style scoped>
@@ -231,22 +300,13 @@ function onCleaningConfirm(cleanedText: string) {
   min-height: 0;
   margin-top: 8px;
 }
-.raw {
+.cm-host {
   flex: 1;
-  padding: 12px;
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
-  background: var(--color-sheet);
-  border: 1px solid var(--border-color);
+  min-height: 0;
   border-radius: var(--radius-pin);
-  resize: none;
-  outline: none;
-  color: var(--text-primary);
+  overflow: hidden;
 }
-.raw:focus {
-  border-color: var(--border-strong);
-}
-.raw-loading {
+.cm-host--loading {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -254,6 +314,8 @@ function onCleaningConfirm(cleanedText: string) {
   font-size: 13px;
   font-style: italic;
   font-family: var(--font-serif);
+  background: var(--color-sheet);
+  border: 1px solid var(--border-color);
 }
 .alert {
   margin-top: 12px;
