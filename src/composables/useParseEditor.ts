@@ -208,7 +208,17 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
       if (!v) return;
       v.dispatch({ effects: markerEffect.of(new Set(lines1based)) });
     },
-    scrollToLine: (_line0based: number) => { /* Task 7 */ },
+    scrollToLine: (line0based: number) => {
+      const v = view.value;
+      if (!v) return;
+      // store is 0-based; CM6 is 1-based. Clamp to doc bounds.
+      const safe = Math.max(1, Math.min(line0based + 1, v.state.doc.lines));
+      const pos = v.state.doc.line(safe).from;
+      v.dispatch({
+        selection: { anchor: pos },
+        effects: cmViewEditor!.scrollIntoView(pos, { y: 'start' }),
+      });
+    },
     runSearch: (query: string) => {
       const v = view.value;
       if (!v || !cmSearchMod) return;
