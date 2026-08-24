@@ -181,11 +181,16 @@ const markerSet = computed(() => new Set(store.markers.map((m) => String(m))));
 const searchQuery = ref<string>('');
 const cmHost = ref<HTMLDivElement | null>(null);
 const cmEditor = useParseEditor({
+  markerSet,
   host: cmHost,
   onMarkerToggle: (line1based) => {
+    console.log('[parse] onMarkerToggle', { line1based });
     const key = String(line1based - 1); // CM6 1-based → store 0-based
-    if (markerSet.value.has(key)) store.removeMarker(key);
-    else store.addMarker(key);
+    if (markerSet.value.has(key)) {
+      store.removeMarker(key);
+    } else {
+      store.addMarker(key);
+    }
   },
 });
 const hitCount = computed(() => cmEditor.hitCount.value);
@@ -221,14 +226,17 @@ watch(
   (text) => {
     if (!text) return;
     void cmEditor.mount(text);
-    cmEditor.setMarkers(new Set(store.markers.map((m) => Number(m))));
+    // store stores 0-based line keys; CM6 doc.line() is 1-based, so +1.
+    cmEditor.setMarkers(new Set(store.markers.map((m) => Number(m) + 1)));
   },
 );
 
 watch(
   () => store.markers,
   (markers) => {
-    cmEditor.setMarkers(new Set(markers.map((m) => Number(m))));
+    // store stores 0-based line keys; CM6 doc.line() is 1-based, so +1.
+    const lines1based = markers.map((m) => Number(m) + 1);
+    cmEditor.setMarkers(new Set(lines1based));
   },
   { deep: false },
 );
@@ -497,3 +505,4 @@ async function confirmCommit() {
 }
 .title-input:focus { border-color: var(--border-strong); }
 </style>
+

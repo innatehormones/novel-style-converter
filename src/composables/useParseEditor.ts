@@ -1,12 +1,13 @@
-import { onBeforeUnmount, shallowRef, type Ref } from 'vue';
+import { onBeforeUnmount, shallowRef, type ComputedRef, type Ref } from 'vue';
 import type { EditorView as EditorViewType, DecorationSet as DecorationSetType } from '@codemirror/view';
 import type { EditorState as EditorStateType } from '@codemirror/state';
 import { StateField, StateEffect, RangeSetBuilder } from '@codemirror/state';
-import { Decoration } from '@codemirror/view';
+import { Decoration, GutterMarker } from '@codemirror/view';
 
 export interface UseParseEditorOptions {
   host: Ref<HTMLElement | null>;
   onMarkerToggle?: (line1based: number) => void;
+  markerSet?: ComputedRef<Set<string>>;
 }
 
 export interface UseParseEditorApi {
@@ -69,7 +70,6 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
     }
     return builder.finish();
   };
-  void markerLineDeco; // referenced in Task 5
 
   // Substring-based hit cursor (mirrors the previous useChapterSearch semantics:
   // plain string contains, literal mode). Drives hitCount / currentHitIndex.
@@ -96,28 +96,51 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
   /// 每行一份独立的章按钮 DOM — CM6 不允许同一份节点跨多个 gutter slot 复用。
   /// marker 状态不在 DOM 上区分,而是改由 RangeSet<Decoration> 在已盖行画背景(`.cm-marker-line`),
   /// 与原版 MarkerButton.vue 行为等价:每行可点,已点的行加底色。
-  function makeStamp(): HTMLElement {
-    const el = document.createElement('button');
-    el.type = 'button';
-    el.className = 'cm-marker-stamp';
-    el.title = '在此拆分 / 取消标记';
-    el.textContent = '章';
-    return el;
+    function makeStamp(lineFrom: number): HTMLElement {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'cm-marker-stamp';
+      el.title = '在此拆分 / 取消标记';
+      el.textContent = '章';
+      // 把当前 marker 状态反映到按钮 class 上 ——
+      // 否则用户点完看不到任何视觉变化,会以为 click 没生效。
+      // opts.markerSet 由外部传入(随 store.markers 反应式更新)。
+      function syncMarkedClass() {
+        const v = view.value;
+        if (!v || !opts.markerSet) return;
+        const line1based = v.state.doc.lineAt(lineFrom).number;
+        const key = String(line1based - 1); // store 0-based
+        el.classList.toggle('cm-marker-stamp--marked', opts.markerSet.value.has(key));
+      }
+      syncMarkedClass();
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const v = view.value;
+        if (!v || !opts.onMarkerToggle) return;
+        const line1based = v.state.doc.lineAt(lineFrom).number;
+        opts.onMarkerToggle(line1based);
+        // 立刻反映新状态;不依赖 store 反应式回环,给用户即时反馈。
+        setTimeout(syncMarkedClass, 0);
+      });
+      return el;
+    }
+  /// CM6 gutter 要求 lineMarker 返回 GutterMarker 实例(不是裸 DOM);
+  /// setMarkers 会调用 marker.compare 做差分,无 compare 就崩。
+  /// 不同行的 from 不同 → eq() 返回 false → CM6 不会跨行复用 DOM,每行各一份按钮。
+  class MarkerStamp extends GutterMarker {
+    constructor(public readonly lineFrom: number) { super(); }
+    toDOM() {
+      return makeStamp(this.lineFrom);
+    }
+    eq(other: GutterMarker) {
+      return other instanceof MarkerStamp && other.lineFrom === this.lineFrom;
+    }
   }
   const markerGutter = {
-    class: 'cm-marker-stamp',
-    domEventHandlers: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      click(_view: EditorViewType, lineView: any) {
-        const v = view.value;
-        if (!v || !opts.onMarkerToggle) return false;
-        const line1based = v.state.doc.lineAt(lineView.from).number;
-        opts.onMarkerToggle(line1based);
-        return true;
-      },
-    },
-    lineMarker(_view: EditorViewType, _lineBlock: { from: number }) {
-      return makeStamp();
+    class: 'cm-marker-gutter',
+    lineMarker(_view: EditorViewType, lineBlock: { from: number }) {
+      return new MarkerStamp(lineBlock.from);
     },
   } as const;
 
@@ -159,45 +182,59 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
         padding: '8px 12px',
         caretColor: 'var(--color-cinnabar)',
       },
+      '.cm-line': { lineHeight: '24px' },
       '.cm-scroller': { fontFamily: 'inherit' },
       '.cm-gutters': {
         backgroundColor: 'transparent',
         borderRight: '1px solid var(--border-color)',
         color: 'var(--text-muted)',
       },
-      // Marker gutter column: stamps live here. Width matches the stamp.
-      '.cm-gutter.cm-marker-stamp': {
+      // Marker gutter column. alignItems centers the button horizontally;
+      // do NOT set justifyContent -- CM6 forces minHeight:100% so a centered
+      // flex pack pushes the buttons to the vertical middle of the document.
+      '.cm-gutter.cm-marker-gutter': {
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center',
-        width: '24px',
-        background: 'transparent',
+        flexShrink: 0,
+        width: '28px',
         cursor: 'default',
+        boxSizing: 'border-box',
       },
       // Marked-line background (driven by RangeSet<Decoration>).
       '.cm-marker-line': {
-        backgroundColor: 'var(--bg-hover)',
+        backgroundColor: 'var(--color-cinnabar-light)',
       },
       // Per-line stamp button (visually mirrors the retired MarkerButton.vue).
       '.cm-marker-stamp': {
+        boxSizing: 'border-box',
         width: '22px',
-        height: '22px',
+        height: '20px',
         padding: '0',
-        background: 'var(--color-sheet)',
-        border: '1px solid var(--color-cinnabar)',
-        color: 'var(--color-cinnabar)',
-        fontFamily: 'var(--font-serif)',
-        fontSize: '14px',
-        fontWeight: 'var(--font-weight-medium)',
-        lineHeight: '20px',
+        background: 'var(--color-cinnabar)',
+        border: 'none',
+        color: 'var(--color-sheet)',
+        fontFamily: "'Songti SC', 'STSong', 'SimSun', 'Source Han Serif SC', serif",
+        fontSize: '13px',
+        fontWeight: 700,
+        lineHeight: '18px',
         cursor: 'pointer',
         borderRadius: '2px',
         letterSpacing: '0',
-        transition: 'background 0.1s, color 0.1s',
+        userSelect: 'none',
+        transition: 'background 0.1s, transform 0.05s',
       },
+        '.cm-marker-stamp--marked': {
+          background: 'var(--color-vivid-green)',
+          color: 'var(--color-sheet)',
+        },
+        '.cm-marker-stamp--marked:hover': {
+          background: 'var(--color-vivid-green)',
+        },
       '.cm-marker-stamp:hover': {
-        background: 'var(--color-cinnabar)',
-        color: '#faf6ee',
+        background: 'var(--color-cinnabar-deep)',
+      },
+      '.cm-marker-stamp:active': {
+        transform: 'translateY(1px)',
       },
     }, { dark: false });
 
@@ -296,3 +333,11 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
     mount,
   } as unknown as UseParseEditorApi;
 }
+
+
+
+
+
+
+
+

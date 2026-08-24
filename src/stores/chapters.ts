@@ -10,6 +10,7 @@ import {
   listChapterSegments as ipcListChapterSegments,
   listCommittedSegments as ipcListCommittedSegments,
 } from '../ipc/commands';
+import { splitChaptersByMarkers } from '../utils/splitChapters';
 
 type SourceKind = 'committed' | 'fresh';
 
@@ -69,6 +70,14 @@ export const useChaptersStore = defineStore('chapters', () => {
       : await ipcListChapterSegments(id);
     if (token !== requestToken) return;
 
+    // 先按 markers 把 source 按行切开(原文行号),再看 suppressed 合并。
+    // 否则用户在合并后重新加 marker 想复原章节边界,split 永远不生效,左侧不会变多。
+    // segs -> splitByMarkers -> mergeSuppressed -> applyTitleOverrides。
+    if (markers.value.length > 0 && rawText.value) {
+      segs = splitChaptersByMarkers(segs, markers.value, rawText.value);
+    }
+    if (token !== requestToken) return;
+
     // 计算每段在原文里的起始行号,给"点击章节跳到右侧原文"用。
     segLineMap.value = computeLineMap(rawText.value, segs);
 
@@ -81,25 +90,46 @@ export const useChaptersStore = defineStore('chapters', () => {
   }
 
   /// 从前向后 indexOf,避免同一 content 误匹配到后面的副本。
-  /// map 里记录的是"标题行号"——idx 是 content 第一个字符的位置,
-  /// 往前找最近的换行,该换行之前的换行数就是标题所在行。
-  /// (idx 是新行起点,idx 之前的换行 = 标题行的尾换行。)
+  /// map 里记录的是每个章节 (segmentKey -> 原文起始行号),给"点击章节跳转到右侧原文"用。
+  ///
+  /// 行号算法:content/title 第一字符所在的行号 = 该字符之前的完整行数。
+  /// 实现:text.slice(0, idx) 包含 idx 之前的'\\n',split('\\n').length - 1 就是行号。
+  /// 旧实现 text.slice(0, lastNl) 把那一个'\\n'吃掉了,得到的是**前一行的行号**,
+  /// 用户点"第二章今世只想生孩子"会跳到上一章末尾 rawLines[N-1]("紧接着..." 等),
+  /// 而不是标题自身 rawLines[N]("第二章今世只想生孩子")。
+  ///
+  /// 优先 content(content 是 splitter 输出的原始正文,merge/split 后会被改,
+  /// 但 seq 顺序 + cursor 限制保证不回头匹配)。
+  /// content 找不到时(merge 后 content 改了)再 fallback 到 title。
   function computeLineMap(text: string, segs: ChapterSegment[]): Map<string, number> {
     const map = new Map<string, number>();
     if (!text) return map;
     let cursor = 0;
     for (const s of segs) {
-      const idx = text.indexOf(s.content, cursor);
-      if (idx < 0) continue;
-      const lastNl = text.lastIndexOf('\n', idx - 1);
-      const line = lastNl < 0 ? 0 : text.slice(0, lastNl).split('\n').length - 1;
-      map.set(segmentKey(s), line);
-      cursor = idx + s.content.length;
+      let line = -1;
+      const idxContent = text.indexOf(s.content, cursor);
+      if (idxContent >= 0) {
+        line = idxContent === 0 ? 0 : text.slice(0, idxContent).split('\n').length - 1;
+        cursor = idxContent + s.content.length;
+      } else {
+        const cleanTitle = (s.title ?? '')
+          .replace(/^[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+/u, '')
+          .replace(/[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+$/u, '');
+        if (cleanTitle) {
+          const idxTitle = text.indexOf(cleanTitle);
+          if (idxTitle >= 0) {
+            line = idxTitle === 0 ? 0 : text.slice(0, idxTitle).split('\n').length - 1;
+          }
+        }
+      }
+      if (line >= 0) map.set(segmentKey(s), line);
     }
     return map;
   }
 
-  /// "并入上一章":把 supSet 命中的段 content/word_count 追加到前一段,丢弃本段。
+  /// 从前向后 indexOf,避免同一 content 误匹配到后面的副本。
+  /// map 里记录的是"标题行号"——idx 是 content 第一个字符的位置,
+  /// 往前找最近的换行,该换行之前的换行数就是标题所在行。
   /// 第一章被 suppress 时直接丢弃(没有"上一章"可并)。
   function mergeSuppressed(segs: ChapterSegment[], supSet: Set<string>): ChapterSegment[] {
     const out: ChapterSegment[] = [];
@@ -107,9 +137,15 @@ export const useChaptersStore = defineStore('chapters', () => {
       if (!supSet.has(segmentKey(s))) { out.push(s); continue; }
       if (out.length === 0) continue;
       const prev = out[out.length - 1];
+      // Rust splitter trim() 章节 body —— content 不带首尾换行。
+      // 拼接相邻章节时必须插一个换行,否则 segLines 行号会和 rawText
+      // 失去 1-1 对应,后续 splitChaptersByMarkers 会把章节 2 的首行
+      // body 错位切到上一章里、字数错乱。
+      const NL = String.fromCharCode(10);
+      const needsJoiner = !prev.content.endsWith(NL) && !s.content.startsWith(NL);
       out[out.length - 1] = {
         title: prev.title,
-        content: prev.content + s.content,
+        content: prev.content + (needsJoiner ? NL : "") + s.content,
         word_count: prev.word_count + s.word_count,
       };
     }
@@ -184,11 +220,39 @@ export const useChaptersStore = defineStore('chapters', () => {
 
   function addMarker(key: string) {
     if (markers.value.includes(key)) return;
-    if (suppressed.value.includes(key)) {
-      suppressed.value = suppressed.value.filter((p) => p !== key);
+    // 用户在已 suppress 章节的标题行点"章" = 想"复活"该章节。
+    // 此前的 `suppressed.value.includes(key)` 永远 false:
+    //   key 是行号(0-based),suppressed 是 seg.content —— 类型层就对不上。
+    // 同时 splitChaptersByMarkers 在边界行 (m == start) 主动丢弃 marker,
+    // 即使 marker 落到已 merge 章节的标题行,如果不 un-suppress,该章节也不会出现在左侧。
+    // 这里走 line → source seg → segmentKey 的反查:命中 suppressed 后从该数组移除。
+    const suppressedSeg = findSuppressedSegAtLine(key);
+    if (suppressedSeg) {
+      const segKey = segmentKey(suppressedSeg);
+      suppressed.value = suppressed.value.filter((p) => p !== segKey);
     }
     markers.value = [...markers.value, key].sort();
     debouncedRecompute();
+  }
+
+  /// 反查"该行是不是 source 里某个已 suppress 章节的标题行"。
+  /// 用于 addMarker 在 marker 命中章节标题时联动 un-suppress。
+  /// rawText 没有 / 行号越界 / 该行不是任何 source seg 的标题 / 命中的 seg 未被 suppress —— 都返回 null。
+  /// 不可见字符裁剪与 splitChapters.bodyStartByTitle 一致,保证 line 端/title 端两侧一致。
+  function findSuppressedSegAtLine(lineKey: string): ChapterSegment | null {
+    if (!rawText.value) return null;
+    const lineIdx = Number.parseInt(lineKey, 10);
+    if (!Number.isFinite(lineIdx) || lineIdx < 0) return null;
+    const lines = rawText.value.split('\n');
+    if (lineIdx >= lines.length) return null;
+    const lineContent = lines[lineIdx] ?? '';
+    const clean = lineContent
+      .replace(/^[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+/u, '')
+      .replace(/[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+$/u, '');
+    if (!clean) return null;
+    const seg = source.value.find((s) => s.title === clean);
+    if (!seg) return null;
+    return suppressed.value.includes(segmentKey(seg)) ? seg : null;
   }
 
   function removeMarker(key: string) {
