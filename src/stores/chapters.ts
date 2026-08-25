@@ -1,5 +1,4 @@
 import { defineStore } from 'pinia';
-import { useDebounceFn } from '@vueuse/core';
 import { computed, ref } from 'vue';
 import type { ChapterSegment, ChapterInput } from '../ipc/types';
 import {
@@ -89,7 +88,8 @@ export const useChaptersStore = defineStore('chapters', () => {
   function toggleChapterSplit(key: string) {
     if (chapterSplits.value.has(key)) {
       chapterSplits.value.delete(key);
-      titles.value.delete(key);
+      // 不 delete titles:用户编辑过的标题在 toggle-on 时必须能恢复。
+      // chapterSplits != initialChapterSplits 已被 dirty 检测。
     } else {
       const line = Number(key);
       if (!Number.isFinite(line) || line < 0 || line >= rawLines.value.length) {
@@ -152,6 +152,7 @@ export const useChaptersStore = defineStore('chapters', () => {
   }
 
   function unload() {
+    ++requestToken;
     uploadId.value = null;
     rawText.value = '';
     filename.value = '';
@@ -182,6 +183,7 @@ export const useChaptersStore = defineStore('chapters', () => {
 
   async function commit(title: string): Promise<number> {
     if (uploadId.value === null) throw new Error('no upload loaded');
+    if (loading.value) throw new Error('loading in progress, cannot commit');
     const segs: ChapterInput[] = workingChapters.value.map((s) => ({
       title: s.title,
       content: s.content,
@@ -204,5 +206,6 @@ export const useChaptersStore = defineStore('chapters', () => {
     workingChapters, chapterSplits, initialChapterSplits, titles, initialTitles,
     sourceKind, loading, error, committed, dirty,
     load, toggleChapterSplit, updateTitle, reset, reSplit, commit, unload,
+    recomputeInitialFromSegs,
   };
 });

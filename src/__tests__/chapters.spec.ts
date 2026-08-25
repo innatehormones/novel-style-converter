@@ -12,11 +12,9 @@ vi.mock('../ipc/commands', () => ({
   commitDataAsset: vi.fn(async () => 1),
 }));
 
-vi.mock('@vueuse/core', () => ({
-  useDebounceFn: (fn: (...args: unknown[]) => unknown) => fn,
-}));
-
 import { useChaptersStore } from '../stores/chapters';
+import * as ipcCommands from '../ipc/commands';
+const { commitDataAsset } = ipcCommands;
 
 // title_line = 标题行 0-based 行号(见 TEXT)。
 const SEGMENTS = [
@@ -83,5 +81,44 @@ describe('chapters store: 栈化 chapterSplits', () => {
     expect([...store.chapterSplits].map(Number).sort((a,b)=>a-b)).toEqual([2, 6, 10]);
     expect(store.titles.get('6')).toBe('第二章今世只想生孩子');
     expect(store.dirty).toBe(false);
+  });
+
+  it('updateTitle + toggle-off + toggle-on preserves user title edit', async () => {
+    const store = useChaptersStore();
+    await store.load(1);
+    store.updateTitle('6', '楔子');
+    expect(store.workingChapters[1].title).toBe('楔子');
+    store.toggleChapterSplit('6');
+    store.toggleChapterSplit('6');
+    expect(store.workingChapters[1].title).toBe('楔子');
+    expect(store.dirty).toBe(true);
+  });
+
+  it('toggleChapterSplit 越界抛错', async () => {
+    const store = useChaptersStore();
+    await store.load(1);
+    expect(() => store.toggleChapterSplit('999999')).toThrow(/越界/);
+  });
+
+  it('recomputeInitialFromSegs title_line 越界抛错', async () => {
+    const store = useChaptersStore();
+    await store.load(1);
+    expect(() => store.recomputeInitialFromSegs([
+      { title: 'bad', content: '', word_count: 0, title_line: 999999 },
+    ])).toThrow(/越界/);
+  });
+
+  it('commit 传 {title_line, title, content} 形状', async () => {
+    const store = useChaptersStore();
+    await store.load(1);
+    await store.commit('My Novel');
+    expect(commitDataAsset).toHaveBeenCalledWith(1, {
+      title: 'My Novel',
+      chapters: [
+        { title: '第一章：开篇', content: expect.any(String), title_line: 2 },
+        { title: '第二章今世只想生孩子', content: expect.any(String), title_line: 6 },
+        { title: '第三章：误会', content: expect.any(String), title_line: 10 },
+      ],
+    });
   });
 });
