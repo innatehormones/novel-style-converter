@@ -84,7 +84,7 @@ const MOCK_INIT_SCRIPT = `
   window.__TAURI_OS_PLUGIN_INTERNALS__ = { platform: 'web' };
 `;
 
-test('parse page 章 button click triggers addMarker and splits chapter', async ({ page }) => {
+test('parse page 章 button click toggles chapter boundary and splits chapter', async ({ page }) => {
   await page.addInitScript(MOCK_INIT_SCRIPT);
 
   page.on('pageerror', (err) => {
@@ -160,8 +160,8 @@ test('parse page: 章 on a merged chapter title restores that chapter', async ({
   await page.locator('.cm-marker-stamp').nth(5).click();
   await page.waitForTimeout(600);
 
-  // Pre-fix: pane title stayed at 2 chapters because addMarker tried
-  // to compare a line-number key against seg.content keys (always false),
+  // Pre-fix: pane title stayed at 2 chapters because onBoundaryToggle
+  // fed a line-number key into a store keyed by seg.content (always false),
   // so the chapter stayed suppressed. Post-fix: chapter 2 is back.
   await expect(page.locator('.pane-title').first()).toContainText('章节列表(3)');
   // Verify chapter 2 row is back (title input has the expected value).
