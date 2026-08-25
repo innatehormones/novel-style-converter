@@ -51,15 +51,6 @@
                   @input="onTitleEdit(segIdx(item), ($event.target as HTMLInputElement).value)"
                 />
                 <span class="seg-size" :title="`${item.word_count} 字`">{{ formatWordCount(item.word_count) }}</span>
-                <Button
-                  kind="danger"
-                  size="small"
-                  :disabled="segIdx(item) <= 0"
-                  title="并入上一章"
-                  @click.stop="onMergeClick(segIdx(item))"
-                >
-                  并入上一章
-                </Button>
               </div>
             </DynamicScrollerItem>
           </template>
@@ -88,18 +79,6 @@
         <div ref="cmHost" class="cm-host" />
       </div>
     </div>
-
-    <Dialog v-model:open="mergeDialogOpen" title="确认合并">
-      <p v-if="pendingMerge !== null">
-        将『{{ displayTitle(store.workingChapters[pendingMerge]?.title) }}』并入上一章
-        『{{ displayTitle(store.workingChapters[pendingMerge! - 1]?.title) }}』?
-      </p>
-      <p class="hint">提交章节前可点『重置 marker』撤销。</p>
-      <template #footer>
-        <Button @click="cancelMerge">取消</Button>
-        <Button kind="danger" @click="confirmMerge">确认合并</Button>
-      </template>
-    </Dialog>
 
     <Dialog v-model:open="commitDialogOpen" title="保存为数据资产">
       <p>请输入数据资产标题:</p>
@@ -155,13 +134,6 @@ const router = useRouter();
 const store = useChaptersStore();
 
 const committing = ref(false);
-const pendingMerge = ref<number | null>(null);
-const mergeDialogOpen = computed({
-  get: () => pendingMerge.value !== null,
-  set: (v: boolean) => {
-    if (!v) pendingMerge.value = null;
-  },
-});
 
 const commitDialogOpen = ref(false);
 const pendingTitle = ref('');
@@ -176,22 +148,19 @@ const alertMessage = ref('');
 const chaptersWithIdx = computed(() =>
   store.workingChapters.map((s, idx) => ({ ...s, idx })),
 );
-const markerSet = computed(() => new Set(store.markers.map((m) => String(m))));
+const boundarySet = computed(() => store.chapterSplits);
+
+/// CM6 行按钮回调。CM6 给的是 1-based 行号,store 用 0-based lineKey。
+function onBoundaryToggle(line1based: number) {
+  store.toggleChapterSplit(String(line1based - 1));
+}
 
 const searchQuery = ref<string>('');
 const cmHost = ref<HTMLDivElement | null>(null);
 const cmEditor = useParseEditor({
-  markerSet,
+  markerSet: boundarySet,
   host: cmHost,
-  onMarkerToggle: (line1based) => {
-    console.log('[parse] onMarkerToggle', { line1based });
-    const key = String(line1based - 1); // CM6 1-based → store 0-based
-    if (markerSet.value.has(key)) {
-      store.removeMarker(key);
-    } else {
-      store.addMarker(key);
-    }
-  },
+  onMarkerToggle: onBoundaryToggle,
 });
 const hitCount = computed(() => cmEditor.hitCount.value);
 const currentHitIndex = computed(() => cmEditor.currentHitIndex.value);
@@ -227,15 +196,15 @@ watch(
     if (!text) return;
     void cmEditor.mount(text);
     // store stores 0-based line keys; CM6 doc.line() is 1-based, so +1.
-    cmEditor.setMarkers(new Set(store.markers.map((m) => Number(m) + 1)));
+    cmEditor.setMarkers(new Set([...store.chapterSplits].map((m) => Number(m) + 1)));
   },
 );
 
 watch(
-  () => store.markers,
-  (markers) => {
+  () => store.chapterSplits,
+  (splits) => {
     // store stores 0-based line keys; CM6 doc.line() is 1-based, so +1.
-    const lines1based = markers.map((m) => Number(m) + 1);
+    const lines1based = [...splits].map((m) => Number(m) + 1);
     cmEditor.setMarkers(new Set(lines1based));
   },
   { deep: false },
@@ -251,40 +220,18 @@ function onBack() {
   void router.push('/uploads');
 }
 
-function onMarkLine(lineKey: string) {
-  if (markerSet.value.has(lineKey)) {
-    store.removeMarker(lineKey);
-  } else {
-    store.addMarker(lineKey);
-  }
-}
-
 /// 点击章节行 → 跳转到右侧原文对应位置。
 /// Button 和 input 上的 @click.stop 已拦住冒泡,这里只处理"点空白处"。
 function onChapterClick(item: ChapterSegment) {
-  const line = store.startLineOf(item);
+  const line = item.title_line;
   if (line < 0) return;
   void nextTick(() => { cmEditor.scrollToLine(line); });
 }
 
 function onTitleEdit(idx: number, value: string) {
-  store.updateTitle(idx, value);
-}
-
-function onMergeClick(idx: number) {
-  if (idx === 0) return;
-  pendingMerge.value = idx;
-}
-
-function cancelMerge() {
-  pendingMerge.value = null;
-}
-
-function confirmMerge() {
-  if (pendingMerge.value !== null) {
-    store.removeChapter(pendingMerge.value);
-  }
-  pendingMerge.value = null;
+  const seg = store.workingChapters[idx];
+  if (!seg) return;
+  store.updateTitle(String(seg.title_line), value);
 }
 
 function displayTitle(t: unknown): string {
