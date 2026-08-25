@@ -144,21 +144,18 @@ test('parse page: 章 on a merged chapter title restores that chapter', async ({
   // Sanity: three chapter rows out of the box.
   await expect(page.locator('.seg-row')).toHaveCount(3);
 
-  // User clicks 并入上一章 on the second chapter row (chapter 2).
-  // The chapter title is an <input value=...>, so target by index instead of text.
-  const rows = page.locator('.seg-row');
-  await rows.nth(1).getByRole('button', { name: '并入上一章' }).click();
-  await page.getByRole('button', { name: '确认合并' }).click();
-  // Wait for debouncedRecompute + dialog close.
-  await page.waitForTimeout(600);
-
-  // Left list now has 2 chapters (Ch1+Ch2 merged, Ch3).
-  await expect(page.locator('.pane-title').first()).toContainText('章节列表(2)');
-
-  // User clicks 章 on chapter 2 title line (line 5, 0-based).
-  // Stamps render in document order so nth(5) is the second chapter title.
+  // User clicks 章 on chapter 2 title line to "merge" chapter 2 into chapter 1.
+  // (Replaces the removed 并入上一章 button: in the stack model, removing
+  // chapter 2 from chapterSplits has the same effect — its body concatenates
+  // into chapter 1.) Stamps render in document order; nth(5) is chapter 2's title.
   await page.locator('.cm-marker-stamp').nth(5).click();
   await page.waitForTimeout(600);
+
+  // Left list now has 2 chapters (Ch1 + Ch2 merged, Ch3).
+  await expect(page.locator('.pane-title').first()).toContainText('章节列表(2)');
+
+  // User clicks 章 on chapter 2 title line again to restore chapter 2.
+  await page.locator('.cm-marker-stamp').nth(5).click();
 
   // Pre-fix: pane title stayed at 2 chapters because onBoundaryToggle
   // fed a line-number key into a store keyed by seg.content (always false),
