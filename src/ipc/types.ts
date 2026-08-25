@@ -143,6 +143,7 @@ export interface CommitDataAssetInput {
   chapters: Array<{
     title: string;
     content: string;
+    title_line: number;
   }>;
 }
 
@@ -150,6 +151,8 @@ export interface ChapterSegment {
   title: string;
   content: string;
   word_count: number;
+  /// 标题行 0-based 行号
+  title_line: number;
   edited_at?: string | null;
 }
 
@@ -193,6 +196,7 @@ export interface Chapter {
 export type ChapterInput = {
   title: string;
   content: string;
+  title_line: number;
 };
 
 /**

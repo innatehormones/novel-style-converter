@@ -11,7 +11,7 @@ import type {
   ModelConfig, ModelConfigInput,
   UploadSummary, CleaningPreview,
   DataAssetChapter, DataAssetRow, DataAsset, CommitDataAssetInput,
-  ChapterSegment, ChapterMeta, ChapterContentRow, Chapter, ChapterInput,
+  ChapterSegment, ChapterMeta, ChapterContentRow, Chapter,
   TransformationNovelSummary, TransformationChapterRow,
   CreateTransformationNovelInput, UpdateTransformationNovelInput,
   EnqueuePayload, EnqueueAllPayload, QueueSnapshot,
@@ -147,10 +147,6 @@ export function getChapterContents(dataAssetId: number): Promise<ChapterContentR
 
 export function getChapter(chapterId: number): Promise<Chapter> {
   return invoke<Chapter>('get_chapter', { chapterId });
-}
-
-export function parseChapters(dataAssetId: number, segments: ChapterInput[]): Promise<number> {
-  return invoke<number>('parse_chapters', { dataAssetId, segments });
 }
 
 /** 编辑单章正文：后端同时按统一口径重算 word_count 落库。 */
