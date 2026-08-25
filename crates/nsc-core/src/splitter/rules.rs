@@ -30,12 +30,6 @@ static RE_BLANK_LINE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\r?\n[ \t]*\r?\n+"
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultSplitter;
 
-fn first_line_title(text: &str) -> String {
-    let trimmed = text.trim_start();
-    let first_line = trimmed.lines().next().unwrap_or("").trim();
-    if first_line.is_empty() { "(无标题)".to_string() } else { first_line.to_string() }
-}
-
 fn auto_matches_in(text: &str) -> Vec<(usize, usize, String)> {
     let mut matches = Vec::new();
     for re in [&RE_CHAPTER_CN, &RE_CHAPTER_EN, &RE_VOLUME, &RE_CHAPTER_PCN] {
@@ -57,6 +51,16 @@ fn strip_invisibles(s: &str) -> String {
         '​' | '﻿' | '⁠'
     );
     s.trim_matches(is_inv).to_string()
+}
+
+/// 把空行 fallback 的段落切成 (title=首行, content=次行起)。
+/// 消除「正则路径 content 不含标题、fallback 含首行」的不一致。
+/// 单行段落 → content 为空(确定性输出)。
+fn split_first_line(s: &str) -> (String, String) {
+    match s.find('\n') {
+        Some(pos) => (s[..pos].trim().to_string(), s[pos + 1..].trim().to_string()),
+        None => (s.to_string(), String::new()),
+    }
 }
 
 impl ChapterSplitter for DefaultSplitter {
@@ -98,15 +102,5 @@ impl ChapterSplitter for DefaultSplitter {
             if !content.is_empty() { chapters.push(ParsedChapter { title: title.clone(), word_count: word_count(&content), content, title_line }); }
         }
         SplitResult { chapters }
-    }
-}
-
-/// 把空行 fallback 的段落切成 (title=首行, content=次行起)。
-/// 消除「正则路径 content 不含标题、fallback 含首行」的不一致。
-/// 单行段落 → content 为空(确定性输出)。
-fn split_first_line(s: &str) -> (String, String) {
-    match s.find('\n') {
-        Some(pos) => (s[..pos].trim().to_string(), s[pos + 1..].trim().to_string()),
-        None => (s.to_string(), String::new()),
     }
 }
