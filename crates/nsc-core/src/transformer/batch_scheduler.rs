@@ -217,6 +217,7 @@ impl BatchScheduler {
                 source_kind: chapter.source_kind.clone(),
                 source_chapter_id: chapter.source_chapter_id,
                 edited_at: chapter.edited_at.clone(),
+                title_line: None,
             },
             prompt: prompt.clone(),
             model_config: model.clone(),
