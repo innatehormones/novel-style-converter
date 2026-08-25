@@ -36,10 +36,16 @@ describe('countChapterChars', () => {
 });
 
 describe('stripInvisibles / stripTrailingInvisibles', () => {
-  it('stripInvisibles trims whitespace + ZWSP/BOM on both sides', () => {
-    expect(stripInvisibles('  \u{200B}第1章\u{FEFF} ')).toBe('第1章');
+  it('stripInvisibles trims leading + trailing whitespace and invisibles', () => {
+    // 覆盖所有 5 种 invisible + ZWSP + BOM + 全角空格 + LF
+    expect(stripInvisibles('  \u{200B}\u{FEFF}\u{200C}\u{200D}\u{2060}第1章\u{3000}\n')).toBe('第1章');
   });
-  it('stripTrailingInvisibles keeps leading whitespace', () => {
+  it('stripTrailingInvisibles preserves leading whitespace', () => {
+    // 保留前导空格,只 trim 末尾的 \n
     expect(stripTrailingInvisibles('  正文\n\n')).toBe('  正文');
+  });
+  it('stripTrailingInvisibles trims trailing invisibles (ZWSP/BOM/WJ)', () => {
+    // 这是与 trimEnd 的关键区别:覆盖 ZWSP/BOM/WJ
+    expect(stripTrailingInvisibles('正文\u{200B}\u{FEFF}\u{2060}')).toBe('正文');
   });
 });

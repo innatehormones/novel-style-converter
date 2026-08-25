@@ -9,6 +9,7 @@ function escapeRegExp(s: string): string {
 export const INVIS_PREFIX_RE = /^[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+/u;
 export const INVIS_SUFFIX_RE = /[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+$/u;
 
+/// 清理首尾 invisible/whitespace 后是否为空 —— 空行/纯不可见字符视为视觉空行。
 export function isVisuallyEmptyLine(line: string): boolean {
   return line.replace(INVIS_PREFIX_RE, '').replace(INVIS_SUFFIX_RE, '') === '';
 }
