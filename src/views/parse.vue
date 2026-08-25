@@ -157,6 +157,9 @@ function onBoundaryToggle(line1based: number) {
 
 const searchQuery = ref<string>('');
 const cmHost = ref<HTMLDivElement | null>(null);
+/// 本地符号已 rename 到 boundarySet / onBoundaryToggle;useParseEditor 的 prop key
+/// 仍是旧名 markerSet / onMarkerToggle —— Task 9 会把 useParseEditor 的
+/// UseParseEditorOptions 同步 rename,届时此处 prop key 一起改。
 const cmEditor = useParseEditor({
   markerSet: boundarySet,
   host: cmHost,
