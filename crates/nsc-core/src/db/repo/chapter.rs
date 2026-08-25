@@ -114,3 +114,39 @@ impl<'a> ChapterRepo<'a> {
         Ok(updated)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Db;
+    use crate::models::{NewDataAsset, NewUpload};
+
+    #[test]
+    fn title_line_round_trips_through_db() {
+        let db = Db::open_in_memory().unwrap();
+        let upload_id = db.uploads().insert(&NewUpload {
+            sha256: "abc".into(),
+            filename: "t.txt".into(),
+            byte_size: 0,
+            file_path: String::new(),
+            original_text: String::new(),
+            word_count: 0,
+        }).unwrap();
+        let da_id = db.data_assets().insert(&NewDataAsset {
+            upload_id,
+            title: "DA".into(),
+            source_filename: "t.txt".into(),
+            ..Default::default()
+        }).unwrap();
+        let id = db.chapters().insert(&NewChapter {
+            data_asset_id: da_id,
+            title: "Chapter 1".into(),
+            body: "body".into(),
+            word_count: 1,
+            title_line: Some(42),
+            ..Default::default()
+        }).unwrap();
+        let got = db.chapters().get(id).unwrap().unwrap();
+        assert_eq!(got.title_line, Some(42), "title_line 没被写入第 9 列或读出列序错位");
+    }
+}

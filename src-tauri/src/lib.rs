@@ -130,7 +130,6 @@ pub fn run() {
             commands::chapters::list_chapters,
             commands::chapters::get_chapter_contents,
             commands::chapters::get_chapter,
-            commands::chapters::parse_chapters,
             commands::chapters::update_chapter_body,
             commands::cleaning::preview_cleaning,
             commands::data_assets::list_data_asset_chapters,

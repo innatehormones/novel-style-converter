@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use nsc_core::db::Db;
-use nsc_core::models::{Chapter, NewChapter};
+use nsc_core::models::Chapter;
 use nsc_core::splitter::{ChapterSplitter, DefaultSplitter, SplitResult};
 
 /// parse 阶段返回的章节预览：title + body（不再带 byte 偏移）。
@@ -14,6 +14,9 @@ pub struct ChapterSegment {
     pub title: String,
     pub content: String,
     pub word_count: i32,
+    /// 标题在 upload.original_text 里的 0-based 行号 —— parse 页专用,
+    /// 让前端在 split 结果上挂"跳到原文行 / 重切"等动作时拿得到原文坐标。
+    pub title_line: i32,
 }
 
 #[derive(Debug, Serialize)]
@@ -36,40 +39,32 @@ pub struct ChapterContentRow {
 pub struct ChapterInput {
     pub title: String,
     pub content: String,
+    /// 标题在 upload.original_text 里的 0-based 行号 —— parse 页提交时一并带上,
+    /// commit_data_asset 直接写入 chapter.title_line,后续 list_committed_segments 能拿到。
+    pub title_line: i32,
 }
 
-/// parse wizard 入口：对 upload.original_text 跑 splitter，应用 markers（byte 偏移）
-/// + suppressed（章节 idx），返回 ChapterSegment 列表直接展示。
+/// parse wizard 入口：对 upload.original_text 跑 splitter，返回 ChapterSegment 列表直接展示。
+/// 不再接 markers / suppressed —— 新 splitter 模型下标题由正则确定,无需前端补 marker。
 #[tauri::command]
 pub fn list_chapter_segments(
     db: State<'_, Arc<Db>>,
     upload_id: i64,
-    markers: Option<Vec<i64>>,
-    suppressed: Option<Vec<i64>>,
 ) -> Result<Vec<ChapterSegment>, String> {
     let text = {
-
         let u = db.uploads().get(upload_id).map_err(|e| e.to_string())?
             .ok_or_else(|| format!("upload {upload_id} 不存在"))?;
         crate::commands::uploads::read_upload_original_text(&u)?
     };
 
-    let byte_markers: Vec<usize> = markers.unwrap_or_default()
-        .into_iter()
-        .filter(|m| *m >= 0 && (*m as usize) <= text.len())
-        .map(|m| m as usize)
-        .collect();
-    // suppressed 在新模型下不再有意义（chapter 无 byte_start）—— 保留参数兼容旧前端，忽略
-    let _ = suppressed;
-
-    let SplitResult { chapters } =
-        DefaultSplitter.split_with_edits(&text, &byte_markers, &[]);
+    let SplitResult { chapters } = DefaultSplitter.split(&text);
     Ok(chapters
         .into_iter()
         .map(|c| ChapterSegment {
             title: c.title,
             content: c.content,
             word_count: c.word_count,
+            title_line: c.title_line as i32,
         })
         .collect())
 }
@@ -88,19 +83,26 @@ pub fn get_chapter_contents(
     }).collect())
 }
 
-/// 老接口：返回已提交章节的 title + word_count + id（不带 byte）。
+/// 老接口：返回已提交章节的 title + word_count + title_line（不带 byte）。
 /// 兼容老 parse.vue / dataAsset store 的旧字段。
+/// title_line 为 NULL = 数据是更老路径写入的(promoted da / 老 splitter),
+/// 这种数据没有原文坐标,parse 页也用不上,直接 fail-fast 抛错带诊断。
 #[tauri::command]
 pub fn list_committed_segments(
     db: State<'_, Arc<Db>>,
     data_asset_id: i64,
 ) -> Result<Vec<ChapterSegment>, String> {
     let chapters = db.chapters().list_by_data_asset(data_asset_id).map_err(|e| e.to_string())?;
-    Ok(chapters.into_iter().map(|c| ChapterSegment {
-        title: c.title,
-        content: c.body,
-        word_count: c.word_count,
-    }).collect())
+    chapters.into_iter().map(|c| {
+        let title_line = c.title_line
+            .ok_or_else(|| format!("chapter {} title_line 为 NULL(data_asset_id={data_asset_id})", c.id))?;
+        Ok(ChapterSegment {
+            title: c.title,
+            content: c.body,
+            word_count: c.word_count,
+            title_line,
+        })
+    }).collect()
 }
 
 /// 列出 data_asset 下全部章节（含 body），给前端做完整视图。
@@ -141,27 +143,4 @@ pub fn update_chapter_body(
 ) -> Result<(), String> {
     db.chapters().update_body(chapter_id, &body)
         .map_err(|e| e.to_string())
-}
-
-/// commit 时用：parse.vue 把编辑好的 segments 直接提交，每段是 title + content。
-#[tauri::command]
-pub fn parse_chapters(
-    db: State<'_, Arc<Db>>,
-    data_asset_id: i64,
-    segments: Vec<ChapterInput>,
-) -> Result<usize, String> {
-    let new_chapters: Vec<NewChapter> = segments.into_iter().map(|s| {
-        let wc = nsc_core::text::word_count(&s.content);
-        NewChapter {
-            data_asset_id,
-            idx: 0,
-            title: s.title,
-            body: s.content,
-            word_count: wc,
-            ..Default::default()
-        }
-    }).collect();
-    let n = db.chapters().replace_all_for_data_asset(data_asset_id, &new_chapters)
-        .map_err(|e| e.to_string())?;
-    Ok(n)
 }
