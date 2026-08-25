@@ -8,8 +8,8 @@ import { Decoration, GutterMarker } from '@codemirror/view';
 
 export interface UseParseEditorOptions {
   host: Ref<HTMLElement | null>;
-  onMarkerToggle?: (line1based: number) => void;
-  markerSet?: ComputedRef<Set<string>>;
+  onBoundaryToggle?: (line1based: number) => void;
+  boundarySet?: ComputedRef<Set<string>>;
 }
 
 export interface UseParseEditorApi {
@@ -40,21 +40,21 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
   let cmViewEditor: typeof import('@codemirror/view').EditorView | null = null;
 
 
-  // Marker StateField is built once per mount.
-  const markerEffect = StateEffect.define<ReadonlySet<number>>();
-  const markerField = StateField.define<ReadonlySet<number>>({
+  // Boundary StateField is built once per mount.
+  const boundaryEffect = StateEffect.define<ReadonlySet<number>>();
+  const boundaryField = StateField.define<ReadonlySet<number>>({
     create: () => new Set<number>(),
     update: (value, tr) => {
       for (const e of tr.effects) {
-        if (e.is(markerEffect)) return e.value;
+        if (e.is(boundaryEffect)) return e.value;
       }
       return value;
     },
   });
 
-  // Decoration builder: rebuild RangeSet of "marked line" decorations on marker change.
-  const markerLineDeco = (state: EditorStateType): DecorationSetType => {
-    const set = state.field(markerField, false) ?? new Set<number>();
+  // Decoration builder: rebuild RangeSet of "marked line" decorations on boundary change.
+  const boundaryLineDeco = (state: EditorStateType): DecorationSetType => {
+    const set = state.field(boundaryField, false) ?? new Set<number>();
     const builder = new RangeSetBuilder<Decoration>();
     // RangeSetBuilder requires ranges added in (non-overlapping) order by
     // rom position. Set iteration is insertion order, not numeric, and
@@ -104,47 +104,47 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
       el.className = 'cm-marker-stamp';
       el.title = '在此拆分 / 取消标记';
       el.textContent = '章';
-      // 把当前 marker 状态反映到按钮 class 上 ——
+      // 把当前 boundary 状态反映到按钮 class 上 ——
       // 否则用户点完看不到任何视觉变化,会以为 click 没生效。
-      // opts.markerSet 由外部传入(随 store.markers 反应式更新)。
-      function syncMarkedClass() {
+      // opts.boundarySet 由外部传入(随 store.boundaries 反应式更新)。
+      function syncBoundaryClass() {
         const v = view.value;
-        if (!v || !opts.markerSet) return;
+        if (!v || !opts.boundarySet) return;
         const line1based = v.state.doc.lineAt(lineFrom).number;
         const key = String(line1based - 1); // store 0-based
-        el.classList.toggle('cm-marker-stamp--marked', opts.markerSet.value.has(key));
+        el.classList.toggle('cm-marker-stamp--marked', opts.boundarySet.value.has(key));
       }
-      syncMarkedClass();
+      syncBoundaryClass();
       el.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         const v = view.value;
-        if (!v || !opts.onMarkerToggle) return;
+        if (!v || !opts.onBoundaryToggle) return;
         const line1based = v.state.doc.lineAt(lineFrom).number;
-        opts.onMarkerToggle(line1based);
+        opts.onBoundaryToggle(line1based);
         // 立刻反映新状态;不依赖 store 反应式回环,给用户即时反馈。
-        setTimeout(syncMarkedClass, 0);
+        setTimeout(syncBoundaryClass, 0);
       });
       return el;
     }
   /// CM6 gutter 要求 lineMarker 返回 GutterMarker 实例(不是裸 DOM);
   /// setMarkers 会调用 marker.compare 做差分,无 compare 就崩。
   /// 不同行的 from 不同 → eq() 返回 false → CM6 不会跨行复用 DOM,每行各一份按钮。
-  class MarkerStamp extends GutterMarker {
+  class BoundaryStamp extends GutterMarker {
     constructor(public readonly lineFrom: number) { super(); }
     toDOM() {
       return makeStamp(this.lineFrom);
     }
     eq(other: GutterMarker) {
-      return other instanceof MarkerStamp && other.lineFrom === this.lineFrom;
+      return other instanceof BoundaryStamp && other.lineFrom === this.lineFrom;
     }
   }
-  const markerGutter = {
+  const boundaryGutter = {
     class: 'cm-marker-gutter',
     lineMarker(view: EditorViewType, lineBlock: { from: number }) {
       const text = view.state.doc.lineAt(lineBlock.from).text;
       if (isVisuallyEmptyLine(text)) return null;
-      return new MarkerStamp(lineBlock.from);
+      return new BoundaryStamp(lineBlock.from);
     },
   } as const;
 
@@ -252,12 +252,12 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
           lineNumbers(),
           themeExt,
           cmCommands.history(),
-          markerField,
+          boundaryField,
           // marked-line background (driven by RangeSet<Decoration>)
-          EditorView.decorations.compute([markerField], (v) => markerLineDeco(v)),
+          EditorView.decorations.compute([boundaryField], (v) => boundaryLineDeco(v)),
           // marker gutter: stamp on each marked line; click toggles via store
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (gutter(markerGutter as any) as any),
+          (gutter(boundaryGutter as any) as any),
           cmSearchMod!.search({ top: true }),
         ],
       }),
@@ -282,7 +282,7 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
     setMarkers: (lines1based: ReadonlySet<number>) => {
       const v = view.value;
       if (!v) return;
-      v.dispatch({ effects: markerEffect.of(new Set(lines1based)) });
+      v.dispatch({ effects: boundaryEffect.of(new Set(lines1based)) });
     },
     scrollToLine: (line0based: number) => {
       const v = view.value;
