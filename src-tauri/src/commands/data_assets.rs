@@ -18,6 +18,13 @@ pub struct DataAssetChapter {
     /// 章节来源:transformed = 工作流转换结果;original = 原文(派生 da 失败章节回退)。
     /// 旧 da(migration 0021 之前)没有该字段,反序列化时默认 "original"。
     pub source_kind: String,
+    #[serde(default)]
+    pub source_chapter_id: Option<i64>,
+    #[serde(default)]
+    pub edited_at: Option<String>,
+    /// 标题文本在 upload.original_text 里的 0-based 行号。None = 无原文坐标(promoted 章节)。
+    #[serde(default)]
+    pub title_line: Option<i32>,
 }
 
 impl From<&Chapter> for DataAssetChapter {
@@ -29,6 +36,9 @@ impl From<&Chapter> for DataAssetChapter {
             body: c.body.clone(),
             word_count: c.word_count,
             source_kind: c.source_kind.clone(),
+            source_chapter_id: c.source_chapter_id,
+            edited_at: c.edited_at.clone(),
+            title_line: c.title_line,
         }
     }
 }

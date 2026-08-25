@@ -134,10 +134,13 @@ export interface DataAssetChapter {
   word_count: number;
   /// 绔犺妭鏉ユ簮:transformed = 宸ヤ綔娴佽浆鎹㈢粨鏋?original = 鍘熸枃(娲剧敓 da 澶辫触绔犺妭鍥為€€)銆?
   source_kind: 'transformed' | 'original';
+  source_chapter_id: number | null;
   edited_at: string | null;
+  /// 标题文本在 upload.original_text 里的 0-based 行号。null = 无原文坐标(promoted 章节)。
+  title_line: number | null;
 }
 
-/// commit_data_asset 鍏ュ弬:title + 绔犺妭鍒楄〃(姣忎釜鍚?title + byte 鑼冨洿)銆?
+/// commit_data_asset 鍏ュ弬:title + 绔犺妭鍒楄〃(姣忎釜鍚?title + content + title_line)銆?
 export interface CommitDataAssetInput {
   title: string;
   chapters: Array<{

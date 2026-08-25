@@ -2,8 +2,17 @@ import { defineStore } from 'pinia';
 import { computed, ref, shallowRef } from 'vue';
 import { listDataAssetChapters, listDataAssets as ipcListDataAssets, updateChapterBody } from '../ipc/commands';
 import type { DataAssetChapter } from '../ipc/types';
-import type { ChapterSegment } from '../ipc/types';
 import type { DataAssetRow } from '../ipc/types';
+
+/// dataAsset store 自己的 view 类型:不绑定 parse-page 的 ChapterSegment。
+/// 这里只展示 title/content/word_count,以及 title_line 0/实际坐标供将来跳转;
+/// promoted 章节无原文坐标 → title_line=0,UI 跳过即可。
+type DataAssetChapterView = {
+  title: string;
+  content: string;
+  word_count: number;
+  title_line: number;
+};
 
 export const useDataAssetStore = defineStore('dataAsset', () => {
   const dataAssetId = ref<number | null>(null);
@@ -11,7 +20,7 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
   const filename = ref<string>('');
   const parsedAt = ref<string | null>(null);
   const tnCount = ref<number>(0);
-  const chapters = ref<ChapterSegment[]>([]);
+  const chapters = ref<DataAssetChapterView[]>([]);
   /// 跟 chapters 对齐:章节 db id,update_chapter_body 要用
   const chapterIds = ref<(number | null)[]>([]);
   const selectedIdx = ref<number | null>(null);
@@ -67,6 +76,9 @@ export const useDataAssetStore = defineStore('dataAsset', () => {
         title: c.title,
         content: c.body,
         word_count: c.word_count,
+        /// promoted 章节 title_line 为 null,view 视图无跳转需求,记 0 表示"无坐标",
+        /// 不影响后续 selectedContent / saveEdit(它们只读 content / word_count)。
+        title_line: c.title_line ?? 0,
       }));
       chapterIds.value = chs.map((c: DataAssetChapter) => c.id);
       sourceKinds.value = chs.map((c: DataAssetChapter) => c.source_kind);
