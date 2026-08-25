@@ -68,8 +68,8 @@ pub fn decode_to_utf8(bytes: &[u8]) -> Result<DecodedText, String> {
 ///
 /// upload_file 写盘用的是原字节(只 decode 校验不入库),
 /// 所以磁盘上的 .txt 可能是 GBK/BIG5 等非 UTF-8 字节。
-/// 所有"读 upload 全文"的入口(get_upload_text / list_chapter_segments /
-/// parse_chapters)统一走这里,避免 `read_to_string` 在非 UTF-8 文件上炸
+/// 所有"读 upload 全文"的入口(get_upload_text / list_chapter_segments)
+/// 统一走这里,避免 `read_to_string` 在非 UTF-8 文件上炸
 /// "stream did not contain valid UTF-8"。
 pub fn read_text_file(path: &Path) -> Result<DecodedText, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("读文件失败({}): {e}", path.display()))?;

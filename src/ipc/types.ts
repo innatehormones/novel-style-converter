@@ -187,7 +187,7 @@ export interface Chapter {
 }
 
 /**
- * `commit_data_asset` / `parse_chapters` 鍏ュ弬鐨勭珷鑺傚厓绱?
+ * `commit_data_asset` 鍏ュ弬鐨勭珷鑺傚厓绱?
  * 浠呮爣棰?+ byte 鑼冨洿銆傚悗绔寜 byte range 鍒囩墖鍘熸枃璁＄畻 `word_count` / `idx`銆?
  */
 export type ChapterInput = {
