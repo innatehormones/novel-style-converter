@@ -12,6 +12,10 @@ function escapeRegExp(s: string): string {
 /// 不可见字符)。
 const INVIS_PREFIX_RE = /^[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+/u;
 const INVIS_SUFFIX_RE = /[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+$/u;
+export function isVisuallyEmptyLine(line: string): boolean {
+  return line.replace(INVIS_PREFIX_RE, '').replace(INVIS_SUFFIX_RE, '') === '';
+}
+
 export function countChapterChars(s: string): number {
   let n = 0;
   for (const ch of s) if (!/\s/.test(ch)) n++;
@@ -67,20 +71,19 @@ function parseChapterTitleStrict(line: string): string | null {
   return m[0].replace(/^[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+/u, '').replace(/[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+$/u, '');
 }
 
-/// 宽松模式:严格模式没命中,再 fallback 到「清理后 ≤30 字符的短行 → 标题候选」。
-/// 章节正文里偶发的短句(「咚 咚 咚 ！」「咣当」「他微微一笑」等)常被作者用作章节起始,
-/// 用户在 UI 上点「章」= 显式表达「这一行起算新章节」,此时直接用该行内容作标题,而不是「（续）」后缀。
+/// 宽松模式:严格模式没命中,fallback 到「清理后非空的整行 → 标题候选」。
+/// 用户在 UI 上点「章」= 显式表达「这一行起算新章节」,无论这一行 4 字还是 400 字
+/// 都是同一意图 —— 只要清理后非空,直接用做新章节 title,而不是「（续）」后缀。
+/// marker 行本身为空 / 仅 whitespace / 仅 invisibles 的退化场景由 split 里的
+/// zero-word guard 兜底(避免产生没正文的'僵尸'章节)。
 ///
-/// 返回清理后的 title(去掉首尾 invisible/whitespace);不匹配返回 null。
-///
-/// 用途:marker 命中某段 body 后,split 那行如果是个标题(短句或 chapter 标题),
-/// 应该用这个标题作新章节的 title,而不是「（续）」后缀。
+/// 返回清理后的 title(去掉首尾 invisible/whitespace);空串返回 null。
 function parseChapterTitle(line: string): string | null {
   if (!line) return null;
   const strict = parseChapterTitleStrict(line);
   if (strict !== null) return strict;
   const cleaned = line.replace(/^[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+/u, '').replace(/[\s\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2060}]+$/u, '');
-  if (cleaned && cleaned.length <= 30) return cleaned;
+  if (cleaned) return cleaned;
   return null;
 }
 /// 把 (startLine, endLine, title) 跟 markers 求交,得到"命中本段的 markers 列表"。
@@ -215,43 +218,33 @@ export function splitChaptersByMarkers(
       //   2) strict 在 splitLine 上检测(seg.content 里就含标题行的罕见情况)
       //   3) 宽松在 splitLine 上检测(短句正文行作为新章节标题)
       //   4) 宽松在 rawLineAtMarker 上检测(兜底,实际基本走不到这步)
-      const detected = parseChapterTitleStrict(rawLineAtMarker)
+            const detected = parseChapterTitleStrict(rawLineAtMarker)
         ?? parseChapterTitleStrict(splitLine)
         ?? parseChapterTitle(splitLine)
         ?? parseChapterTitle(rawLineAtMarker);
+      // 空 marker 行(纯空 / 纯 whitespace / 纯 invisibles) → 整个 split 跳过。
+      // UI 层 lineMarker 已经不渲染按钮,splitter 实际收不到 —— 作为兜底,
+      // 不 push 任何东西(partStart / lastPushedTitle / nextPartTitle 都不动)。
+      if (detected === null) continue;
       // push 当前段(partStart..splitAt)
       const part = segLines.slice(partStart, splitAt).join('\n');
-      // 防御:如果 part 实质为空(只剩空白/invisible),这是"marker 紧贴 chapter body 起点"的退化场景,
-      // 不能再把 chapter 2 切空 —— 否则原章节字数变 0,体感是 bug。
-      // 例:Rust 输出的 chapter content 里第一项就是 ""(空行/invisibles),marker 命中第二行 →
-      // splitAt=1,segLines.slice(0,1)=[""],countChapterChars("")=0。直接 skip 这种切分。
-      if (countChapterChars(part) === 0) {
-        if (detected !== null) {
-          // 检测到标题但 part 是空 —— 实际是"marker 命中 chapter 起始后的第一个有内容行"，
-          // 不切分,继续往后看下一个 marker(如果本次循环后面还有,partStart 保持不变)。
-          continue;
-        }
-        continue;
-      }
+      // 防御:part 是纯 whitespace/invisible 也不切 ——
+      // 否则 marker 紧贴 chapter body 起点时会把 chapter 2 切空,体感是 bug。
+      if (countChapterChars(part) === 0) continue;
+      // 上半段照常 push;下半段的 zombie 防御(字数 = 0 不 push)由 lastClean 那段统一处理,
+      // 这里不重复检查 splitAt,否则会把上半段也丢掉("咚 咚 咚 ！" 这种 marker
+      // 行 == 最后一行的场景,期望 out[0].content 只剩上半段)。
       result.push({
         title: nextPartTitle,
         content: part,
         word_count: countChapterChars(part),
       });
       lastPushedTitle = nextPartTitle;
-      // 决定下一段的 title 与 partStart
-      if (detected !== null) {
-        // marker 命中章节标题行(或 ≤30 字短行) → 用它作为新章节标题,跳过一格
-        nextPartTitle = detected;
-        // titleStripped:raw 上的标题已被合并剥离,segLines[splitAt] 已是新章节的
-        // 第一行 body,不再 +1 跳过;否则 marker 行落在 segLines 内,需跳过此行。
-        partStart = titleStripped ? splitAt : splitAt + 1;
-      } else {
-        // marker 落在普通正文行 → 上半段 title 已经 push,下半段加「（续）」后缀。
-        // 多次切分时,「（续）」要累加到上一段标题(不是始终 seg.title)。
-        nextPartTitle = lastPushedTitle + '\u201C\uFF08\u7EED\uFF09\u201D';
-        partStart = splitAt;
-      }
+      // marker 行有内容 → 整行(清理 invisibles)作为新章节标题。
+      nextPartTitle = detected;
+      // titleStripped:raw 上的标题已被合并剥离,segLines[splitAt] 已是新章节的
+      // 第一行 body,不再 +1 跳过;否则 marker 行落在 segLines 内,需跳过此行。
+      partStart = titleStripped ? splitAt : splitAt + 1;
     }
     // 去掉合并内容末尾的换行/空白 —— 内容在 splitter 看来不应带 trailing \n,
     // 避免给前端渲染或后续 round-trip 制造噪音(测试期望也不带)。

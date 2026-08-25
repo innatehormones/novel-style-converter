@@ -1,6 +1,8 @@
 import { onBeforeUnmount, shallowRef, type ComputedRef, type Ref } from 'vue';
 import type { EditorView as EditorViewType, DecorationSet as DecorationSetType } from '@codemirror/view';
 import type { EditorState as EditorStateType } from '@codemirror/state';
+import { isVisuallyEmptyLine } from '../utils/splitChapters';
+
 import { StateField, StateEffect, RangeSetBuilder } from '@codemirror/state';
 import { Decoration, GutterMarker } from '@codemirror/view';
 
@@ -139,7 +141,9 @@ export function useParseEditor(opts: UseParseEditorOptions): UseParseEditorApi {
   }
   const markerGutter = {
     class: 'cm-marker-gutter',
-    lineMarker(_view: EditorViewType, lineBlock: { from: number }) {
+    lineMarker(view: EditorViewType, lineBlock: { from: number }) {
+      const text = view.state.doc.lineAt(lineBlock.from).text;
+      if (isVisuallyEmptyLine(text)) return null;
       return new MarkerStamp(lineBlock.from);
     },
   } as const;

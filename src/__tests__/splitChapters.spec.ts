@@ -16,15 +16,17 @@ describe('splitChaptersByMarkers', () => {
     expect(out).not.toBe(segs);
   });
 
-  it('marker in second body line splits body and assigns marker line to lower half', () => {
+  it('marker on a body line makes that line the new chapter title', () => {
     const text = 'T1\nbody line 1 placeholder for chapter 1 split tests\nbody line 2 placeholder for chapter 1 split tests\nbody line 3 placeholder for chapter 1 split tests\nT2\nbody line 1 placeholder for chapter 2 split tests\nbody line 2 placeholder for chapter 2 split tests\n';
     const segs = [seg('T1', 'body line 1 placeholder for chapter 1 split tests\nbody line 2 placeholder for chapter 1 split tests\nbody line 3 placeholder for chapter 1 split tests'), seg('T2', 'body line 1 placeholder for chapter 2 split tests\nbody line 2 placeholder for chapter 2 split tests')];
+    // 任何非空 marker 行都作为新章节标题 —— 之前的 30 字上限已移除,
+    // 所以长 body 行也直接当标题,而不是 fallback 到「(续)」后缀。
     const out = splitChaptersByMarkers(segs, ['2'], text);
     expect(out).toHaveLength(3);
     expect(out[0]?.title).toBe('T1');
     expect(out[0]?.content).toBe('body line 1 placeholder for chapter 1 split tests');
-    expect(out[1]?.title).toBe('T1\u201C\uFF08\u7EED\uFF09\u201D');
-    expect(out[1]?.content).toBe('body line 2 placeholder for chapter 1 split tests\nbody line 3 placeholder for chapter 1 split tests');
+    expect(out[1]?.title).toBe('body line 2 placeholder for chapter 1 split tests');
+    expect(out[1]?.content).toBe('body line 3 placeholder for chapter 1 split tests');
     expect(out[2]?.title).toBe('T2');
   });
 
@@ -36,13 +38,18 @@ describe('splitChaptersByMarkers', () => {
     expect(out[0]?.content).toBe('body line 1 placeholder for chapter 1 split tests\nbody line 2 placeholder for chapter 1 split tests');
   });
 
-  it('marker on last body line splits, marker line in lower half', () => {
+  it('marker on last body line splits, marker line in lower half (zombie guard skips empty lower half)', () => {
+    // marker 行作为下半段标题,下半段没正文 → zombie 防御不 push 空章节,
+    // 但上半段照常 push。期望 out.length = 2(只有上半段 + segs[1]),不出现 0 字章节。
     const text = 'T1\nbody line 1 placeholder for chapter 1 split tests\nbody line 2 placeholder for chapter 1 split tests\nT2\nbody line 1 placeholder for chapter 2 split tests\n';
     const segs = [seg('T1', 'body line 1 placeholder for chapter 1 split tests\nbody line 2 placeholder for chapter 1 split tests'), seg('T2', 'body line 1 placeholder for chapter 2 split tests')];
     const out = splitChaptersByMarkers(segs, ['2'], text);
-    expect(out).toHaveLength(3);
+    expect(out).toHaveLength(2);
+    expect(out[0]?.title).toBe('T1');
     expect(out[0]?.content).toBe('body line 1 placeholder for chapter 1 split tests');
-    expect(out[1]?.content).toBe('body line 2 placeholder for chapter 1 split tests');
+    expect(out[1]?.title).toBe('T2');
+    expect(out[1]?.content).toBe('body line 1 placeholder for chapter 2 split tests');
+    for (const s of out) expect(s.word_count).toBeGreaterThan(0);
   });
 
   it('marker on title line does not split', () => {
@@ -60,23 +67,28 @@ describe('splitChaptersByMarkers', () => {
     expect(out[1]?.content).toBe('body line 1 placeholder for chapter 2 split tests\nbody line 2 placeholder for chapter 2 split tests');
   });
 
-  it('multiple markers in same chapter produce three parts', () => {
+  it('multiple markers in same chapter: each marker line is its own title', () => {
     const text = 'T1\nbody line 1 for multi-split test\nbody line 2 for multi-split test\nbody line 3 for multi-split test\nbody line 4 for multi-split test\nbody line 5 for multi-split test\n';
     const segs = [seg('T1', 'body line 1 for multi-split test\nbody line 2 for multi-split test\nbody line 3 for multi-split test\nbody line 4 for multi-split test\nbody line 5 for multi-split test')];
     const out = splitChaptersByMarkers(segs, ['2', '4'], text);
     expect(out).toHaveLength(3);
+    expect(out[0]?.title).toBe('T1');
     expect(out[0]?.content).toBe('body line 1 for multi-split test');
-    expect(out[1]?.content).toBe('body line 2 for multi-split test\nbody line 3 for multi-split test');
-    expect(out[2]?.content).toBe('body line 4 for multi-split test\nbody line 5 for multi-split test');
+    expect(out[1]?.title).toBe('body line 2 for multi-split test');
+    expect(out[1]?.content).toBe('body line 3 for multi-split test');
+    expect(out[2]?.title).toBe('body line 4 for multi-split test');
+    expect(out[2]?.content).toBe('body line 5 for multi-split test');
   });
 
-  it('first chapter body starting at idx = 0', () => {
+  it('first chapter body starting at idx = 0: marker line becomes title', () => {
     const text = 'body line 1 placeholder for chapter 1 split tests\nbody line 2 placeholder for chapter 1 split tests\nbody line 3 placeholder for chapter 1 split tests\n';
     const segs = [seg('(no title)', 'body line 1 placeholder for chapter 1 split tests\nbody line 2 placeholder for chapter 1 split tests\nbody line 3 placeholder for chapter 1 split tests')];
     const out = splitChaptersByMarkers(segs, ['1'], text);
     expect(out).toHaveLength(2);
+    expect(out[0]?.title).toBe('(no title)');
     expect(out[0]?.content).toBe('body line 1 placeholder for chapter 1 split tests');
-    expect(out[1]?.content).toBe('body line 2 placeholder for chapter 1 split tests\nbody line 3 placeholder for chapter 1 split tests');
+    expect(out[1]?.title).toBe('body line 2 placeholder for chapter 1 split tests');
+    expect(out[1]?.content).toBe('body line 3 placeholder for chapter 1 split tests');
   });
 
   it('marker out of range is ignored', () => {
@@ -93,7 +105,7 @@ describe('splitChaptersByMarkers', () => {
     expect(out).toHaveLength(1);
   });
 
-  it('marker only in second chapter body splits only that one', () => {
+  it('marker only in second chapter body: only that one splits', () => {
     const text = 'T1\nbody line 1 placeholder for chapter 1 split tests\nbody line 2 placeholder for chapter 1 split tests\nT2\nbody line 1 placeholder for chapter 2 split tests\nbody line 2 placeholder for chapter 2 split tests\nbody line 3 placeholder for chapter 2 split tests\nT3\nbody line 1 placeholder for chapter 3 split tests\n';
     const segs = [
       seg('T1', 'body line 1 placeholder for chapter 1 split tests\nbody line 2 placeholder for chapter 1 split tests'),
@@ -102,9 +114,13 @@ describe('splitChaptersByMarkers', () => {
     ];
     const out = splitChaptersByMarkers(segs, ['5'], text);
     expect(out).toHaveLength(4);
+    expect(out[0]?.title).toBe('T1');
     expect(out[0]?.content).toBe('body line 1 placeholder for chapter 1 split tests\nbody line 2 placeholder for chapter 1 split tests');
+    expect(out[1]?.title).toBe('T2');
     expect(out[1]?.content).toBe('body line 1 placeholder for chapter 2 split tests');
-    expect(out[2]?.content).toBe('body line 2 placeholder for chapter 2 split tests\nbody line 3 placeholder for chapter 2 split tests');
+    expect(out[2]?.title).toBe('body line 2 placeholder for chapter 2 split tests');
+    expect(out[2]?.content).toBe('body line 3 placeholder for chapter 2 split tests');
+    expect(out[3]?.title).toBe('T3');
     expect(out[3]?.content).toBe('body line 1 placeholder for chapter 3 split tests');
   });
 
@@ -283,20 +299,6 @@ describe('marker at chapter-title line', () => {
     expect(out[1]?.title).toBe("第2章：这是个误会");
   });
 
-  it("keeps (续) suffix when marker lands on a long non-title body line", () => {
-    // body 行超过 30 字 → 不算候选标题 → 下半段拿「(续)」后缀。
-    const longBody = "这是一段明显超过三十字符的正文段落用来确认它不会作为标题候选 中文扩展";
-    const raw = "T1\nbody1\n" + longBody + "\nbody3\n";
-    const segs = [{ title: "T1", content: "body1\n" + longBody + "\nbody3", word_count: 100 }];
-    // raw 行号：0=T1, 1=body1, 2=longBody, 3=body3 → marker 2 落在长 body 上
-    const out = splitChaptersByMarkers(segs, ["2"], raw);
-    expect(out).toHaveLength(2);
-    expect(out[0]?.title).toBe("T1");
-    expect(out[0]?.content).toBe("body1");
-    expect(out[1]?.title).toBe("T1" + "\u201C\uFF08\u7EED\uFF09\u201D");
-    expect(out[1]?.content).toBe(longBody + "\nbody3");
-  });
-
   it("short non-title body line becomes the new chapter title", () => {
     // 用户报告：在「咚 咚 咚 ！」之类的短句上点「章」→ 期望成为新章节标题,
     // 而不是退化成「(续)」。
@@ -311,27 +313,31 @@ describe('marker at chapter-title line', () => {
     expect(out[1]?.content).toBe("body3");
   });
 
-  it("consecutive non-title markers stack (续) on the previous pushed title", () => {
-    // 多段切分都落在长 body 行上(全是非标题),第二段应该是「上一段标题 + (续)」,
-    // 而不是退化成「seg.title + (续)」(那样会让所有分段都长得一样)。
-    const longBody = "这是一段明显超过三十字符的正文段落用来确认它不会作为标题候选 中文扩展";
-    const raw = "T1\nbody line 1 for multi-split test\n" + longBody + "\n" + longBody + "\n" + longBody + "\n";
-    const segs = [{ title: "T1", content: "body line 1 for multi-split test\n" + longBody + "\n" + longBody + "\n" + longBody, word_count: 100 }];
-    // raw 行号：0=T1, 1=body line 1 for multi-split test, 2/3/4=三个长 body 行
-    // markers 2, 3 → 在第 2 / 3 个长 body 行处切,共三段。
-    const out = splitChaptersByMarkers(segs, ["2", "3"], raw);
-    expect(out).toHaveLength(3);
+
+
+
+  it("blank-line marker is dropped silently (no suffix, no split)", () => {
+    const raw = "T1\nbody1\n\nbody3\n";
+    const segs = [{ title: "T1", content: "body1\n\nbody3", word_count: 100 }];
+    const out = splitChaptersByMarkers(segs, ["2"], raw);
+    expect(out).toHaveLength(1);
     expect(out[0]?.title).toBe("T1");
-    expect(out[0]?.content).toBe("body line 1 for multi-split test");
-    // 第一处切 → 上一段标题是 seg.title → 第二段标题是「T1(续)」
-    expect(out[1]?.title).toBe("T1" + "\u201C\uFF08\u7EED\uFF09\u201D");
-    expect(out[1]?.content).toBe(longBody);
-    // 第二处切 → 上一段标题已是「T1(续)」 → 第三段再叠一次。
-    expect(out[2]?.title).toBe("T1" + "\u201C\uFF08\u7EED\uFF09\u201D" + "\u201C\uFF08\u7EED\uFF09\u201D");
-    expect(out[2]?.content).toBe(longBody + "\n" + longBody);
+    expect(out[0]?.content).toBe("body1\n\nbody3");
   });
 
-
+  it("blank-line marker mixed with valid marker: only valid splits", () => {
+    const raw = "T1\nbody1\n\n咚 咚 咚 ！\nbody3\n";
+    const segs = [{ title: "T1", content: "body1\n\n咚 咚 咚 ！\nbody3", word_count: 100 }];
+    const out = splitChaptersByMarkers(segs, ["2", "3"], raw);
+    expect(out).toHaveLength(2);
+    expect(out[0]?.title).toBe("T1");
+    // 上半段 = segLines[0..2] = "body1" + 空行,join = "body1\n"
+    // 空行 marker 默默丢掉但不影响 partStart —— 这是有意为之的简单语义,
+    // 复杂语义("空行 marker 自动合并到下一个非空 marker")留给后续 if 决定。
+    expect(out[0]?.content).toBe("body1\n");
+    expect(out[1]?.title).toBe("咚 咚 咚 ！");
+    expect(out[1]?.content).toBe("body3");
+  });
 
   it("does not push 0-word zombie chapter when marker hits last body line and that line is short title candidate", () => {
     // 场景:marker 落在 body 的最后一行,且该行 ≤30 字 → parseChapterTitle 视为下一段标题候选。
@@ -461,25 +467,4 @@ describe('mergeSuppressed + splitChaptersByMarkers round trip', () => {
   });
 
   /// 多个 marker 在同一 chapter 里:分别产生多段,标题累加 "(续)" 后缀。
-  it('multiple markers in merged chapter produce multiple parts with (续) suffix', () => {
-    // 这里用明顯超过三十字符的 body 作为分割点(parseChapterTitle 不会把它当标题)
-    // —— 期望连续切两处后,下半段标题累加「(续)」后缀。
-    const long = '这是一段明显超过三十字符的正文段落用来确认它不会作为标题候选';
-    const text = '第一章：开篇\n1. body line 一\n' + long + '\n' + long + '\n' + long + '\n' + long + '\n';
-    const merged = [{
-      title: '第一章：开篇',
-      content: '1. body line 一\n' + long + '\n' + long + '\n' + long + '\n' + long,
-      word_count: 5,
-    }];
-    // raw 行号:0=第一章, 1='1. body line 一', 2/3/4/5 四个长 body 行
-    // markers 2 和 3 在相邻两个长 body 行切,期望 3 段;后两段标题累加 (续)。
-    const out = splitChaptersByMarkers(merged, ['2', '3'], text);
-    expect(out).toHaveLength(3);
-    expect(out[0].title).toBe('第一章：开篇');
-    expect(out[0].content).toBe('1. body line 一');
-    expect(out[1].title).toBe('第一章：开篇\u201C\uFF08\u7EED\uFF09\u201D');
-    expect(out[1].content).toBe(long);
-    expect(out[2].title).toBe('第一章：开篇\u201C\uFF08\u7EED\uFF09\u201D\u201C\uFF08\u7EED\uFF09\u201D');
-    expect(out[2].content).toBe(long + '\n' + long + '\n' + long);
-  });
 });
