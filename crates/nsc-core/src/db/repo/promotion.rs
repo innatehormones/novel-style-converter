@@ -219,6 +219,9 @@ mod tests {
             transformation_novel_id: tn_id,
             label: Some("w1".into()),
             on_failure_policy: OnFailurePolicy::PauseAndReview,
+            prompt_id: 1, model_config_id: 1, mode: "compress".into(),
+            ctx_prev_original: 0, ctx_prev_transformed: 0,
+            ctx_next_original: 0, ctx_next_transformed: 0,
         }).unwrap();
         let mut tc_ids = vec![];
         for i in 0..3 {
@@ -273,6 +276,9 @@ mod tests {
             transformation_novel_id: tn_id,
             label: Some("w1".into()),
             on_failure_policy: OnFailurePolicy::PauseAndReview,
+            prompt_id: 1, model_config_id: 1, mode: "compress".into(),
+            ctx_prev_original: 0, ctx_prev_transformed: 0,
+            ctx_next_original: 0, ctx_next_transformed: 0,
         }).unwrap();
         let chapter_id = db.chapters().insert(&NewChapter {
             data_asset_id: da_id,

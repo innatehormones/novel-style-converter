@@ -382,6 +382,9 @@ mod tests {
         let b1 = db.batches().insert(&NewBatch {
             transformation_novel_id: tn1_id, label: Some("w1".into()),
             on_failure_policy: OnFailurePolicy::PauseAndReview,
+            prompt_id: 1, model_config_id: 1, mode: "compress".into(),
+            ctx_prev_original: 0, ctx_prev_transformed: 0,
+            ctx_next_original: 0, ctx_next_transformed: 0,
         }).unwrap();
         let c1 = db.chapters().insert(&NewChapter {
             data_asset_id: da1_id, idx: 1, title: "c1".into(),
@@ -409,6 +412,9 @@ mod tests {
         let b2 = db.batches().insert(&NewBatch {
             transformation_novel_id: tn2_id, label: Some("w2".into()),
             on_failure_policy: OnFailurePolicy::PauseAndReview,
+            prompt_id: 1, model_config_id: 1, mode: "compress".into(),
+            ctx_prev_original: 0, ctx_prev_transformed: 0,
+            ctx_next_original: 0, ctx_next_transformed: 0,
         }).unwrap();
         let c2 = db.chapters().insert(&NewChapter {
             data_asset_id: da2_id, idx: 1, title: "c2".into(),
