@@ -3,7 +3,7 @@
     <div class="ov-kind"><IconRefreshCw :size="14" :stroke-width="2.2" /> 工作流</div>
     <div class="ov-title">{{ data.title }}</div>
     <div class="ov-row">
-      <span class="status-pill" v-if="data.status">{{ formatBatchStatus(data.status as any) }}</span>
+      <span class="status-pill" v-if="data.status">{{ formatBatchStatus(data.status) }}</span>
       <span class="ov-meta" v-if="data.meta">{{ data.meta }}</span>
     </div>
   </div>
@@ -13,8 +13,9 @@
 import { computed } from 'vue';
 import IconRefreshCw from '~icons/lucide/refresh-cw';
 import { formatBatchStatus } from '../../utils/status-locale';
+import type { WorkflowStatus } from '../../ipc/types';
 
-const props = defineProps<{ data: { title: string; status?: string | null; meta?: string | null } }>();
+const props = defineProps<{ data: { title: string; status?: WorkflowStatus | null; meta?: string | null } }>();
 
 const STATUS_MAP: Record<string, string> = {
   running: 'running',
