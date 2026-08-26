@@ -22,6 +22,7 @@ import type {
   AiCallLog, AiCallLogFilter, AiCallLogPage,
   ChapterPreviewRow, CommitPreviewInput, RegeneratePreviewInput,
   PreviewFirstChapterInput, PreviewFirstChapterOutput, PreviewFirstChapter,
+  AppendChaptersToBatchPayload, AppendChaptersResult,
 } from './types';
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -388,4 +389,11 @@ export function previewFirstChapter(
   input: PreviewFirstChapterInput,
 ): Promise<PreviewFirstChapterOutput> {
   return invoke<PreviewFirstChapterOutput>('preview_first_chapter', { input });
+}
+
+export function appendChaptersToBatch(payload: AppendChaptersToBatchPayload): Promise<AppendChaptersResult> {
+  return invoke<AppendChaptersResult>('append_chapters_to_batch', {
+    batchId: payload.batchId,
+    chapterIds: payload.chapterIds,
+  });
 }

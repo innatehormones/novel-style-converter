@@ -632,3 +632,15 @@ export interface PreviewFirstChapter {
   tokens_in: number;
   tokens_out: number;
 }
+
+/// `append_chapters_to_batch` 入参。
+export type AppendChaptersToBatchPayload = {
+  batchId: number;
+  chapterIds: number[];
+};
+
+/// `append_chapters_to_batch` 返回。
+export interface AppendChaptersResult {
+  batch_id: number;
+  added_tc_ids: number[];
+}
