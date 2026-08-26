@@ -51,6 +51,9 @@ impl CreateWorkflowPayload {
             ctx_prev_original: self.ctx_prev_original,
             ctx_prev_transformed: self.ctx_prev_transformed,
             ctx_next_original: self.ctx_next_original,
+            // 前端 CreateWorkflowInput 暂无 ctx_next_transformed 字段 —— 默认 0(无后文),
+            // 与 transformation_chapters 列在 schema 0028 后保持一致(详见 batch.rs 同质配置迁移)。
+            ctx_next_transformed: 0,
             on_failure_policy,
             preview_first_chapter: self.preview_first_chapter.map(|p| nsc_core::models::transformation::PreviewFirstChapter {
                 content: p.content,
