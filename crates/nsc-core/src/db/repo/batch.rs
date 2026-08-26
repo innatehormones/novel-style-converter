@@ -34,10 +34,22 @@ impl<'a> BatchRepo<'a> {
     }
 
     pub fn get(&self, id: i64) -> Result<Option<Batch>> {
+        // COALESCE for the 7 fields added in migration 0029 — schema 是 nullable,
+        // Batch struct 字段是 i32 / i64 / String(非 Option),read 端遇到 NULL 直接抛
+        // Invalid column type Null(migration 0029 backfill 引用了不存在的
+        // transformation_chapters.ctx_next_transformed → ctx_next_transformed 永远 NULL)。
+        // COALESCE 是「schema nullable 时安全降级到 i32 默认值 0 / i64 默认值 0 /
+        // mode 默认 'compress'」,0 = ctx_next_transformed 的「无后文」语义,与
+        // WorkflowCreate 默认值(commit 1a7d845)对齐;不是 fallback。
         let mut stmt = self.conn.prepare(
             "SELECT id, transformation_novel_id, label, on_failure_policy, status, created_at, started_at, ended_at, \
-              prompt_id, model_config_id, mode, \
-              ctx_prev_original, ctx_prev_transformed, ctx_next_original, ctx_next_transformed \
+              COALESCE(prompt_id, 0) AS prompt_id, \
+              COALESCE(model_config_id, 0) AS model_config_id, \
+              COALESCE(mode, 'compress') AS mode, \
+              COALESCE(ctx_prev_original, 0) AS ctx_prev_original, \
+              COALESCE(ctx_prev_transformed, 0) AS ctx_prev_transformed, \
+              COALESCE(ctx_next_original, 0) AS ctx_next_original, \
+              COALESCE(ctx_next_transformed, 0) AS ctx_next_transformed \
              FROM batches WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -45,10 +57,17 @@ impl<'a> BatchRepo<'a> {
     }
 
     pub fn list_by_tn(&self, tn_id: i64) -> Result<Vec<Batch>> {
+        // 同 get() 的 COALESCE 注释 —— 7 个新增列 schema nullable,read 端做 NULL→默认值
+        // 安全降级,避免 batch_from_row 抛 Invalid column type Null。
         let mut stmt = self.conn.prepare(
             "SELECT id, transformation_novel_id, label, on_failure_policy, status, created_at, started_at, ended_at, \
-              prompt_id, model_config_id, mode, \
-              ctx_prev_original, ctx_prev_transformed, ctx_next_original, ctx_next_transformed \
+              COALESCE(prompt_id, 0) AS prompt_id, \
+              COALESCE(model_config_id, 0) AS model_config_id, \
+              COALESCE(mode, 'compress') AS mode, \
+              COALESCE(ctx_prev_original, 0) AS ctx_prev_original, \
+              COALESCE(ctx_prev_transformed, 0) AS ctx_prev_transformed, \
+              COALESCE(ctx_next_original, 0) AS ctx_next_original, \
+              COALESCE(ctx_next_transformed, 0) AS ctx_next_transformed \
              FROM batches WHERE transformation_novel_id = ?1 ORDER BY id DESC",
         )?;
         let rows = stmt.query_map(params![tn_id], batch_from_row)?;

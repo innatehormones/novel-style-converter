@@ -29,4 +29,8 @@ pub const SCHEMAS: &[(&str, &str)] = &[
     ("0028_chapter_title_line", include_str!("../../../../migrations/0028_chapter_title_line.sql")),
     // 注:此条 key 与文件名错位(`0028_` vs `0029_`),见 migration 文件顶部注释。
     ("0028_batch_homogeneous_config", include_str!("../../../../migrations/0029_batch_homogeneous_config.sql")),
+    // 注:此条 key 与文件名错位(`0029_` vs `0030_`),见 migration 文件顶部注释。
+    // 修复 0029 backfill 引用不存在的 transformation_chapters.ctx_next_transformed
+    // 列导致所有 batches.ctx_next_transformed 留 NULL 的问题。
+    ("0029_backfill_batches_ctx_next_transformed", include_str!("../../../../migrations/0030_backfill_batches_ctx_next_transformed.sql")),
 ];
