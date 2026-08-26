@@ -232,13 +232,17 @@ const workflows = computed<WorkflowSummary[]>(() => workflowsQuery.data.value ??
 watch(
   () => [workflowsQuery.data.value, workflowsQuery.isPending.value, workflowsQuery.isError.value, tnId.value],
   ([data, isPending, isError, id]) => {
+    const err = workflowsQuery.error.value;
     console.log('[DEBUG workflowsQuery reactive]', {
       tnId: id,
       dataLength: Array.isArray(data) ? data.length : 'not-array',
+      dataType: Array.isArray(data) ? 'array' : (data === null ? 'null' : typeof data),
       workflowIds: Array.isArray(data) ? data.map((w) => w.id) : null,
       isPending,
       isError,
-      error: workflowsQuery.error.value?.message ?? null,
+      errorFull: err,                  // ← show the whole error object, not just message
+      errorJSON: err ? JSON.stringify(err, Object.getOwnPropertyNames(err)) : null,  // ← catch non-enumerable fields
+      errorKeys: err ? Object.keys(err) : [],
     });
   },
   { immediate: true, deep: true },
