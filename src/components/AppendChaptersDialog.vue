@@ -316,7 +316,7 @@ function onConfirm() {
   --lit-rule: var(--border-color);
   --lit-rule-soft: var(--border-soft);
   --lit-vermillion: var(--color-cinnabar);
-  --lit-chapter-num: 24px;
+  --lit-chapter-num: 1em;
 
   position: relative;
   width: 900px;
