@@ -746,9 +746,12 @@ impl BatchScheduler {
         })
     }
 
-    /// append chapters 到 stopped batch —— 校验 + 去重骨架。
-    /// Task 4 末尾完整实现:4. 事务(insert tc + wrc 空槽 + set_status(Running))
-    /// 5. dispatch 每个新 tc 6. advance_batch 兜底。
+    /// append chapters 到 stopped batch —— spec §3.4 / Task 4 完整实现。
+    /// 1. 校验 batch 存在 + status==Stopped
+    /// 2. 校验 chapter_ids 都属于 tn.data_asset
+    /// 3. 去重:剔除已在 batch 中的章节
+    /// 4. 事务:insert tc + wrc 空槽 + set_status(Running)
+    /// 5. 提交后 dispatch 每个新 tc;advance_batch 兜底
     pub fn append_chapters_to_batch(
         &self,
         batch_id: i64,
@@ -784,7 +787,65 @@ impl BatchScheduler {
         if to_add.is_empty() {
             return Err(Error::Validation("所选章节全部已在工作流中".into()));
         }
-        Ok(to_add)
+        // 4. 事务:insert tc + wrc 空槽 + set_status(Running)。
+        // 全部走 tx.execute —— 持锁时再调 self.db.foo() 会让 std::sync::Mutex 非可重入 → 死锁。
+        let now = Utc::now().to_rfc3339();
+        let mut new_tc_ids: Vec<i64> = Vec::with_capacity(to_add.len());
+        {
+            let _bsg = self.db.lock();
+            let tx = _bsg.unchecked_transaction()?;
+            for &cid in &to_add {
+                tx.execute(
+                    "INSERT INTO transformation_chapters \
+                     (transformation_novel_id, chapter_id, mode, prompt_id, model_config_id, \
+                      ctx_prev_original, ctx_prev_transformed, ctx_next_original, \
+                      batch_id, style_ref_chapter_id, status) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, 'pending')",
+                    rusqlite::params![
+                        batch.transformation_novel_id, cid, batch.mode.as_str(),
+                        batch.prompt_id, batch.model_config_id,
+                        batch.ctx_prev_original, batch.ctx_prev_transformed,
+                        batch.ctx_next_original,
+                        batch_id,
+                    ],
+                )?;
+                new_tc_ids.push(tx.last_insert_rowid());
+            }
+            // workflow_results + 空槽 —— inline create_for_batch_with_slots 语义。
+            tx.execute(
+                "INSERT OR IGNORE INTO workflow_results (batch_id, created_at) VALUES (?1, ?2)",
+                rusqlite::params![batch_id, now],
+            )?;
+            let result_id: i64 = tx.query_row(
+                "SELECT id FROM workflow_results WHERE batch_id = ?1",
+                rusqlite::params![batch_id], |r| r.get(0),
+            )?;
+            for &cid in &to_add {
+                tx.execute(
+                    "INSERT OR IGNORE INTO workflow_result_chapters \
+                     (workflow_result_id, chapter_id, content, created_at, updated_at) \
+                     VALUES (?1, ?2, NULL, ?3, ?3)",
+                    rusqlite::params![result_id, cid, now],
+                )?;
+            }
+            // batch 状态迁移 stopped → running(等价于 set_status(Running),inline 后不需重新 lock)。
+            tx.execute(
+                "UPDATE batches SET status='running', started_at=COALESCE(started_at, ?2), ended_at=NULL WHERE id=?1",
+                rusqlite::params![batch_id, now],
+            )?;
+            tx.commit()?;
+        }
+        // 5. 入队每个新 tc —— 复用 create_workflow advance_batch 里的 dispatch 路径。
+        let prompt = self.db.prompts().get(batch.prompt_id)?
+            .ok_or_else(|| Error::NotFound(format!("prompt {} 不存在", batch.prompt_id)))?;
+        let model = self.db.model_configs().get(batch.model_config_id)?
+            .ok_or_else(|| Error::NotFound(format!("model_config {} 不存在", batch.model_config_id)))?;
+        for &tc_id in &new_tc_ids {
+            self.dispatch(&prompt, &model, tc_id)?;
+        }
+        // 6. advance_batch 兜底:确保 batch 内剩余 pending tc 也被派。
+        self.advance_batch(&self.db, batch_id)?;
+        Ok(new_tc_ids)
     }
 }
 
