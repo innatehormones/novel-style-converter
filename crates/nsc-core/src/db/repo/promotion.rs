@@ -3,8 +3,9 @@ use chrono::Utc;
 use rusqlite::params;
 use crate::error::{Error, Result};
 use crate::models::{DataAsset, DataAssetKind};
-/// promotion 一次 SELECT 读出的行:(tc_id, chapter_id, tc_status, idx, title, body, word_count, wrc_content)。
-type PromotionRow = (i64, i64, String, i32, String, String, i32, Option<String>);
+/// promotion 一次 SELECT 读出的行:(tc_id, chapter_id, tc_status, idx, title, body, wrc_content)。
+/// word_count 不再读 —— promote 落库的字数从实际 body 重算,跟落库的 body 永远一致。
+type PromotionRow = (i64, i64, String, i32, String, String, Option<String>);
 
 pub struct PromotionRepo<'a> { pub(crate) conn: MutexGuard<'a, rusqlite::Connection> }
 
@@ -45,7 +46,7 @@ impl<'a> PromotionRepo<'a> {
         let rows: Vec<PromotionRow> = {
             let mut stmt = tx.prepare(
                 "SELECT tc.id, tc.chapter_id, tc.status,
-                        c.idx, c.title, c.body, c.word_count,
+                        c.idx, c.title, c.body,
                         wrc.content
                  FROM transformation_chapters tc
                  JOIN chapters c ON c.id = tc.chapter_id
@@ -56,7 +57,7 @@ impl<'a> PromotionRepo<'a> {
             )?;
             let collected = stmt.query_map(params![batch_id], |r| Ok((
                 r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?,
-                r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?,
+                r.get(4)?, r.get(5)?, r.get(6)?,
             )))?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             drop(stmt);
@@ -67,7 +68,7 @@ impl<'a> PromotionRepo<'a> {
         }
 
         // 4. 前置校验
-        for (tc_id, _cid, tc_status, _idx, _t, _b, _wc, wrc_content) in &rows {
+        for (tc_id, _cid, tc_status, _idx, _t, _b, wrc_content) in &rows {
             match tc_status.as_str() {
                 "done" => {
                     if wrc_content.is_none() {
@@ -95,17 +96,18 @@ impl<'a> PromotionRepo<'a> {
         let new_da_id = tx.last_insert_rowid();
 
         // 6. INSERT N 个 chapter
-        for (_tc_id, chapter_id, tc_status, idx, chapter_title, chapter_body, word_count, wrc_content) in &rows {
+        for (_tc_id, chapter_id, tc_status, idx, chapter_title, chapter_body, wrc_content) in &rows {
             let (body, source_kind) = if tc_status == "done" {
                 (wrc_content.as_ref().unwrap().clone(), "transformed")
             } else {
                 (chapter_body.clone(), "original")
             };
+            let body_word_count = crate::text::word_count(&body) as i32;
             tx.execute(
                 "INSERT INTO chapters
                     (data_asset_id, idx, title, body, word_count, source_kind, source_chapter_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![new_da_id, idx, chapter_title, body, word_count, source_kind, chapter_id],
+                params![new_da_id, idx, chapter_title, body, body_word_count, source_kind, chapter_id],
             )?;
         }
 
