@@ -746,14 +746,9 @@ impl BatchScheduler {
         })
     }
 
-    /// append chapters 到 stopped batch(spec §3.4 / Task 3-4)。
-    /// 1. 校验 batch 存在 + status==Stopped
-    /// 2. 校验 chapter_ids 都属于 tn.data_asset
-    /// 3. 去重:剔除已在 batch 中的章节
-    /// 4. 事务:insert tc + insert wrc 空槽 + set_status(Running)
-    /// 5. 提交
-    /// 6. 对每个新 tc 调 self.dispatch(prompt, model, tc_id) 入队
-    /// 7. 调 advance_batch 兜底
+    /// append chapters 到 stopped batch —— 校验 + 去重骨架。
+    /// Task 4 末尾完整实现:4. 事务(insert tc + wrc 空槽 + set_status(Running))
+    /// 5. dispatch 每个新 tc 6. advance_batch 兜底。
     pub fn append_chapters_to_batch(
         &self,
         batch_id: i64,
@@ -789,7 +784,6 @@ impl BatchScheduler {
         if to_add.is_empty() {
             return Err(Error::Validation("所选章节全部已在工作流中".into()));
         }
-        // (Step 5/6/7 待续 Task 4)
         Ok(to_add)
     }
 }

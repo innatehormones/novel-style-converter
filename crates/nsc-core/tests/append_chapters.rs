@@ -99,19 +99,3 @@ fn list_existing_tcs_by_batch() {
     assert!(!tc_chapter_ids.contains(&cids[2]));
 }
 
-#[test]
-fn da_chapter_set_excludes_other_da_chapters() {
-    // 准备两个 da:DA1 含 cids[0..2],DA2 含 cids[2..3]
-    // 验证 list_by_data_asset 只返回该 da 的章节。
-    let (_db, _tn_id, _cids) = seed_env();
-    // 这一步需要第二个 da;留到 Task 4 完整测试时做。
-    let _ = (_db, _tn_id, _cids);
-}
-
-#[test]
-fn test_placeholder_for_compilation() {
-    // 真实测试在 Task 4(完整实现)与 Task 9(vitest)阶段加。
-    // 本 Task 3 只验证 append_chapters_to_batch 方法骨架编译过且类型对。
-    let _ = seed_env;
-    let _ = insert_batch_with_status;
-}
