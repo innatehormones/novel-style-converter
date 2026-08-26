@@ -881,10 +881,14 @@ mod tests {
         let _bsg = db.lock();
         let tx = _bsg.unchecked_transaction().unwrap();
         tx.execute(
-            "INSERT INTO batches (transformation_novel_id, label, on_failure_policy, status, created_at, started_at) \
-             VALUES (?1, ?2, ?3, \"running\", ?4, ?4)",
+            "INSERT INTO batches \
+             (transformation_novel_id, label, on_failure_policy, status, created_at, started_at, \
+              prompt_id, model_config_id, mode, \
+              ctx_prev_original, ctx_prev_transformed, ctx_next_original, ctx_next_transformed) \
+             VALUES (?1, ?2, ?3, \"running\", ?4, ?4, ?5, ?6, \"compress\", 0, 0, 0, 0)",
             rusqlite::params![
                 tn_id, "test", "pause_and_review", now,
+                prompt_id, model_id,
             ],
         ).unwrap();
         let batch_id = tx.last_insert_rowid();

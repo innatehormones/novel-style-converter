@@ -56,7 +56,7 @@ impl<'a> BatchRepo<'a> {
     }
 
     /// 设 status 同时自动维护 started_at / ended_at 时间戳。
-    /// - Running:started_at 已有则不动,首次写入。
+    /// - Running:started_at 已有则不动,首次写入;**ended_at 清空**(stopped → running 转移语义)。
     /// - Completed/Terminated/Cancelled/Stopped:ended_at 设 NOW。
     /// - 其它:仅改 status。
     pub fn set_status(&self, id: i64, status: BatchStatus) -> Result<()> {
