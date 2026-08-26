@@ -188,7 +188,7 @@ const configLine = computed<string>(() => [
   props.mode,
   props.promptName,
   `前文原文 ×${props.ctxPrevOriginal}`,
-  `前文转撰 ×${props.ctxPrevTransformed}`,
+  `前文转换 ×${props.ctxPrevTransformed}`,
   `后文原文 ×${props.ctxNextOriginal}`,
 ].join(' · '));
 
@@ -316,6 +316,7 @@ function onConfirm() {
   --lit-rule: var(--border-color);
   --lit-rule-soft: var(--border-soft);
   --lit-vermillion: var(--color-cinnabar);
+  --lit-chapter-num: 24px;
 
   position: relative;
   width: 900px;
@@ -511,7 +512,7 @@ function onConfirm() {
 }
 .num {
   font-family: var(--font-mono);
-  font-size: var(--text-display);
+  font-size: var(--lit-chapter-num);
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
   text-align: right;

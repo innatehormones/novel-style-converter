@@ -143,7 +143,7 @@ describe('AppendChaptersDialog: literary / catalog redesign (RED)', () => {
     const txt = config.text();
     expect(txt).toContain('compress');
     expect(txt).toContain('前文原文');
-    expect(txt).toContain('前文转撰');
+    expect(txt).toContain('前文转换');
     expect(txt).toContain('后文原文');
     // · 分隔符必须出现至少 3 次(把 4 段串起来)
     const dotCount = (txt.match(/·/g) ?? []).length;
