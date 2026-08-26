@@ -88,6 +88,18 @@ pub struct WorkflowSummary {
     pub skipped_count: i64,
     pub total_count: i64,
     pub promoted_count: i64,
+    // append_chapters spec §3.2 / Task 8:
+    // - `prompt_name` / `model_display_name` 来自 batch 同质配置字段的 JOIN,
+    //   缺失时(archived=1 或已物理删除的 prompt/model)fallback 为空串;
+    //   UI 的 AppendChaptersDialog 上下文展示位只用显示语义,不要求强非空。
+    // - `mode` 是 batch 字段("compress" / "style"),直接 clone,不再做归一化。
+    // - 三个 ctx_* 是 batch 字段,stopped batch append 时 dialog 拿来确认"沿用旧配置"。
+    pub prompt_name: String,
+    pub model_display_name: String,
+    pub mode: String,
+    pub ctx_prev_original: i32,
+    pub ctx_prev_transformed: i32,
+    pub ctx_next_original: i32,
 }
 
 #[derive(Debug, Serialize)]
@@ -147,22 +159,34 @@ fn parse_transform_status(s: &str) -> Result<TransformStatus, String> {
 }
 
 fn to_summary(db: &Db, b: &Batch) -> WorkflowSummary {
-    // 单 SQL JOIN 一次拿完 5 个聚合:tc status 计数 + promoted da 计数。
-    // 旧实现拆成 2 次 db.lock() 各跑一次 SQL,每次跨 mutex 序列化往返。
-    // list_workflows 调 to_summary N 次,旧 = 2N 次锁;新 = N 次锁。
-    // 在 tn 下 batch 数较多时,refetch 路径(list_workflows / invalidate 后的
-    // vue-query 重 fetch)总开销减半。
-    let (done, failed, skipped, total, promoted_count): (i64, i64, i64, i64, i64) = db.lock().query_row(
+    // 单 SQL 一次拿完 5 个聚合 + 2 个 JOIN 的名称:tc status 计数、promoted da 计数、
+    // prompt / model name(spec §3.2 同质配置 join)。
+    // list_workflows 调 to_summary N 次,保持 N=1 次 db.lock(),不引入额外锁往返;
+    // prompt_name / model_display_name 用 SELECT-list 子查询(常量输入),SQLite 按主键
+    // lookup 单行,O(1) 开销可忽略。
+    //
+    // prompt / model 名字用 COALESCE 兜底:archived=1 的行仍然存在可 join,只有物理
+    // 删除才会 NULL;UI 上下文展示位不要求强非空,空串显示更直白。
+    let lk = db.lock();
+    let (done, failed, skipped, total, promoted_count, prompt_name, model_display_name): (
+        i64, i64, i64, i64, i64, String, String,
+    ) = lk.query_row(
         "SELECT \
             COALESCE(SUM(CASE WHEN tc.status='done' THEN 1 ELSE 0 END), 0), \
             COALESCE(SUM(CASE WHEN tc.status='failed' THEN 1 ELSE 0 END), 0), \
             COALESCE(SUM(CASE WHEN tc.status='skipped' THEN 1 ELSE 0 END), 0), \
             COUNT(tc.id), \
-            COALESCE((SELECT COUNT(*) FROM data_assets WHERE source_workflow_id = ?1), 0) \
+            COALESCE((SELECT COUNT(*) FROM data_assets WHERE source_workflow_id = ?1), 0), \
+            COALESCE((SELECT name FROM prompts WHERE id = ?2), ''), \
+            COALESCE((SELECT name FROM model_configs WHERE id = ?3), '') \
          FROM transformation_chapters tc WHERE tc.batch_id = ?1",
-        rusqlite::params![b.id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-    ).unwrap_or((0, 0, 0, 0, 0));
+        rusqlite::params![b.id, b.prompt_id, b.model_config_id],
+        |row| Ok((
+            row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?,
+            row.get(5)?, row.get(6)?,
+        )),
+    ).unwrap_or((0, 0, 0, 0, 0, String::new(), String::new()));
+    drop(lk);
     WorkflowSummary {
         id: b.id,
         tn_id: b.transformation_novel_id,
@@ -176,6 +200,12 @@ fn to_summary(db: &Db, b: &Batch) -> WorkflowSummary {
         skipped_count: skipped,
         total_count: total,
         promoted_count,
+        prompt_name,
+        model_display_name,
+        mode: b.mode.clone(),
+        ctx_prev_original: b.ctx_prev_original,
+        ctx_prev_transformed: b.ctx_prev_transformed,
+        ctx_next_original: b.ctx_next_original,
     }
 }
 

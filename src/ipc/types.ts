@@ -269,6 +269,17 @@ export interface WorkflowSummary {
   skipped_count: number;
   total_count: number;
   promoted_count: number;
+  // 新增(append_chapters spec §3.2 / Task 8)—— 同质配置字段 join prompts/model_configs。
+  // - prompt_name / model_display_name:archived 或物理删除时,后端 fallback 为 ''。
+  //   UI 的 AppendChaptersDialog 仅用于展示上下文,空串视为"该来源已被清理"。
+  // - mode 跟 CreateWorkflowInput 一致('compress' / 'style')。
+  // - ctx_* 是 stopped batch append 时的"沿用旧配置"读端字段。
+  prompt_name: string;
+  model_display_name: string;
+  mode: 'compress' | 'style';
+  ctx_prev_original: number;
+  ctx_prev_transformed: number;
+  ctx_next_original: number;
 }
 
 /** `list_workflow_chapters` 杩斿洖:tc 琛?+ 绔犺妭鏍囬/idx + 鍏宠仈缁撴灉妲介瑙堛€?*/
