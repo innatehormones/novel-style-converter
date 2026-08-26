@@ -219,36 +219,7 @@ const workflowsQuery = useQuery({
   queryFn: () => listWorkflows(tnId.value),
   refetchInterval: 5000,
 });
-// DEBUG: workflow tab empty list — remove after fix confirmed
-console.log('[DEBUG workflowsQuery]', {
-  data: workflowsQuery.data.value,
-  isPending: workflowsQuery.isPending.value,
-  isError: workflowsQuery.isError.value,
-  error: workflowsQuery.error.value,
-  tnId: tnId.value,
-});
 const workflows = computed<WorkflowSummary[]>(() => workflowsQuery.data.value ?? []);
-// DEBUG: workflow tab empty list — remove after fix confirmed
-watch(
-  () => [workflowsQuery.data.value, workflowsQuery.isPending.value, workflowsQuery.isError.value, tnId.value],
-  ([data, isPending, isError, id]) => {
-    const err = workflowsQuery.error.value;
-    console.log('[DEBUG workflowsQuery reactive]', {
-      tnId: id,
-      dataLength: Array.isArray(data) ? data.length : 'not-array',
-      dataType: Array.isArray(data) ? 'array' : (data === null ? 'null' : typeof data),
-      workflowIds: Array.isArray(data) ? data.map((w) => w.id) : null,
-      isPending,
-      isError,
-      errorFull: err,                  // ← show the whole error object, not just message
-      errorJSON: err ? JSON.stringify(err, Object.getOwnPropertyNames(err)) : null,  // ← catch non-enumerable fields
-      errorKeys: err ? Object.keys(err) : [],
-    });
-  },
-  { immediate: true, deep: true },
-);
-// DEBUG: workflow tab empty list — remove after fix confirmed
-const _debugWorkflowsIds = computed<string>(() => workflows.value.map((w) => w.id).join(','));
 /// 章节来源 tab 表格自适应高度:监听 `main.app` 的尺寸变化,实时算出
 /// 章节来源 Tab 表格 + 工作流 Tab 表格共用 composable,统一从 main.app 计算可用高度。
 
@@ -888,11 +859,6 @@ watch(() => sources.value, (list) => {
 
     <!-- 工作流 tab -->
     <template v-else>
-      <!-- DEBUG: workflow tab empty list — remove after fix confirmed -->
-      <div style="background: yellow; padding: 4px; font-size: 11px; color: black;">
-        DEBUG: workflows.length={{ workflows.length }}, ids={{ _debugWorkflowsIds }}
-      </div>
-      <!-- /DEBUG -->
       <div v-if="workflows.length > 0" ref="workflowsTableEl" class="table-wrap">
       <DataTable
         :columns="workflowColumns"
