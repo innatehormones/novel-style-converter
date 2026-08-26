@@ -745,6 +745,53 @@ impl BatchScheduler {
             tokens_out: outcome.tokens_out,
         })
     }
+
+    /// append chapters 到 stopped batch(spec §3.4 / Task 3-4)。
+    /// 1. 校验 batch 存在 + status==Stopped
+    /// 2. 校验 chapter_ids 都属于 tn.data_asset
+    /// 3. 去重:剔除已在 batch 中的章节
+    /// 4. 事务:insert tc + insert wrc 空槽 + set_status(Running)
+    /// 5. 提交
+    /// 6. 对每个新 tc 调 self.dispatch(prompt, model, tc_id) 入队
+    /// 7. 调 advance_batch 兜底
+    pub fn append_chapters_to_batch(
+        &self,
+        batch_id: i64,
+        chapter_ids: Vec<i64>,
+    ) -> Result<Vec<i64>> {
+        if chapter_ids.is_empty() {
+            return Err(Error::Validation("至少选 1 章".into()));
+        }
+        // 1. 读 batch + 校验 status
+        let batch = self.db.batches().get(batch_id)?
+            .ok_or_else(|| Error::NotFound(format!("batch {batch_id} 不存在")))?;
+        if batch.status != BatchStatus::Stopped {
+            return Err(Error::Validation(format!(
+                "仅 stopped 工作流可追加章节(当前 {:?})", batch.status
+            )));
+        }
+        // 2. 读 tn + 校验 chapter_ids 属于 tn.data_asset
+        let tn = self.db.transformation_novels().get(batch.transformation_novel_id)?
+            .ok_or_else(|| Error::NotFound(format!("tn {} 不存在", batch.transformation_novel_id)))?;
+        let da_chapter_set: HashSet<i64> = self.db.chapters().list_by_data_asset(tn.data_asset_id)?
+            .iter().map(|c| c.id).collect();
+        for &cid in &chapter_ids {
+            if !da_chapter_set.contains(&cid) {
+                return Err(Error::Validation(format!(
+                    "chapter {cid} 不属于本 tn 的 data_asset {}", tn.data_asset_id
+                )));
+            }
+        }
+        // 3. 去重
+        let existing: HashSet<i64> = self.db.transformation_chapters().list_by_batch(batch_id)?
+            .iter().map(|tc| tc.chapter_id).collect();
+        let to_add: Vec<i64> = chapter_ids.iter().copied().filter(|c| !existing.contains(c)).collect();
+        if to_add.is_empty() {
+            return Err(Error::Validation("所选章节全部已在工作流中".into()));
+        }
+        // (Step 5/6/7 待续 Task 4)
+        Ok(to_add)
+    }
 }
 
 /// frontier 章节 id(spec §5.3):仅读当前工作流结果集里的最近非空 slot。
