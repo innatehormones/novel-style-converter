@@ -42,7 +42,7 @@
       </template>
       <template #cell-kind="{ row }">
         <Tag :kind="row.kind === 'compress' ? 'info' : 'success'">
-          {{ row.kind === 'compress' ? '压缩' : '文风' }}
+          {{ formatPromptKind(row.kind) }}
         </Tag>
       </template>
       <template #cell-builtin="{ row }">
@@ -107,6 +107,7 @@ import PageHeader from '../components/ui/PageHeader.vue';
 import PromptEditDialog from '../components/PromptEditDialog.vue';
 import PromptViewDialog from '../components/PromptViewDialog.vue';
 import { usePromptsStore } from '../stores/prompts';
+import { formatPromptKind } from '../utils/prompt-locale';
 import type { Prompt } from '../ipc/types';
 
 const store = usePromptsStore();

@@ -6,7 +6,7 @@
     </div>
     <div class="row">
       <label>kind</label>
-      <span class="value">{{ initial.kind === 'compress' ? '压缩' : '文风' }}</span>
+      <span class="value">{{ formatPromptKind(initial.kind) }}</span>
     </div>
     <div class="row column">
       <label>template</label>
@@ -28,6 +28,7 @@
 <script setup lang="ts">
 import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
+import { formatPromptKind } from '../utils/prompt-locale';
 import type { Prompt } from '../ipc/types';
 
 defineProps<{ initial: Prompt }>();

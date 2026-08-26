@@ -127,6 +127,7 @@ import { useQuery } from '@tanstack/vue-query';
 import Button from './ui/Button.vue';
 import { nextStack } from './ui/dialog-stack';
 import { listTransformationSourceChapters, listWorkflowChapters } from '../ipc/commands';
+import { formatPromptKind } from '../utils/prompt-locale';
 import type { SourceChapterRow, WorkflowChapterRow } from '../ipc/types';
 
 /// 「补充章节」对话框 spec(stopped-batch-append-chapters):
@@ -185,7 +186,7 @@ const firstAvailableIdx = computed<number>(() => availableSources.value[0]?.idx 
 
 /// 头部配置单行 mono —— 模式 / 提示词 / 三路上下文,用 · 串起来。
 const configLine = computed<string>(() => [
-  props.mode,
+  formatPromptKind(props.mode),
   props.promptName,
   `前文原文 ×${props.ctxPrevOriginal}`,
   `前文转换 ×${props.ctxPrevTransformed}`,
