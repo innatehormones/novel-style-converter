@@ -33,6 +33,7 @@ import { countWords, formatTime, formatWordCount } from '../utils/format';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import CreateBatchDialog from '../components/CreateBatchDialog.vue';
 import PromoteWorkflowDialog from '../components/PromoteWorkflowDialog.vue';
+import AppendChaptersDialog from '../components/AppendChaptersDialog.vue';
 import Dialog from '../components/ui/Dialog.vue';
 import DataTable from '../components/ui/DataTable.vue';
 import Tag from '../components/ui/Tag.vue';
@@ -108,7 +109,8 @@ const workflowWidths: Record<string, number> = {
   skipped: 80,
   created: 160,
   ended: 160,
-  actions: 200,
+  // 详情 + 补充章节 + 转正 + 删除 = 4 个 row-link + 3 个 separator,200 偏紧会换行。
+  actions: 280,
 };
 
 /// 工作流详情表格列
@@ -548,6 +550,30 @@ async function confirmStopWorkflow() {
   stopTargetId.value = null;
 }
 
+// 「补充章节」对话框状态 —— 仅 stopped batch 可 append(spec:stopped-batch-append-chapters)。
+// 父组件保存当前在 append 的 batch + dialog 开关;Dialog 内部走 store.appendChapters 实际提交。
+const appendOpen = ref(false);
+const appendTarget = ref<WorkflowSummary | null>(null);
+
+function askAppendChapters(w: WorkflowSummary) {
+  // 仅 stopped 可 append —— 其他状态后端会拒,UI 层先关掉入口。
+  if (w.status !== 'stopped') return;
+  appendTarget.value = w;
+  appendOpen.value = true;
+}
+
+async function onAppendConfirm(payload: { batchId: number; chapterIds: number[] }) {
+  try {
+    // store.appendChapters 内部已 invalidate ['workflowChapters', batchId] + ['workflows'],
+    // 父组件无需手动刷新。
+    await store.appendChapters(payload);
+    appendOpen.value = false;
+    appendTarget.value = null;
+  } catch (e: unknown) {
+    showAlert('补充失败', e instanceof Error ? e.message : String(e));
+  }
+}
+
 function canRetryChapter(c: WorkflowChapterRow): boolean {
   return c.status === 'failed' || c.status === 'skipped';
 }
@@ -862,6 +888,16 @@ watch(() => sources.value, (list) => {
         </template>
         <template #cell-actions="{ row }">
           <button type="button" class="row-link" @click="openWorkflowPanel(row)">详情</button>
+          <span class="row-sep" aria-hidden="true">·</span>
+          <!-- 补充章节:仅 stopped 可 append,沿用 batch 同质配置(prompt / model / ctx)。
+               askAppendChapters 在 UI 层再做一次前置校验,与按钮 disabled 对齐。 -->
+          <button
+            type="button"
+            class="row-link"
+            :disabled="row.status !== 'stopped'"
+            :title="row.status === 'stopped' ? '从 source data_asset 选若干章节追加到此 batch' : '该工作流尚未停止,无法追加章节'"
+            @click="askAppendChapters(row)"
+          >补充章节</button>
           <span class="row-sep" aria-hidden="true">·</span>
           <button
             type="button"
@@ -1182,6 +1218,22 @@ watch(() => sources.value, (list) => {
       :chapter-title="regenChapter.chapter_title"
       :tn-id="tnId"
       @committed="onPreviewCommitted"
+    />
+
+    <!-- 补充章节对话框:仅 stopped batch 可触发;状态/上下文展示由父组件传入
+         (appendTarget.prompt_name 等),Dialog 内部只做章节挑选 + emit confirm。 -->
+    <AppendChaptersDialog
+      v-if="appendOpen && appendTarget !== null"
+      v-model:open="appendOpen"
+      :batch-id="appendTarget.id"
+      :transformation-novel-id="tnId"
+      :prompt-name="appendTarget.prompt_name"
+      :model-display-name="appendTarget.model_display_name"
+      :mode="appendTarget.mode"
+      :ctx-prev-original="appendTarget.ctx_prev_original"
+      :ctx-prev-transformed="appendTarget.ctx_prev_transformed"
+      :ctx-next-original="appendTarget.ctx_next_original"
+      @confirm="onAppendConfirm"
     />
   </section>
 </template>
