@@ -5,7 +5,7 @@ use tauri::State;
 
 use nsc_core::db::Db;
 use nsc_core::models::{NewTransformationChapter, PromptKind, TransformStatus};
-use nsc_core::transformer::{JobQueue, JobSpec, QueueSnapshot};
+use nsc_core::transformer::{BatchScheduler, JobQueue, JobSpec, QueueSnapshot};
 
 #[derive(Debug, Serialize)]
 pub struct TransformationChapterRow {
@@ -261,4 +261,28 @@ pub fn enqueue_all_chapters(
 #[tauri::command]
 pub fn get_queue_snapshot(queue: State<'_, Arc<JobQueue>>) -> Result<QueueSnapshot, String> {
     Ok(queue.snapshot())
+}
+
+#[derive(Debug, Serialize)]
+pub struct AppendChaptersResult {
+    pub batch_id: i64,
+    pub added_tc_ids: Vec<i64>,
+}
+
+/// 把 chapter_ids 追加到 stopped batch(spec §3.4 / Task 3-4)。
+/// 薄层委派给 BatchScheduler::append_chapters_to_batch —— 不在此层
+/// 手撸事务、校验或入队,所有逻辑都跟 create_workflow 路径共用。
+#[tauri::command]
+pub fn append_chapters_to_batch(
+    scheduler: State<'_, Arc<BatchScheduler>>,
+    batch_id: i64,
+    chapter_ids: Vec<i64>,
+) -> Result<AppendChaptersResult, String> {
+    let tc_ids = scheduler
+        .append_chapters_to_batch(batch_id, chapter_ids)
+        .map_err(|e| e.to_string())?;
+    Ok(AppendChaptersResult {
+        batch_id,
+        added_tc_ids: tc_ids,
+    })
 }

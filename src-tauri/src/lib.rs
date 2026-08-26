@@ -151,6 +151,7 @@ pub fn run() {
             commands::transformations::enqueue_transformation_chapters,
             commands::transformations::enqueue_all_chapters,
             commands::transformations::get_queue_snapshot,
+            commands::transformations::append_chapters_to_batch,
             commands::prompts::list_prompts,
             commands::prompts::get_prompt,
             commands::prompts::upsert_prompt,
