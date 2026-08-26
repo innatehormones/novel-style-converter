@@ -7,8 +7,8 @@
     <div class="row">
       <label>kind *</label>
       <select v-model="kindRef" class="kind-select">
-        <option value="compress">压缩</option>
-        <option value="style">文风</option>
+        <option value="compress">{{ formatPromptKind('compress') }}</option>
+        <option value="style">{{ formatPromptKind('style') }}</option>
       </select>
     </div>
     <div class="row column">
@@ -40,6 +40,7 @@ import Button from './ui/Button.vue';
 import Input from './ui/Input.vue';
 import type { Prompt, PromptInput } from '../ipc/types';
 import { usePromptsStore } from '../stores/prompts';
+import { formatPromptKind } from '../utils/prompt-locale';
 
 const props = defineProps<{
   mode: 'create' | 'edit' | 'copy-from-builtin';

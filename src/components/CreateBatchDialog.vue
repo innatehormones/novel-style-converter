@@ -5,6 +5,10 @@
         <div class="summary">
           已选 <strong>{{ selectedChapterIds.length }}</strong> 章
         </div>
+        <div v-if="defaultMode" class="row">
+          <label>默认模式</label>
+          <span class="readonly">{{ formatPromptKind(defaultMode) }}</span>
+        </div>
         <div class="row">
           <label>提示词模板 *</label>
           <select v-model="promptId" class="prompt-select">
@@ -132,6 +136,7 @@ import IconPauseCircle from '~icons/lucide/pause-circle';
 import IconSkipForward from '~icons/lucide/skip-forward';
 import { listModels, listPrompts, previewFirstChapter, getChapter } from '../ipc/commands';
 import type { ModelConfig, Prompt, CreateWorkflowInput, PreviewFirstChapter } from '../ipc/types';
+import { formatPromptKind } from '../utils/prompt-locale';
 
 const props = defineProps<{
   tnId: number;

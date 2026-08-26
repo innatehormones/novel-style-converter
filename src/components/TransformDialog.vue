@@ -18,6 +18,7 @@
       <label>prompt</label>
       <span class="readonly">#{{ promptId || '?' }} (继承自上次转换)</span>
     </div>
+    <div class="mode-info">支持模式: {{ formatPromptKind('compress') }} / {{ formatPromptKind('style') }}</div>
     <div class="row ctx">
       <div>
         <label>前文原文</label>
@@ -62,6 +63,7 @@ import {
   enqueueTransformationChapters as ipcEnqueueTns,
 } from '../ipc/commands';
 import type { TransformationNovelSummary, ModelConfig } from '../ipc/types';
+import { formatPromptKind } from '../utils/prompt-locale';
 
 const props = defineProps<{
   dataAssetId: number;
@@ -149,4 +151,5 @@ async function onSubmit() {
 .error { color: var(--danger); font-size: 12px; margin-top: 8px; }
 .hint { color: var(--text-muted); font-size: 12px; margin-top: 8px; }
 .ctx-hint { color: var(--text-muted); font-size: 11px; margin-top: -4px; margin-bottom: 12px; line-height: 1.5; }
+.mode-info { color: var(--text-muted); font-size: 12px; margin-top: -4px; margin-bottom: 12px; }
 </style>
