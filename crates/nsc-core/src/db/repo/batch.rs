@@ -13,17 +13,31 @@ impl<'a> BatchRepo<'a> {
     pub fn insert(&self, b: &NewBatch) -> Result<i64> {
         let now = Utc::now().to_rfc3339();
         let policy_s = policy_to_str(b.on_failure_policy);
+        // mode 必须是 "compress" / "style" 之一(spec §3.1 wire-level 一致)。
+        let mode_s = match b.mode.as_str() {
+            "compress" | "style" => b.mode.as_str(),
+            other => return Err(Error::Validation(format!("unknown batch mode: {other}"))),
+        };
         self.conn.execute(
-            "INSERT INTO batches (transformation_novel_id, label, on_failure_policy, status, created_at) \
-             VALUES (?1, ?2, ?3, 'pending', ?4)",
-            params![b.transformation_novel_id, b.label, policy_s, now],
+            "INSERT INTO batches \
+             (transformation_novel_id, label, on_failure_policy, status, created_at, \
+              prompt_id, model_config_id, mode, \
+              ctx_prev_original, ctx_prev_transformed, ctx_next_original, ctx_next_transformed) \
+             VALUES (?1, ?2, ?3, 'pending', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                b.transformation_novel_id, b.label, policy_s, now,
+                b.prompt_id, b.model_config_id, mode_s,
+                b.ctx_prev_original, b.ctx_prev_transformed, b.ctx_next_original, b.ctx_next_transformed,
+            ],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
 
     pub fn get(&self, id: i64) -> Result<Option<Batch>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, transformation_novel_id, label, on_failure_policy, status, created_at, started_at, ended_at \
+            "SELECT id, transformation_novel_id, label, on_failure_policy, status, created_at, started_at, ended_at, \
+              prompt_id, model_config_id, mode, \
+              ctx_prev_original, ctx_prev_transformed, ctx_next_original, ctx_next_transformed \
              FROM batches WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -32,7 +46,9 @@ impl<'a> BatchRepo<'a> {
 
     pub fn list_by_tn(&self, tn_id: i64) -> Result<Vec<Batch>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, transformation_novel_id, label, on_failure_policy, status, created_at, started_at, ended_at \
+            "SELECT id, transformation_novel_id, label, on_failure_policy, status, created_at, started_at, ended_at, \
+              prompt_id, model_config_id, mode, \
+              ctx_prev_original, ctx_prev_transformed, ctx_next_original, ctx_next_transformed \
              FROM batches WHERE transformation_novel_id = ?1 ORDER BY id DESC",
         )?;
         let rows = stmt.query_map(params![tn_id], batch_from_row)?;
@@ -49,7 +65,10 @@ impl<'a> BatchRepo<'a> {
         match status {
             BatchStatus::Running => {
                 self.conn.execute(
-                    "UPDATE batches SET status = ?2, started_at = COALESCE(started_at, ?3) WHERE id = ?1",
+                    "UPDATE batches SET status = ?2, \
+                     started_at = COALESCE(started_at, ?3), \
+                     ended_at = NULL \
+                     WHERE id = ?1",
                     params![id, status_s, now],
                 )?;
             }
@@ -171,6 +190,14 @@ pub(crate) fn batch_from_row(row: &Row) -> rusqlite::Result<Batch> {
         created_at,
         started_at: parse_opt(started_at_s)?,
         ended_at: parse_opt(ended_at_s)?,
+        // 新增(append_chapters spec §3.2):
+        prompt_id: row.get(8)?,
+        model_config_id: row.get(9)?,
+        mode: row.get(10)?,
+        ctx_prev_original: row.get(11)?,
+        ctx_prev_transformed: row.get(12)?,
+        ctx_next_original: row.get(13)?,
+        ctx_next_transformed: row.get(14)?,
     })
 }
 

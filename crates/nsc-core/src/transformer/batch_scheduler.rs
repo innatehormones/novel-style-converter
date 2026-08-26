@@ -55,6 +55,7 @@ pub struct WorkflowCreate {
     pub ctx_prev_original: i32,
     pub ctx_prev_transformed: i32,
     pub ctx_next_original: i32,
+    pub ctx_next_transformed: i32,
     /// 章节失败时的处理策略。
     /// - PauseAndReview: batch → Paused,等用户通过 `resume` 决策。
     /// - Terminate: 同 batch 后续 pending → cancelled,batch → Terminated。
@@ -120,10 +121,17 @@ impl BatchScheduler {
             let _bsg = self.db.lock();
             let tx = _bsg.unchecked_transaction()?;
             tx.execute(
-                "INSERT INTO batches (transformation_novel_id, label, on_failure_policy, status, created_at, started_at)                  VALUES (?1, ?2, ?3, 'running', ?4, ?4)",
+                "INSERT INTO batches \
+                 (transformation_novel_id, label, on_failure_policy, status, created_at, started_at, \
+                  prompt_id, model_config_id, mode, \
+                  ctx_prev_original, ctx_prev_transformed, ctx_next_original, ctx_next_transformed) \
+                 VALUES (?1, ?2, ?3, 'running', ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 rusqlite::params![
                     spec.transformation_novel_id, spec.label,
                     policy_str(spec.on_failure_policy), now,
+                    spec.prompt_id, spec.model_config_id, mode_str(spec.mode),
+                    spec.ctx_prev_original, spec.ctx_prev_transformed, spec.ctx_next_original,
+                    spec.ctx_next_transformed,
                 ],
             )?;
             let batch_id = tx.last_insert_rowid();
