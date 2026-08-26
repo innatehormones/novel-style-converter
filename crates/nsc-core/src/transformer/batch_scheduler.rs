@@ -746,12 +746,15 @@ impl BatchScheduler {
         })
     }
 
-    /// append chapters 到 stopped batch —— spec §3.4 / Task 4 完整实现。
+    /// append chapters 到 stopped batch。
     /// 1. 校验 batch 存在 + status==Stopped
     /// 2. 校验 chapter_ids 都属于 tn.data_asset
     /// 3. 去重:剔除已在 batch 中的章节
     /// 4. 事务:insert tc + wrc 空槽 + set_status(Running)
-    /// 5. 提交后 dispatch 每个新 tc;advance_batch 兜底
+    /// 5. advance_batch 派首章(按 chapter_idx ASC),后续由 on_chapter_done 自然推进
+    ///
+    /// 注意:不要循环 dispatch 每个新 tc — `advance_batch` 已覆盖所有 pending 派发,
+    /// 循环 dispatch 会让同一个 tc 入队两次,worker 跑两次(第二次覆写第一次正文)。
     pub fn append_chapters_to_batch(
         &self,
         batch_id: i64,
@@ -835,15 +838,7 @@ impl BatchScheduler {
             )?;
             tx.commit()?;
         }
-        // 5. 入队每个新 tc —— 复用 create_workflow advance_batch 里的 dispatch 路径。
-        let prompt = self.db.prompts().get(batch.prompt_id)?
-            .ok_or_else(|| Error::NotFound(format!("prompt {} 不存在", batch.prompt_id)))?;
-        let model = self.db.model_configs().get(batch.model_config_id)?
-            .ok_or_else(|| Error::NotFound(format!("model_config {} 不存在", batch.model_config_id)))?;
-        for &tc_id in &new_tc_ids {
-            self.dispatch(&prompt, &model, tc_id)?;
-        }
-        // 6. advance_batch 兜底:确保 batch 内剩余 pending tc 也被派。
+        // 5. advance_batch 派首章(按 chapter_idx ASC),后续由 on_chapter_done 自然推进。
         self.advance_batch(&self.db, batch_id)?;
         Ok(new_tc_ids)
     }
