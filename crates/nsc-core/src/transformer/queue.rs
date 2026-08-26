@@ -345,27 +345,29 @@ pub fn read_context(db: &Arc<Db>, job: &JobSpec) -> StdResult<Prep, String> {
 
     let prev_tx: Vec<(String, String)> = {
         let mut out = Vec::new();
-        let chs = db.chapters().prev_n(data_asset_id, idx, 32)
-            .map_err(|e| e.to_string())?;
         let take = job.ctx_prev_transformed.max(0) as usize;
-        for ch in chs.iter().take(take) {
-            let list = db.transformation_chapters().list_by_chapter(ch.id)
+        if take > 0 {
+            let chs = db.chapters().prev_n(data_asset_id, idx, take as i32)
                 .map_err(|e| e.to_string())?;
-            if let Some(t) = list.into_iter().find(|t| {
-                t.transformation_novel_id == job.tn_id
-                    && t.prompt_id == job.prompt.id
-                    && t.model_config_id == job.model_config.id
-                    && matches!(t.status, TransformStatus::Done)
-            }) {
-                // 真内容在 workflow_result_chapters.content,不是 tc.result_content。
-                let content = match t.batch_id {
-                    Some(bid) => db.workflow_results()
-                        .get_content_by_batch_and_chapter(bid, ch.id)
-                        .map_err(|e| e.to_string())?,
-                    None => None,
-                };
-                if let Some(c) = content {
-                    out.push((ch.title.clone(), c));
+            for ch in chs.iter() {
+                let list = db.transformation_chapters().list_by_chapter(ch.id)
+                    .map_err(|e| e.to_string())?;
+                if let Some(t) = list.into_iter().find(|t| {
+                    t.transformation_novel_id == job.tn_id
+                        && t.prompt_id == job.prompt.id
+                        && t.model_config_id == job.model_config.id
+                        && matches!(t.status, TransformStatus::Done)
+                }) {
+                    // 真内容在 workflow_result_chapters.content,不是 tc.result_content。
+                    let content = match t.batch_id {
+                        Some(bid) => db.workflow_results()
+                            .get_content_by_batch_and_chapter(bid, ch.id)
+                            .map_err(|e| e.to_string())?,
+                        None => None,
+                    };
+                    if let Some(c) = content {
+                        out.push((ch.title.clone(), c));
+                    }
                 }
             }
         }
