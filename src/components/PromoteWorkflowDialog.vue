@@ -25,7 +25,8 @@
           <span><strong>{{ skipCount }}</strong> 章被跳过,将使用原文</span>
         </div>
       </div>
-      <div v-if="error" class="error">{{ error }}</div>
+      <div v-if="externalError" class="error-banner">{{ externalError }}</div>
+      <div v-else-if="error" class="error">{{ error }}</div>
       <div class="hint">
         转正后会生成一份新的 <code>promoted</code> 数据资产，与源数据资产互相独立。
         多次转正可保留不同版本。
@@ -55,6 +56,11 @@ const props = defineProps<{
   successCount: number;
   failCount: number;
   skipCount: number;
+  /// 父组件传入的外部错误(后端报错)。区别于 dialog 内部 error ref —— 内部
+  /// error 是 onConfirm 同步校验失败用,持续时间短;外部 error 是异步 IPC 失败,
+  /// 需要稳定显示直到父组件清除(bug B: confirmPromote 把错误塞进 promoteError
+  /// 但从没传给 dialog,被静默吞掉)。
+  externalError?: string | null;
 }>();
 
 const open = defineModel<boolean>('open', { required: true });
@@ -148,6 +154,14 @@ async function onConfirm() {
 .error {
   color: var(--c-danger, #d32f2f);
   font-size: 13px;
+}
+.error-banner {
+  color: var(--c-danger, #d32f2f);
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--c-danger, #d32f2f);
+  border-radius: 4px;
+  background: rgba(211, 47, 47, 0.05);
 }
 .hint {
   font-size: 12px;

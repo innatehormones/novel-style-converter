@@ -61,10 +61,12 @@ export const useWorkflowsStore = defineStore('workflows', () => {
   }
 
   /// 工作流转正为新数据资产。源 workflow 状态不变 (completed 仍是 completed),
-  /// 但 tn 视图可能刷新以反映派生的 da。
+  /// 但 tn 视图可能刷新以反映派生的 da。Library 数据资产 tab 也需要刷新,
+  /// 否则新 da 在 library 看不到(bug A)。
   async function promote(batchId: number, title: string): Promise<DataAsset> {
     const newDa = await promoteWorkflow({ batchId, title });
     await queryClient.invalidateQueries({ queryKey: ['workflows'] });
+    await queryClient.invalidateQueries({ queryKey: ['dataAssets'] });
     return newDa;
   }
 

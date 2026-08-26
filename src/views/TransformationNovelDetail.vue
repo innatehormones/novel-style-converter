@@ -286,6 +286,42 @@ function showAlert(title: string, message: string) {
   alertOpen.value = true;
 }
 
+// Toast —— 仿照 Library.vue:433 的写法,showToast(text, action, actionLabel?)。
+// 用于转正成功后提示「已转正为「X」」并提供「查看」跳转入口。
+const toast = ref<{ text: string; action: (() => void) | null; actionLabel: string } | null>(null);
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+function stopToastTimer() {
+  if (toastTimer !== null) { clearTimeout(toastTimer); toastTimer = null; }
+}
+function startToastTimer() {
+  stopToastTimer();
+  toastTimer = setTimeout(() => { toast.value = null; toastTimer = null; }, 5000);
+}
+function showToast(text: string, action: (() => void) | null = null, actionLabel = '查看') {
+  stopToastTimer();
+  toast.value = { text, action, actionLabel };
+  startToastTimer();
+}
+function dismissToast() {
+  stopToastTimer();
+  toast.value = null;
+}
+function onToastAction() {
+  const a = toast.value?.action;
+  dismissToast();
+  if (a) a();
+}
+
+/// 跳到 data-asset 详情页。仿照 Library.vue:524 的 goDataAsset。
+function goDataAsset(id: number) {
+  void router.push({ name: 'data-asset', params: { dataAssetId: id } });
+}
+
+/// 跳到数据资产列表 tab —— 用于「转正 × N」badge 点击后让用户看到所有 da。
+function goDataAssetsList() {
+  void router.push('/data-assets');
+}
+
 // 工作流转正 —— 触发源已移到外面的列表 actions 列,故不绑定 modal 的 selectedWorkflow。
 // promoteTargetId 独立记录当前在转正的 workflow,转正期间 modal 是否打开无关。
 const promoteTargetId = ref<number | null>(null);
@@ -308,9 +344,11 @@ async function confirmPromote(title: string) {
   promoteSubmitting.value = true;
   promoteError.value = null;
   try {
-    await store.promote(tid, title);
+    const newDa = await store.promote(tid, title);
     promoteOpen.value = false;
     promoteTargetId.value = null;
+    // 成功反馈:toast 提示 + 「查看」按钮跳到新 da 详情。仿照 Library.vue:453 的 onCreateTn。
+    showToast(`已转正为「${newDa.title}」`, () => goDataAsset(newDa.id));
   } catch (e: unknown) {
     promoteError.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -736,6 +774,14 @@ watch(() => sources.value, (list) => {
       </template>
     </PageHeader>
 
+    <Transition name="toast">
+      <div v-if="toast" class="toast">
+        <span class="toast-msg">{{ toast.text }}</span>
+        <button v-if="toast.action" type="button" class="toast-action" @click="onToastAction">{{ toast.actionLabel }}</button>
+        <button type="button" class="toast-close" aria-label="关闭" @click="dismissToast">×</button>
+      </div>
+    </Transition>
+
     <div v-if="tnError" class="alert">{{ tnError }}</div>
 
     <div v-if="tnSummary" class="meta-strip">
@@ -873,11 +919,13 @@ watch(() => sources.value, (list) => {
         <template #cell-status="{ row }">
           <div class="cell-status">
 <span class="status" :class="row.status">{{ formatBatchStatus(row.status) }}</span>
-            <span
+            <button
               v-if="row.promoted_count > 0"
-              class="promoted-tag"
-              :title="`已基于此工作流转正 ${row.promoted_count} 份数据资产`"
-            >转正 × {{ row.promoted_count }}</span>
+              type="button"
+              class="promoted-tag promoted-tag-link"
+              :title="`已基于此工作流转正 ${row.promoted_count} 份数据资产,点击查看`"
+              @click="goDataAssetsList"
+            >转正 × {{ row.promoted_count }}</button>
           </div>
         </template>
         <template #cell-created="{ row }">
@@ -974,11 +1022,13 @@ watch(() => sources.value, (list) => {
             <span class="dot-sep">·</span>
             <span>已跳过 {{ selectedWorkflow.skipped_count }}</span>
           </span>
-          <span
+          <button
             v-if="selectedWorkflow.status === 'stopped' && selectedWorkflow.promoted_count > 0"
-            class="promoted-tag"
-            :title="`已基于此工作流转正 ${selectedWorkflow.promoted_count} 份数据资产`"
-          >已转正 × {{ selectedWorkflow.promoted_count }}</span>
+            type="button"
+            class="promoted-tag promoted-tag-link"
+            :title="`已基于此工作流转正 ${selectedWorkflow.promoted_count} 份数据资产,点击查看`"
+            @click="goDataAssetsList"
+          >已转正 × {{ selectedWorkflow.promoted_count }}</button>
         </div>
         <div class="wf-status-right">
           <span class="wf-time">创建 {{ fmtTime(selectedWorkflow.created_at) }}</span>
@@ -1174,6 +1224,7 @@ watch(() => sources.value, (list) => {
       :success-count="promoteTarget.done_count"
       :fail-count="promoteTarget.failed_count"
       :skip-count="promoteTarget.skipped_count"
+      :external-error="promoteError"
       @confirm="confirmPromote"
     />
 
@@ -1606,4 +1657,56 @@ watch(() => sources.value, (list) => {
   cursor: default;
   white-space: nowrap;
 }
+.promoted-tag-link {
+  border: 1px solid #c8e6c9;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+.promoted-tag-link:hover {
+  background: #c8e6c9;
+  color: #1b5e20;
+}
+
+/* Toast —— 仿 Library.vue:545 */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--color-paper);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--color-cinnabar);
+  border-radius: var(--radius-pin);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+.toast-msg {
+  flex: 1;
+  color: var(--text-primary);
+}
+.toast-action {
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-slate);
+  cursor: pointer;
+}
+.toast-action:hover { color: var(--color-cinnabar); }
+.toast-close {
+  background: transparent;
+  border: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 4px;
+}
+.toast-close:hover { color: var(--text-primary); }
+.toast-enter-active, .toast-leave-active { transition: opacity 0.2s, transform 0.2s; }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(-4px); }
 </style>
