@@ -34,6 +34,15 @@ pub struct Batch {
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
+    // 新增(append_chapters spec §3.2):
+    pub prompt_id: i64,
+    pub model_config_id: i64,
+    /// PromptKind 的字符串形式("compress" / "style")。
+    pub mode: String,
+    pub ctx_prev_original: i32,
+    pub ctx_prev_transformed: i32,
+    pub ctx_next_original: i32,
+    pub ctx_next_transformed: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -41,5 +50,13 @@ pub struct NewBatch {
     pub transformation_novel_id: i64,
     pub label: Option<String>,
     pub on_failure_policy: OnFailurePolicy,
+    // 新增:
+    pub prompt_id: i64,
+    pub model_config_id: i64,
+    pub mode: String,
+    pub ctx_prev_original: i32,
+    pub ctx_prev_transformed: i32,
+    pub ctx_next_original: i32,
+    pub ctx_next_transformed: i32,
 }
 

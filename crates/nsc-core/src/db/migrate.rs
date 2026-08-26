@@ -27,4 +27,5 @@ pub const SCHEMAS: &[(&str, &str)] = &[
     ("0026_model_disable_thinking", include_str!("../../../../migrations/0026_model_disable_thinking.sql")),
     ("0027_tc_batch_cascade", include_str!("../../../../migrations/0027_tc_batch_cascade.sql")),
     ("0028_chapter_title_line", include_str!("../../../../migrations/0028_chapter_title_line.sql")),
+    ("0028_batch_homogeneous_config", include_str!("../../../../migrations/0029_batch_homogeneous_config.sql")),
 ];
