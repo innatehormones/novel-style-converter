@@ -3,10 +3,12 @@ import { useQueryClient } from '@tanstack/vue-query';
 import {
   createWorkflow, stopWorkflow, retryWorkflowChapters, deleteWorkflow as deleteWorkflowCmd,
   promoteWorkflow, regenerateChapterPreview, commitChapterPreview, discardChapterPreview,
+  appendChaptersToBatch,
 } from '../ipc/commands';
 import type {
   CreateWorkflowInput, WorkflowSummary, DataAsset, DeleteWorkflowResult,
   ChapterPreviewRow, CommitPreviewInput,
+  AppendChaptersToBatchPayload, AppendChaptersResult,
 } from '../ipc/types';
 
 /// workflows store —— 缩成 mutation + invalidate 编排。
@@ -40,6 +42,15 @@ export const useWorkflowsStore = defineStore('workflows', () => {
     const w = await retryWorkflowChapters(batchId, chapterIds);
     await queryClient.invalidateQueries({ queryKey: ['workflowChapters', batchId] });
     return w;
+  }
+
+  /// 往已 stopped 的工作流追加章节(spec:stopped-batch-append-chapters)。
+  /// 跟 retry 一样,失效章节列表 + workflows 总览。
+  async function appendChapters(payload: AppendChaptersToBatchPayload): Promise<AppendChaptersResult> {
+    const res = await appendChaptersToBatch(payload);
+    await queryClient.invalidateQueries({ queryKey: ['workflowChapters', payload.batchId] });
+    await queryClient.invalidateQueries({ queryKey: ['workflows'] });
+    return res;
   }
 
   /// 删除工作流。后端 cascade 处理衍生表。
@@ -89,6 +100,7 @@ export const useWorkflowsStore = defineStore('workflows', () => {
   return {
     create, stop, retry, deleteWorkflow, promote,
     regeneratePreview, commitPreview, discardPreview,
+    appendChapters,
   };
 });
 
