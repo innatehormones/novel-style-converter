@@ -1233,6 +1233,7 @@ watch(() => sources.value, (list) => {
       :ctx-prev-original="appendTarget.ctx_prev_original"
       :ctx-prev-transformed="appendTarget.ctx_prev_transformed"
       :ctx-next-original="appendTarget.ctx_next_original"
+      :workflow-label="appendTarget.label"
       @confirm="onAppendConfirm"
     />
   </section>

@@ -13,7 +13,7 @@
 
       <!-- 头部:eyebrow(去哪个工作流)/ title(从第几章起补)/ config(怎么转) -->
       <header class="head">
-        <div class="eyebrow" data-role="eyebrow">续工作流 #{{ batchId }} · {{ modelDisplayName }}</div>
+        <div class="eyebrow" data-role="eyebrow">{{ eyebrowText }}</div>
         <h2 class="title" data-role="title">补充第 {{ firstAvailableIdx }} 章起 · 续作</h2>
         <div class="config" data-role="config">{{ configLine }}</div>
       </header>
@@ -144,6 +144,9 @@ const props = defineProps<{
   ctxPrevOriginal: number;
   ctxPrevTransformed: number;
   ctxNextOriginal: number;
+  /// 可选:workflow 自定义 label(由父组件从 WorkflowSummary.label 传入)。
+  /// 旧 batch path 可传 null/undefined → 回退到「工作流 #batchId」形态。
+  workflowLabel?: string | null;
 }>();
 
 const open = defineModel<boolean>('open', { required: true });
@@ -183,6 +186,15 @@ const availableSources = computed<SourceChapterRow[]>(() => {
 
 /// 标题用:第一个还能补的章节序号。全在 batch 里 / 还没加载出来时退化成 1。
 const firstAvailableIdx = computed<number>(() => availableSources.value[0]?.idx ?? 1);
+
+/// eyebrow 单行 —— 有 label 用「label」,没 label 用「工作流 #batchId」。
+/// CSS 走 ellipsis,不在此处截断字符串(保留完整 label 给可访问性 / 调试)。
+const eyebrowText = computed<string>(() => {
+  const target = props.workflowLabel
+    ? `「${props.workflowLabel}」`
+    : `工作流 #${props.batchId}`;
+  return `续${target} · ${props.modelDisplayName}`;
+});
 
 /// 头部配置单行 mono —— 模式 / 提示词 / 三路上下文,用 · 串起来。
 const configLine = computed<string>(() => [
@@ -370,6 +382,11 @@ function onConfirm() {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--lit-muted);
+  /* 长 label 不撑爆头部 —— CSS 截断,不在 JS 里改字符串(保留完整 label) */
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .title {
   margin: 10px 0 0;
