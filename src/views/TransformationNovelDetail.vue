@@ -1004,7 +1004,7 @@ watch(() => sources.value, (list) => {
       v-if="selectedWorkflow !== null"
       :open="true"
       :title="selectedWorkflow.label ? `工作流 #${selectedWorkflow.id} · ${selectedWorkflow.label}` : `工作流 #${selectedWorkflow.id}`"
-      :width="1100"
+      :width="960"
       @update:open="closeWorkflowPanel"
     >
       <div class="wf-status-strip">
