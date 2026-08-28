@@ -62,12 +62,7 @@ function close() {
   border-radius: var(--radius-card);
   display: flex;
   flex-direction: column;
-  /* 默认有界:即使传入 width 很大或内容撑宽,弹窗也不会吞掉整个视口。
-     .dialog-full 通过 max-width: none 显式解锁,允许 100vw 全屏变体。 */
-  max-width: 1100px;
-  margin-left: auto;
-  margin-right: auto;
-  max-height: 85vh;
+  max-height: 90vh;
   overflow: hidden;
   box-shadow: 0 1px 0 0 var(--border-rouge) inset, 0 12px 36px rgba(26, 23, 20, 0.18);
 }
@@ -125,7 +120,6 @@ function close() {
 .dialog-full {
   width: 100vw;
   height: 100vh;
-  max-width: none;
   max-height: 100vh;
   border-radius: 0;
   border: none;
