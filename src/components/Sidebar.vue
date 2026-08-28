@@ -123,14 +123,11 @@ function isActive(to: string): boolean {
 }
 
 .handle {
-  display: flex;
-  justify-content: flex-end;
-  padding: 8px 8px 8px 0;
-  margin-top: auto;
-}
-.sidebar.collapsed .handle {
-  justify-content: center;
-  padding-right: 0;
+  position: absolute;
+  right: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
 }
 
 .collapse-btn {
@@ -142,7 +139,7 @@ function isActive(to: string): boolean {
   border: 1px solid var(--border-soft);
   background: var(--bg-card);
   color: var(--text-secondary);
-  border-radius: 4px;
+  border-radius: 50%;
   cursor: pointer;
   font-family: inherit;
   padding: 0;
@@ -161,6 +158,7 @@ function isActive(to: string): boolean {
   padding: 0 12px;
 }
 .nav-bottom {
+  margin-top: auto;
   padding-top: 12px;
   border-top: 1px solid var(--border-soft);
 }
