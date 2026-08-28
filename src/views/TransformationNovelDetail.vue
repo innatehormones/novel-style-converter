@@ -1291,7 +1291,6 @@ watch(() => sources.value, (list) => {
 </template>
 
 <style scoped>
-.tn-detail { padding: 16px; }
 .meta-strip {
   display: flex;
   align-items: center;
