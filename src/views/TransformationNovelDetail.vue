@@ -1063,7 +1063,7 @@ watch(() => sources.value, (list) => {
         :data="selectedWorkflowChapters"
         :row-key="(row: WorkflowChapterRow) => row.tc_id"
         :widths="workflowChapterWidths"
-        :max-height="'600px'"
+        :max-height="'calc(90vh - 200px)'"
         :truncate-columns="['title', 'preview']"
         frozen-column="actions"
         empty-text="暂无章节"
