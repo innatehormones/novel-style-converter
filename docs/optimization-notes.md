@@ -423,7 +423,7 @@ A single upload can produce many data assets, and the data assets survive the up
 ## Test status
 
 
-- `cargo test --workspace` 当前: nsc-core 18 unit tests + nsc-desktop 12 unit tests 全过,0 失败 0 警告
+- `cargo test --workspace` 当前: nsc-core 50 unit tests 全过(其中 1 ignored 是设计如此),0 失败 0 警告
 - 覆盖范围:
   - `recorder` 3 个(channel 满丢事件 / channel 收发 / noop)
   - `db::repo::ai_call_log` 6 个(insert+roundtrip / filter / clear / truncate_preview 边界)
