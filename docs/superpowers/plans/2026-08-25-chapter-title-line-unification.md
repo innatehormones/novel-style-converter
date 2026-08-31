@@ -145,7 +145,7 @@ fn split(&self, text: &str) -> SplitResult {
 }
 ```
 
-新增辅助函数（放在 `first_line_title` 附近）：
+新增辅助函数（放在 `split_first_line` 附近）：
 
 ```rust
 /// 把空行 fallback 的段落切成 (title=首行, content=次行起)。
