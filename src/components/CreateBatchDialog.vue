@@ -130,7 +130,7 @@
             placeholder="可手写 / 可点↑ 从预览复制 / 可保持空（首章走 LLM 队列）"
             rows="6"
           ></textarea>
-          <div v-if="seedSource" class="seed-source-hint">
+          <div v-if="seedSource && seedContent.trim()" class="seed-source-hint">
             来源：
             <template v-if="seedSource.kind === 'llm'">LLM（消耗 {{ seedSource.tokens_in }}/{{ seedSource.tokens_out }} tokens）</template>
             <template v-else>手写（不消耗 tokens）</template>
@@ -158,7 +158,7 @@ import Button from './ui/Button.vue';
 import IconPauseCircle from '~icons/lucide/pause-circle';
 import IconSkipForward from '~icons/lucide/skip-forward';
 import { listModels, listPrompts, previewFirstChapter, getChapter } from '../ipc/commands';
-import type { ModelConfig, Prompt, CreateWorkflowInput, FirstChapterSeed, FirstChapterSeedSource } from '../ipc/types';
+import type { ModelConfig, Prompt, CreateWorkflowInput, FirstChapterSeedSource } from '../ipc/types';
 import { formatPromptKind } from '../utils/prompt-locale';
 
 const props = defineProps<{
@@ -317,7 +317,7 @@ function onCopyFromPreview() {
   );
   if (append) {
     seedContent.value = seedContent.value + '\n\n' + out.content;
-    // 追加: source 视为 Llm 混合,保留原 tokens
+    // 追加: 保留原 seedSource(混合内容近似按原 source 标注)。
   } else {
     seedContent.value = out.content;
     seedSource.value = { kind: 'llm', tokens_in: out.tokens_in, tokens_out: out.tokens_out };
@@ -474,7 +474,8 @@ async function onSubmit() {
   padding: 2px 8px;
 }
 .preview-original,
-.preview-output {
+.preview-output,
+.seed-output {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.55;
@@ -488,10 +489,9 @@ async function onSubmit() {
   width: 100%;
   box-sizing: border-box;
 }
-.preview-original { max-height: 180px; }
-.preview-output { flex: 1; min-height: 140px; }
+.preview-original { max-height: 180px; font-family: var(--font-mono); }
+.preview-output { flex: 1; min-height: 140px; font-family: var(--font-mono); }
 .seed-output {
-  width: 100%;
   font-family: var(--font-serif);
   font-size: 13px;
 }
