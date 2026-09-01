@@ -228,7 +228,6 @@ match seed {
 | `crates/nsc-core/src/models/transformation.rs` | `PreviewFirstChapter` → `FirstChapterSeed`；新增 `SeedSource` 枚举 |
 | `crates/nsc-core/src/transformer/batch_scheduler.rs` | `create_workflow` 入参 `first_chapter_seed: Option<FirstChapterSeed>`；事务内分支；None 路径恢复"所有 tc pending" |
 | `src-tauri/src/commands/workflows.rs` | DTO `preview_first_chapter: Option<FirstChapterSeed>`；serde 标签兼容 |
-| `src-tauri/src/commands/transformations.rs` | 如有 preview_first_chapter 内部转换，相应更新类型 |
 
 ### 6.2 前端
 
@@ -241,7 +240,7 @@ match seed {
 
 | 文件 | 改动 |
 |---|---|
-| `crates/nsc-core/tests/transformer_ctx.rs` | 加 `create_workflow_with_llm_seed` / `create_workflow_with_manual_seed` / `create_workflow_with_null_seed` 三个测试；现有 LLM seed 测试改为使用新类型 |
+| `crates/nsc-core/tests/transformer_ctx.rs` | 加 `create_workflow_with_llm_seed` / `create_workflow_with_manual_seed` / `create_workflow_with_null_seed` / `first_chapter_seed_does_not_overwrite_old_done_tc` 四个测试；现有 LLM seed 相关测试需要把旧 `PreviewFirstChapter { tokens_in, tokens_out }` 构造改成 `FirstChapterSeed { content, source: Llm { tokens_in, tokens_out } }` |
 | `src/components/__tests__/CreateBatchDialog.spec.ts`（如不存在则新增） | 9 个 vitest 场景（见 §7） |
 
 ### 6.4 不改
