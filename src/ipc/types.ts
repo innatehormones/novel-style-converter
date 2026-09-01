@@ -333,7 +333,7 @@ export interface CreateWorkflowInput {
   ctx_next_original: number;
   on_failure_policy: 'pause_and_review' | 'skip_failed';
   /// 试运行首章结果(spec §3.1 / §4.2)。用户满意后由 dialog 状态传入 create_workflow,后端事务内把 idx 最小那个 chapter 的 tc 标 done;为 null 时与原行为一致(所有 tc pending)。
-  preview_first_chapter: PreviewFirstChapter | null;
+  preview_first_chapter: FirstChapterSeed | null;
 }
 
 /**
@@ -636,13 +636,18 @@ export interface PreviewFirstChapterOutput {
   tokens_out: number;
 }
 
-/// 用户在「新建工作流」试运行区满意的首章结果,作为 create_workflow 的 seed(spec §3.1 / §4.2)。
-/// 后端事务内把 idx 最小那个 chapter 对应的 tc 标 done + 写 result_content + tokens。
-export interface PreviewFirstChapter {
+/// 「新建工作流」试运行区可选项（spec 2026-09-01）。
+/// 后端 nsc_core::models::FirstChapterSeed + SeedSource。
+/// IPC 字段名 preview_first_chapter 保留，类型从必填改 nullable。
+export interface FirstChapterSeed {
   content: string;
-  tokens_in: number;
-  tokens_out: number;
+  source: FirstChapterSeedSource;
 }
+
+/// 区分 LLM 出 vs 手写。手写时 tokens_in/out 都是 0,语义"无 LLM 调用"。
+export type FirstChapterSeedSource =
+  | { kind: 'llm'; tokens_in: number; tokens_out: number }
+  | { kind: 'manual' };
 
 /// `append_chapters_to_batch` 入参。
 export type AppendChaptersToBatchPayload = {
