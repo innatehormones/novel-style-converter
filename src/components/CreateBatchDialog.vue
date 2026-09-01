@@ -129,6 +129,7 @@
           <textarea
             class="seed-output"
             v-model="seedContent"
+            @input="onSeedInput"
             placeholder="可手写 / 可点↑ 从预览复制 / 可保持空（首章走 LLM 队列）"
             rows="6"
           ></textarea>
@@ -332,6 +333,14 @@ function onClearSeed() {
   if (!window.confirm('清空转换结果区？')) return;
   seedContent.value = '';
   seedSource.value = null;
+}
+
+/// 用户手写输入 → 标记 source 为 manual（无 LLM 调用）。
+/// 仅在 seedSource 仍为 null 时设置，避免覆盖已通过 "↑ 复制" 选中的 LLM 标签。
+function onSeedInput() {
+  if (!seedSource.value && seedContent.value.trim()) {
+    seedSource.value = { kind: 'manual' };
+  }
 }
 
 async function onSubmit() {
