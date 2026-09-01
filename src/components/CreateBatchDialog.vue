@@ -92,7 +92,7 @@
           <label class="preview-label">
             预览
             <Button
-              class="inline-gen-btn"
+              class="inline-gen-btn gen-preview-btn"
               kind="default"
               :loading="previewLoading"
               :disabled="!canPreview"
@@ -113,11 +113,13 @@
             转换结果
             <span class="label-actions">
               <Button
+                class="copy-btn"
                 kind="default"
                 :disabled="!previewLatest || !previewLatest.content.trim()"
                 @click="onCopyFromPreview"
               >↑ 从预览复制</Button>
               <Button
+                class="clear-btn"
                 kind="default"
                 :disabled="!seedContent.trim()"
                 @click="onClearSeed"
@@ -142,6 +144,7 @@
     <template #footer>
       <Button @click="open = false">取消</Button>
       <Button
+        class="create-btn"
         kind="primary"
         :loading="submitting"
         :disabled="!canSubmit"
