@@ -924,7 +924,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use crate::db::Db;
-    use crate::models::transformation::PreviewFirstChapter;
+    use crate::models::transformation::{FirstChapterSeed, SeedSource};
     use crate::models::{
         NewChapter, NewDataAsset, NewTransformationNovel, NewUpload,
         Prompt, PromptKind, TransformStatus,
@@ -1028,10 +1028,9 @@ mod tests {
         let db = fresh_db();
         let (tn_id, c0, c1, c2, prompt_id, model_id) = seed_env(&db);
         let batch_id = seed_batch_with_tcs(&db, tn_id, c0, c1, c2, prompt_id, model_id);
-        let preview = PreviewFirstChapter {
+        let preview = FirstChapterSeed {
             content: "preview result".into(),
-            tokens_in: 100,
-            tokens_out: 200,
+            source: SeedSource::Llm { tokens_in: 100, tokens_out: 200 },
         };
         let now = Utc::now().to_rfc3339();
         let _bsg = db.lock();
@@ -1053,6 +1052,32 @@ mod tests {
         assert_eq!(wrc0.as_deref(), Some("preview result"));
         let wrc1 = db.workflow_results().get_content_by_batch_and_chapter(batch_id, c1).unwrap();
         assert!(wrc1.is_none());
+    }
+
+    #[test]
+    fn apply_preview_seeds_first_chapter_done_manual() {
+        // Manual 路径:content 写,tokens_in/out = 0。
+        let db = fresh_db();
+        let (tn_id, c0, c1, c2, prompt_id, model_id) = seed_env(&db);
+        let batch_id = seed_batch_with_tcs(&db, tn_id, c0, c1, c2, prompt_id, model_id);
+        let preview = FirstChapterSeed {
+            content: "manual content".into(),
+            source: SeedSource::Manual,
+        };
+        let now = Utc::now().to_rfc3339();
+        let _bsg = db.lock();
+        let tx = _bsg.unchecked_transaction().unwrap();
+        apply_preview_in_tx(&tx, batch_id, &[c0, c1, c2], &preview, &now).unwrap();
+        tx.commit().unwrap();
+        drop(_bsg);
+        let tcs = db.transformation_chapters().list_by_batch(batch_id).unwrap();
+        let tc0 = tcs.iter().find(|t| t.chapter_id == c0).unwrap();
+        assert_eq!(tc0.status, TransformStatus::Done);
+        assert_eq!(tc0.result_content.as_deref(), Some("manual content"));
+        assert_eq!(tc0.tokens_in, Some(0));
+        assert_eq!(tc0.tokens_out, Some(0));
+        let wrc0 = db.workflow_results().get_content_by_batch_and_chapter(batch_id, c0).unwrap();
+        assert_eq!(wrc0.as_deref(), Some("manual content"));
     }
 
     #[test]
