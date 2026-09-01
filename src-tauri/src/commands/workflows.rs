@@ -75,17 +75,17 @@ impl CreateWorkflowPayload {
             // 与 transformation_chapters 列在 schema 0028 后保持一致(详见 batch.rs 同质配置迁移)。
             ctx_next_transformed: 0,
             on_failure_policy,
-            first_chapter_seed: self.preview_first_chapter.map(|p| match p.source {
-                SeedSourceDto::Llm { tokens_in, tokens_out } =>
-                    nsc_core::models::transformation::FirstChapterSeed {
-                        content: p.content,
-                        source: nsc_core::models::transformation::SeedSource::Llm { tokens_in, tokens_out },
-                    },
-                SeedSourceDto::Manual =>
-                    nsc_core::models::transformation::FirstChapterSeed {
-                        content: p.content,
-                        source: nsc_core::models::transformation::SeedSource::Manual,
-                    },
+            first_chapter_seed: self.preview_first_chapter.map(|p| {
+                let source = match p.source {
+                    SeedSourceDto::Llm { tokens_in, tokens_out } =>
+                        nsc_core::models::transformation::SeedSource::Llm { tokens_in, tokens_out },
+                    SeedSourceDto::Manual =>
+                        nsc_core::models::transformation::SeedSource::Manual,
+                };
+                nsc_core::models::transformation::FirstChapterSeed {
+                    content: p.content,
+                    source,
+                }
             }),
         })
     }
@@ -522,17 +522,6 @@ pub struct PreviewFirstChapterInput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct PreviewFirstChapterOutput {
-    pub content: String,
-    pub tokens_in: i32,
-    pub tokens_out: i32,
-}
-
-/// 用户在「新建工作流」试运行区满意的首章结果(IPC 入参),作为 create_workflow 的 seed。
-/// 字段名和核心层 nsc_core::models::transformation::PreviewFirstChapter 一致;这里只作为
-/// IPC 边界 DTO,在 into_core 中映射到核心类型。spec §5.2「IPC 边界透传」。
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct PreviewFirstChapter {
     pub content: String,
     pub tokens_in: i32,
     pub tokens_out: i32,
