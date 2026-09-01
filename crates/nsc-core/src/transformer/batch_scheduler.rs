@@ -1028,14 +1028,14 @@ mod tests {
         let db = fresh_db();
         let (tn_id, c0, c1, c2, prompt_id, model_id) = seed_env(&db);
         let batch_id = seed_batch_with_tcs(&db, tn_id, c0, c1, c2, prompt_id, model_id);
-        let preview = FirstChapterSeed {
+        let seed = FirstChapterSeed {
             content: "preview result".into(),
             source: SeedSource::Llm { tokens_in: 100, tokens_out: 200 },
         };
         let now = Utc::now().to_rfc3339();
         let _bsg = db.lock();
         let tx = _bsg.unchecked_transaction().unwrap();
-        apply_preview_in_tx(&tx, batch_id, &[c0, c1, c2], &preview, &now).unwrap();
+        apply_preview_in_tx(&tx, batch_id, &[c0, c1, c2], &seed, &now).unwrap();
         tx.commit().unwrap();
         drop(_bsg);
         let tcs = db.transformation_chapters().list_by_batch(batch_id).unwrap();
@@ -1046,6 +1046,8 @@ mod tests {
         assert_eq!(tc0.result_content.as_deref(), Some("preview result"));
         assert_eq!(tc0.tokens_in, Some(100));
         assert_eq!(tc0.tokens_out, Some(200));
+        assert!(tc0.started_at.is_some());
+        assert!(tc0.error.is_none());
         assert_eq!(tc1.status, TransformStatus::Pending);
         assert_eq!(tc2.status, TransformStatus::Pending);
         let wrc0 = db.workflow_results().get_content_by_batch_and_chapter(batch_id, c0).unwrap();
@@ -1060,14 +1062,14 @@ mod tests {
         let db = fresh_db();
         let (tn_id, c0, c1, c2, prompt_id, model_id) = seed_env(&db);
         let batch_id = seed_batch_with_tcs(&db, tn_id, c0, c1, c2, prompt_id, model_id);
-        let preview = FirstChapterSeed {
+        let seed = FirstChapterSeed {
             content: "manual content".into(),
             source: SeedSource::Manual,
         };
         let now = Utc::now().to_rfc3339();
         let _bsg = db.lock();
         let tx = _bsg.unchecked_transaction().unwrap();
-        apply_preview_in_tx(&tx, batch_id, &[c0, c1, c2], &preview, &now).unwrap();
+        apply_preview_in_tx(&tx, batch_id, &[c0, c1, c2], &seed, &now).unwrap();
         tx.commit().unwrap();
         drop(_bsg);
         let tcs = db.transformation_chapters().list_by_batch(batch_id).unwrap();
@@ -1076,6 +1078,8 @@ mod tests {
         assert_eq!(tc0.result_content.as_deref(), Some("manual content"));
         assert_eq!(tc0.tokens_in, Some(0));
         assert_eq!(tc0.tokens_out, Some(0));
+        assert!(tc0.started_at.is_some());
+        assert!(tc0.error.is_none());
         let wrc0 = db.workflow_results().get_content_by_batch_and_chapter(batch_id, c0).unwrap();
         assert_eq!(wrc0.as_deref(), Some("manual content"));
     }
