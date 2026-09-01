@@ -160,4 +160,56 @@ describe('CreateBatchDialog: 首章种子可选化 (spec 2026-09-01)', () => {
     const createBtn = dialog.find('button.create-btn');
     expect(createBtn.attributes('disabled')).toBeUndefined();
   });
+
+  // 覆盖 onCopyFromPreview 的 confirm 分支（I-1）
+  it('"↑ 复制"在 seedContent 非空时弹 confirm,确定=追加', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+    const dialog = mountDialog();
+    await fillRequired(dialog);
+    await dialog.find('textarea.seed-output').setValue('existing content');
+    await dialog.find('button.gen-preview-btn').trigger('click');
+    await flushPromises();
+    await dialog.find('button.copy-btn').trigger('click');
+    await flushPromises();
+    const seedTextarea = dialog.find('textarea.seed-output').element as HTMLTextAreaElement;
+    expect(seedTextarea.value).toBe('existing content\n\nLLM 输出内容');
+  });
+
+  it('"↑ 复制"在 seedContent 非空时弹 confirm,取消=替换', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(false);
+    const dialog = mountDialog();
+    await fillRequired(dialog);
+    await dialog.find('textarea.seed-output').setValue('existing content');
+    await dialog.find('button.gen-preview-btn').trigger('click');
+    await flushPromises();
+    await dialog.find('button.copy-btn').trigger('click');
+    await flushPromises();
+    const seedTextarea = dialog.find('textarea.seed-output').element as HTMLTextAreaElement;
+    expect(seedTextarea.value).toBe('LLM 输出内容');
+    // 提交后 source 应该是 LLM
+    await dialog.find('button.create-btn').trigger('click');
+    await flushPromises();
+    const payload = dialog.emitted('submit')![0][0];
+    expect(payload.preview_first_chapter.source).toEqual({ kind: 'llm', tokens_in: 100, tokens_out: 50 });
+  });
+
+  // 覆盖 seed-source-hint 的 v-if 分支（I-2）
+  it('seed-source-hint: LLM 路径显示消耗 tokens 信息', async () => {
+    const dialog = mountDialog();
+    await fillRequired(dialog);
+    await dialog.find('button.gen-preview-btn').trigger('click');
+    await flushPromises();
+    await dialog.find('button.copy-btn').trigger('click');
+    await flushPromises();
+    expect(dialog.find('.seed-source-hint').text()).toContain('100');
+    expect(dialog.find('.seed-source-hint').text()).toContain('50');
+  });
+
+  it('seed-source-hint: 手写路径显示不消耗 tokens', async () => {
+    const dialog = mountDialog();
+    await fillRequired(dialog);
+    await dialog.find('textarea.seed-output').setValue('hand written');
+    await flushPromises();
+    expect(dialog.find('.seed-source-hint').text()).toContain('不消耗');
+  });
 });
