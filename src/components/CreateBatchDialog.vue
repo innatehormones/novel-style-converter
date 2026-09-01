@@ -12,14 +12,18 @@
         <div class="row">
           <label>提示词模板 *</label>
           <select v-model="promptId" class="prompt-select">
-            <option :value="0" disabled>{{ prompts.length === 0 ? '加载中...' : '选择 prompt...' }}</option>
+            <option :value="0" disabled>
+              {{ promptsLoading ? '加载中...' : (prompts.length === 0 ? '暂无 prompt（请到 Prompts 页面添加）' : '选择 prompt...') }}
+            </option>
             <option v-for="p in filteredPrompts" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
         </div>
         <div class="row">
           <label>模型配置 *</label>
           <select v-model="modelConfigId" class="model-select">
-            <option :value="0" disabled>{{ models.length === 0 ? '加载中...' : '选择 model...' }}</option>
+            <option :value="0" disabled>
+              {{ modelsLoading ? '加载中...' : (models.length === 0 ? '暂无 model（请到 Models 页面添加）' : '选择 model...') }}
+            </option>
             <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }} ({{ m.model }})</option>
           </select>
         </div>
@@ -181,6 +185,9 @@ const emit = defineEmits<{
 
 const prompts = ref<Prompt[]>([]);
 const models = ref<ModelConfig[]>([]);
+/// IPC 加载完成标记 —— 区分"还在加载"和"加载完但空"
+const promptsLoading = ref(true);
+const modelsLoading = ref(true);
 const promptId = ref(0);
 const modelConfigId = ref(0);
 const label = ref('');
@@ -242,12 +249,17 @@ watch(open, async (v) => {
   seedContent.value = '';
   seedSource.value = null;
   onFailurePolicy.value = 'pause_and_review';
+  promptsLoading.value = true;
+  modelsLoading.value = true;
   try {
     const [pRes, mRes] = await Promise.all([listPrompts(), listModels()]);
     prompts.value = pRes;
     models.value = mRes;
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    promptsLoading.value = false;
+    modelsLoading.value = false;
   }
 }, { immediate: true });
 
