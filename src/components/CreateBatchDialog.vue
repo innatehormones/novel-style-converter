@@ -77,41 +77,64 @@
             <span v-if="previewMeta">#{{ previewMeta.idx }} · {{ previewMeta.title }} · {{ previewMeta.wordCount }} 字</span>
             <span v-else>未选章节</span>
           </div>
+
+          <!-- 区 1：原文（只读） -->
           <label class="preview-label">原文</label>
           <textarea
             class="preview-original"
             :value="previewOriginal"
             readonly
             placeholder="(切换预览章节时自动加载)"
-            rows="6"
+            rows="5"
           ></textarea>
-          <div class="preview-actions">
+
+          <!-- 区 2：预览（LLM 输出，可重生成） -->
+          <label class="preview-label">
+            预览
             <Button
+              class="inline-gen-btn"
               kind="default"
               :loading="previewLoading"
               :disabled="!canPreview"
               @click="onGeneratePreview"
             >{{ previewOutput ? '重新生成' : '生成预览' }}</Button>
-            <Button
-              v-if="previewOutput && !previewAccepted"
-              kind="primary"
-              @click="onAcceptPreview"
-            >满意,使用此结果</Button>
-            <Button
-              v-else-if="previewAccepted"
-              kind="primary"
-              @click="onReselectPreview"
-            >已选 ✓ 重新选</Button>
-          </div>
-          <div v-if="previewError" class="preview-error">{{ previewError }}</div>
-          <label class="preview-label">转换预览</label>
+          </label>
           <textarea
             class="preview-output"
             :value="previewOutput"
             readonly
             placeholder="(点上方按钮生成)"
-            rows="10"
+            rows="6"
           ></textarea>
+          <div v-if="previewError" class="preview-error">{{ previewError }}</div>
+
+          <!-- 区 3：转换结果（首章 seed，可空） -->
+          <label class="preview-label">
+            转换结果
+            <span class="label-actions">
+              <Button
+                kind="default"
+                :disabled="!previewLatest || !previewLatest.content.trim()"
+                @click="onCopyFromPreview"
+              >↑ 从预览复制</Button>
+              <Button
+                kind="default"
+                :disabled="!seedContent.trim()"
+                @click="onClearSeed"
+              >清空</Button>
+            </span>
+          </label>
+          <textarea
+            class="seed-output"
+            v-model="seedContent"
+            placeholder="可手写 / 可点↑ 从预览复制 / 可保持空（首章走 LLM 队列）"
+            rows="6"
+          ></textarea>
+          <div v-if="seedSource" class="seed-source-hint">
+            来源：
+            <template v-if="seedSource.kind === 'llm'">LLM（消耗 {{ seedSource.tokens_in }}/{{ seedSource.tokens_out }} tokens）</template>
+            <template v-else>手写（不消耗 tokens）</template>
+          </div>
         </div>
       </div>
     </div>
@@ -135,7 +158,7 @@ import Button from './ui/Button.vue';
 import IconPauseCircle from '~icons/lucide/pause-circle';
 import IconSkipForward from '~icons/lucide/skip-forward';
 import { listModels, listPrompts, previewFirstChapter, getChapter } from '../ipc/commands';
-import type { ModelConfig, Prompt, CreateWorkflowInput, PreviewFirstChapter } from '../ipc/types';
+import type { ModelConfig, Prompt, CreateWorkflowInput, FirstChapterSeed, FirstChapterSeedSource } from '../ipc/types';
 import { formatPromptKind } from '../utils/prompt-locale';
 
 const props = defineProps<{
@@ -160,19 +183,17 @@ const label = ref('');
 const labelError = ref<string | null>(null);
 const includePrev = ref(false);
 const includeNext = ref(false);
-/// 试运行区状态(spec §3.4 / §6.1):用户点「生成预览」→ 调 previewFirstChapter →
-/// 结果暂存 previewOutput,满意后 cache 进 previewFirstChapterRef 传给 create_workflow。
-const previewFirstChapterRef = ref<PreviewFirstChapter | null>(null);
-/// 最近一次 previewFirstChapter IPC 的成功返回(含 tokens_in/out)。
-/// previewLatest 在生成成功时就写入;previewFirstChapterRef 仅在用户点「满意」后从 previewLatest 复制。
-/// spec §6.1:create_workflow 的 preview_first_chapter 入参只能在用户明确确认后携带。
-const previewLatest = ref<PreviewFirstChapter | null>(null);
 const previewLoading = ref(false);
 const previewError = ref<string | null>(null);
 const previewOriginal = ref('');
 const previewOutput = ref('');
-const previewAccepted = ref(false);
+/// 最新一次 previewFirstChapter IPC 的返回（含 tokens_in/out）。
+/// previewLatest 在生成成功时即写入；"↑ 从预览复制"按钮读取它构建 seed。
+const previewLatest = ref<{ content: string; tokens_in: number; tokens_out: number } | null>(null);
 const previewMeta = ref<{ idx: number; title: string; wordCount: number } | null>(null);
+/// "转换结果"区双向绑定。可空 —— 用户不填时，seed=null，首章走 LLM 队列。
+const seedContent = ref('');
+const seedSource = ref<FirstChapterSeedSource | null>(null);
 const onFailurePolicy = ref<CreateWorkflowInput['on_failure_policy']>('pause_and_review');
 const submitting = ref(false);
 const error = ref<string | null>(null);
@@ -188,7 +209,6 @@ const canSubmit = computed(() =>
   modelConfigId.value !== 0 &&
   label.value.trim() !== '' &&
   props.selectedChapterIds.length > 0 &&
-  (previewAccepted.value || !props.previewChapterId) &&
   !submitting.value,
 );
 
@@ -210,13 +230,13 @@ watch(open, async (v) => {
   labelError.value = null;
   includePrev.value = false;
   includeNext.value = false;
-  previewFirstChapterRef.value = null;
   previewLatest.value = null;
   previewOutput.value = '';
   // previewOriginal / previewMeta 由 previewChapterId watcher 管理,不在这里 reset:
   // dialog 挂载时 watcher 已 immediate 触发拉过原文,open 切换不应清掉。
   previewError.value = null;
-  previewAccepted.value = false;
+  seedContent.value = '';
+  seedSource.value = null;
   onFailurePolicy.value = 'pause_and_review';
   try {
     const [pRes, mRes] = await Promise.all([listPrompts(), listModels()]);
@@ -231,10 +251,10 @@ watch(open, async (v) => {
 /// immediate: dialog 挂载时 sources 已经加载好,previewChapterId 已有值,需立即拉原文。
 watch(() => props.previewChapterId, async (id) => {
   // 切换预览章节:丢掉旧预览结果(否则用户可能带着上一个章节的"满意"误传)
-  previewFirstChapterRef.value = null;
   previewLatest.value = null;
   previewOutput.value = '';
-  previewAccepted.value = false;
+  seedContent.value = '';
+  seedSource.value = null;
   previewError.value = null;
   if (id === null) {
     previewOriginal.value = '';
@@ -258,9 +278,7 @@ async function onGeneratePreview() {
     previewError.value = '请先选择 prompt 和 model';
     return;
   }
-  // 新一次生成让旧 acceptance 失效(spec §6.1:cache 只能由「满意」按钮写入)。
-  previewFirstChapterRef.value = null;
-  previewAccepted.value = false;
+  // 重生成预览:覆盖 previewOutput;不动 seedContent(已写的内容不会被 LLM 覆盖)
   previewLatest.value = null;
   previewOutput.value = '';
   previewLoading.value = true;
@@ -284,16 +302,33 @@ async function onGeneratePreview() {
   }
 }
 
-function onAcceptPreview() {
-  if (previewLatest.value === null) return;
-  previewFirstChapterRef.value = previewLatest.value;
-  previewAccepted.value = true;
+/// "↑ 从预览复制"按钮。previewOutput 空时按钮禁用;
+/// seedContent 已非空时弹 confirm 决定追加或替换。
+function onCopyFromPreview() {
+  const out = previewLatest.value;
+  if (!out || !out.content.trim()) return;
+  if (!seedContent.value.trim()) {
+    seedContent.value = out.content;
+    seedSource.value = { kind: 'llm', tokens_in: out.tokens_in, tokens_out: out.tokens_out };
+    return;
+  }
+  const append = window.confirm(
+    '转换结果区已有内容。\n确定=追加到末尾（保留现有内容）\n取消=替换当前内容',
+  );
+  if (append) {
+    seedContent.value = seedContent.value + '\n\n' + out.content;
+    // 追加: source 视为 Llm 混合,保留原 tokens
+  } else {
+    seedContent.value = out.content;
+    seedSource.value = { kind: 'llm', tokens_in: out.tokens_in, tokens_out: out.tokens_out };
+  }
 }
 
-function onReselectPreview() {
-  previewAccepted.value = false;
-  previewFirstChapterRef.value = null;
-  // previewLatest 保留,用户可以再次点「满意」直接复用最近一次生成结果(含 tokens)。
+function onClearSeed() {
+  if (!seedContent.value.trim()) return;
+  if (!window.confirm('清空转换结果区？')) return;
+  seedContent.value = '';
+  seedSource.value = null;
 }
 
 async function onSubmit() {
@@ -322,8 +357,14 @@ async function onSubmit() {
       ctx_prev_transformed: includePrev.value ? 1 : 0,
       ctx_next_original: includeNext.value ? 1 : 0,
       on_failure_policy: onFailurePolicy.value,
-      // 试运行首章结果(spec §3.1 / §3.4):用户点「满意,使用此结果」后 cache 的 PreviewFirstChapter。
-      preview_first_chapter: previewFirstChapterRef.value,
+      // 构造 FirstChapterSeed: seedContent 空 → null（首章走 LLM 队列）;
+//   非空 → { content, source }。
+      preview_first_chapter: seedContent.value.trim()
+        ? {
+            content: seedContent.value.trim(),
+            source: seedSource.value ?? { kind: 'manual' },
+          }
+        : null,
     });
     open.value = false;
   } catch (e: unknown) {
@@ -418,8 +459,19 @@ async function onSubmit() {
   font-family: var(--font-mono);
 }
 .preview-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   font-size: 11px;
   color: var(--text-muted);
+}
+.label-actions {
+  display: flex;
+  gap: 4px;
+}
+.inline-gen-btn {
+  font-size: 12px;
+  padding: 2px 8px;
 }
 .preview-original,
 .preview-output {
@@ -438,10 +490,15 @@ async function onSubmit() {
 }
 .preview-original { max-height: 180px; }
 .preview-output { flex: 1; min-height: 140px; }
-.preview-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.seed-output {
+  width: 100%;
+  font-family: var(--font-serif);
+  font-size: 13px;
+}
+.seed-source-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
 }
 .preview-error {
   color: var(--danger);

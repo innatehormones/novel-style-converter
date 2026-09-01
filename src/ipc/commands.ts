@@ -21,7 +21,7 @@ import type {
   UploadDeletePreview,
   AiCallLog, AiCallLogFilter, AiCallLogPage,
   ChapterPreviewRow, CommitPreviewInput, RegeneratePreviewInput,
-  PreviewFirstChapterInput, PreviewFirstChapterOutput, PreviewFirstChapter,
+  PreviewFirstChapterInput, PreviewFirstChapterOutput,
   AppendChaptersToBatchPayload, AppendChaptersResult,
 } from './types';
 
