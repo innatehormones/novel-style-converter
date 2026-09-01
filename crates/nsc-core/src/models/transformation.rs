@@ -101,13 +101,22 @@ pub struct ChapterPreviewRow {
     pub updated_at: DateTime<Utc>,
 }
 
-/// 用户在「新建工作流」试运行区满意的首章结果,作为创建工作流时的 seed。
-/// 后端事务内把 idx 最小那个 chapter 对应的 tc 标 done + 写 result_content。
+/// 「新建工作流」时，用户可选择为首章预置的内容（"种子"）。
+/// 可不传（None），此时首章由 LLM 在 batch 内正常处理。
+/// 重命名自 PreviewFirstChapter（spec 2026-09-01）；同步加 SeedSource 区分来源。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreviewFirstChapter {
+pub struct FirstChapterSeed {
     pub content: String,
-    pub tokens_in: i32,
-    pub tokens_out: i32,
+    pub source: SeedSource,
+}
+
+/// 首章种子的来源 —— 区分 LLM 出 vs 手写,便于后端正确写 tokens 字段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SeedSource {
+    /// 用户调 previewFirstChapter + 从预览复制 → seed 来自 LLM。
+    Llm { tokens_in: i32, tokens_out: i32 },
+    /// 用户在 dialog 内手写 → 没有 LLM 调用,tokens 为 0。
+    Manual,
 }
 
 /// 「新建工作流」试运行区预览首章的入参(spec §3.4 / §5.1)。
