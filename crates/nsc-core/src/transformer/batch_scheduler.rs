@@ -61,9 +61,8 @@ pub struct WorkflowCreate {
     /// - Terminate: 同 batch 后续 pending → cancelled,batch → Terminated。
     /// - SkipFailed: 当前 tc → Skipped,继续派下一章(batch 留 Running)。
     pub on_failure_policy: OnFailurePolicy,
-    /// 试运行首章结果(由「新建工作流」对话框传入)。Some → 事务内把 idx 最小那个
-    /// chapter 对应的 tc 标 done;None → 全部 tc pending(原行为)。
-    pub preview_first_chapter: Option<crate::models::transformation::PreviewFirstChapter>,
+    /// 试运行首章结果(由「新建工作流」对话框传入)。None → 全部 tc pending;Some → 事务内把 idx 最小那个 chapter 的 tc 按 source 标 done。
+    pub first_chapter_seed: Option<crate::models::transformation::FirstChapterSeed>,
 }
 
 impl BatchScheduler {
@@ -162,7 +161,7 @@ impl BatchScheduler {
             }
             // 试运行首章 seed(spec §3.1):Some → 把 idx 最小那个 chapter 对应的 tc 标 done,
             // wrc.content 同步写。scheduler 后续 advance_batch 跳过该 tc,自然派 idx 次小章节。
-            if let Some(preview) = &spec.preview_first_chapter {
+            if let Some(preview) = &spec.first_chapter_seed {
                 apply_preview_in_tx(&tx, batch_id, &spec.chapter_ids, preview, &now)?;
             }
             tx.commit()?;
@@ -882,7 +881,7 @@ pub(crate) fn apply_preview_in_tx(
     tx: &rusqlite::Transaction,
     batch_id: i64,
     chapter_ids: &[i64],
-    preview: &crate::models::transformation::PreviewFirstChapter,
+    preview: &crate::models::transformation::FirstChapterSeed,
     now: &str,
 ) -> Result<()> {
     if chapter_ids.is_empty() {
@@ -903,9 +902,14 @@ pub(crate) fn apply_preview_in_tx(
             other => other.into(),
         })?;
     // 2. UPDATE tc:标 done + 写 result_content + tokens + completed_at
+    // 按 source 分支取 tokens:Llm 用 LLM 实算;Manual 写 0。
+    let (tokens_in, tokens_out) = match preview.source {
+        crate::models::transformation::SeedSource::Llm { tokens_in, tokens_out } => (tokens_in, tokens_out),
+        crate::models::transformation::SeedSource::Manual => (0, 0),
+    };
     tx.execute(
         "UPDATE transformation_chapters SET status='done', result_content=?1, tokens_in=?2, tokens_out=?3, completed_at=?4 WHERE batch_id=?5 AND chapter_id=?6",
-        rusqlite::params![preview.content, preview.tokens_in, preview.tokens_out, now, batch_id, first_chapter_id],
+        rusqlite::params![preview.content, tokens_in, tokens_out, now, batch_id, first_chapter_id],
     )?;
     // 3. UPDATE wrc:写 content + updated_at
     tx.execute(
