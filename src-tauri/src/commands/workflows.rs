@@ -10,6 +10,26 @@ use nsc_core::transformer::{BatchScheduler, WorkflowCreate};
 
 const CONTENT_PREVIEW_CHARS: usize = 80;
 
+/// IPC 边界的首章种子 DTO(spec 2026-09-01)—— 内嵌 source 字段区分来源。
+/// 后端 nsc_core::models::FirstChapterSeed + SeedSource。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct FirstChapterSeedDto {
+    pub content: String,
+    /// snake_case: `kind: "llm"` / `kind: "manual"`
+    pub source: SeedSourceDto,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SeedSourceDto {
+    Llm {
+        tokens_in: i32,
+        tokens_out: i32,
+    },
+    Manual,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CreateWorkflowPayload {
@@ -23,8 +43,8 @@ pub struct CreateWorkflowPayload {
     pub ctx_prev_transformed: i32,
     pub ctx_next_original: i32,
     pub on_failure_policy: String,
-    /// 试运行首章 seed(spec §3.1 / §4.2)。Some → 事务内把 idx 最小那个 chapter 的 tc 标 done;None → 全部 tc pending。
-    pub preview_first_chapter: Option<PreviewFirstChapter>,
+    /// 试运行首章种子(spec §3.2)。None → 全部 tc pending。
+    pub preview_first_chapter: Option<FirstChapterSeedDto>,
 }
 
 impl CreateWorkflowPayload {
@@ -55,10 +75,17 @@ impl CreateWorkflowPayload {
             // 与 transformation_chapters 列在 schema 0028 后保持一致(详见 batch.rs 同质配置迁移)。
             ctx_next_transformed: 0,
             on_failure_policy,
-            preview_first_chapter: self.preview_first_chapter.map(|p| nsc_core::models::transformation::PreviewFirstChapter {
-                content: p.content,
-                tokens_in: p.tokens_in,
-                tokens_out: p.tokens_out,
+            first_chapter_seed: self.preview_first_chapter.map(|p| match p.source {
+                SeedSourceDto::Llm { tokens_in, tokens_out } =>
+                    nsc_core::models::transformation::FirstChapterSeed {
+                        content: p.content,
+                        source: nsc_core::models::transformation::SeedSource::Llm { tokens_in, tokens_out },
+                    },
+                SeedSourceDto::Manual =>
+                    nsc_core::models::transformation::FirstChapterSeed {
+                        content: p.content,
+                        source: nsc_core::models::transformation::SeedSource::Manual,
+                    },
             }),
         })
     }
