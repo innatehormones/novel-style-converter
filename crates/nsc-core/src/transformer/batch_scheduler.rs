@@ -24,6 +24,7 @@ use crate::models::{
     PromptKind,
 };
 use crate::models::AiCallBusiness;
+use crate::models::transformation::SeedSource;
 use crate::recorder::AiCallRecorder;
 use crate::transformer::{
     DefaultTransformer, JobQueue, JobSpec, ProviderFactory, TransformRequest,
@@ -161,8 +162,8 @@ impl BatchScheduler {
             }
             // 试运行首章 seed(spec §3.1):Some → 把 idx 最小那个 chapter 对应的 tc 标 done,
             // wrc.content 同步写。scheduler 后续 advance_batch 跳过该 tc,自然派 idx 次小章节。
-            if let Some(preview) = &spec.first_chapter_seed {
-                apply_preview_in_tx(&tx, batch_id, &spec.chapter_ids, preview, &now)?;
+            if let Some(seed) = &spec.first_chapter_seed {
+                apply_preview_in_tx(&tx, batch_id, &spec.chapter_ids, seed, &now)?;
             }
             tx.commit()?;
             batch_id
@@ -881,7 +882,7 @@ pub(crate) fn apply_preview_in_tx(
     tx: &rusqlite::Transaction,
     batch_id: i64,
     chapter_ids: &[i64],
-    preview: &crate::models::transformation::FirstChapterSeed,
+    seed: &crate::models::transformation::FirstChapterSeed,
     now: &str,
 ) -> Result<()> {
     if chapter_ids.is_empty() {
@@ -903,18 +904,18 @@ pub(crate) fn apply_preview_in_tx(
         })?;
     // 2. UPDATE tc:标 done + 写 result_content + tokens + completed_at
     // 按 source 分支取 tokens:Llm 用 LLM 实算;Manual 写 0。
-    let (tokens_in, tokens_out) = match preview.source {
-        crate::models::transformation::SeedSource::Llm { tokens_in, tokens_out } => (tokens_in, tokens_out),
-        crate::models::transformation::SeedSource::Manual => (0, 0),
+    let (tokens_in, tokens_out) = match seed.source {
+        SeedSource::Llm { tokens_in, tokens_out } => (tokens_in, tokens_out),
+        SeedSource::Manual => (0, 0),
     };
     tx.execute(
-        "UPDATE transformation_chapters SET status='done', result_content=?1, tokens_in=?2, tokens_out=?3, completed_at=?4 WHERE batch_id=?5 AND chapter_id=?6",
-        rusqlite::params![preview.content, tokens_in, tokens_out, now, batch_id, first_chapter_id],
+        "UPDATE transformation_chapters SET status='done', result_content=?1, tokens_in=?2, tokens_out=?3, started_at=?4, completed_at=?4, error=NULL WHERE batch_id=?5 AND chapter_id=?6",
+        rusqlite::params![seed.content, tokens_in, tokens_out, now, batch_id, first_chapter_id],
     )?;
     // 3. UPDATE wrc:写 content + updated_at
     tx.execute(
         "UPDATE workflow_result_chapters SET content=?1, updated_at=?2 WHERE workflow_result_id=(SELECT id FROM workflow_results WHERE batch_id=?3) AND chapter_id=?4",
-        rusqlite::params![preview.content, now, batch_id, first_chapter_id],
+        rusqlite::params![seed.content, now, batch_id, first_chapter_id],
     )?;
     Ok(())
 }
