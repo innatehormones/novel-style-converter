@@ -1,11 +1,11 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use nsc_core::db::Db;
-use nsc_core::models::{NewTransformationChapter, TransformMode, TransformStatus};
-use nsc_core::transformer::{JobQueue, JobSpec, QueueSnapshot};
+use nsc_core::models::{NewTransformationChapter, PromptKind, TransformStatus};
+use nsc_core::transformer::{BatchScheduler, JobQueue, JobSpec, QueueSnapshot};
 
 #[derive(Debug, Serialize)]
 pub struct TransformationChapterRow {
@@ -14,7 +14,7 @@ pub struct TransformationChapterRow {
     pub chapter_id: i64,
     pub chapter_idx: i32,
     pub chapter_title: String,
-    pub mode: TransformMode,
+    pub mode: PromptKind,
     pub prompt_id: i64,
     pub model_config_id: i64,
     pub status: TransformStatus,
@@ -24,6 +24,8 @@ pub struct TransformationChapterRow {
     pub error: Option<String>,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
+    pub batch_id: Option<i64>,
+    pub style_ref_chapter_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,7 +57,7 @@ fn chapter_lookup(db: &Db, data_asset_id: i64) -> std::collections::HashMap<i64,
         .unwrap_or_default()
 }
 
-fn join_chapter_info(
+pub(crate) fn join_chapter_info(
     db: &Db,
     data_asset_id: i64,
     rows: Vec<nsc_core::models::TransformationChapter>,
@@ -80,6 +82,8 @@ fn join_chapter_info(
                 error: r.error,
                 started_at: r.started_at.map(|t| t.to_rfc3339()),
                 completed_at: r.completed_at.map(|t| t.to_rfc3339()),
+                batch_id: r.batch_id,
+                style_ref_chapter_id: r.style_ref_chapter_id,
             }
         })
         .collect()
@@ -87,10 +91,9 @@ fn join_chapter_info(
 
 #[tauri::command]
 pub fn list_transformation_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     transformation_novel_id: i64,
 ) -> Result<Vec<TransformationChapterRow>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let tn = db
         .transformation_novels()
         .get(transformation_novel_id)
@@ -105,10 +108,9 @@ pub fn list_transformation_chapters(
 
 #[tauri::command]
 pub fn list_transformation_chapters_for_chapter(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     chapter_id: i64,
 ) -> Result<Vec<TransformationChapterRow>, String> {
-    let db = db.lock().map_err(|e| e.to_string())?;
     let ch = db
         .chapters()
         .get(chapter_id)
@@ -129,7 +131,7 @@ pub fn list_transformation_chapters_for_chapter(
 /// 返回所有新 `transformation_chapter.id` 的顺序列表。
 #[tauri::command]
 pub fn enqueue_transformation_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     queue: State<'_, Arc<JobQueue>>,
     payload: EnqueuePayload,
 ) -> Result<Vec<i64>, String> {
@@ -137,7 +139,7 @@ pub fn enqueue_transformation_chapters(
         return Ok(vec![]);
     }
     let (tn, prompt, model_cfg) = {
-        let db = db.lock().map_err(|e| e.to_string())?;
+
         let tn = db
             .transformation_novels()
             .get(payload.transformation_novel_id)
@@ -161,7 +163,7 @@ pub fn enqueue_transformation_chapters(
     let mut ids = Vec::with_capacity(payload.chapter_ids.len());
     let mut jobs: Vec<JobSpec> = Vec::with_capacity(payload.chapter_ids.len());
     {
-        let db = db.lock().map_err(|e| e.to_string())?;
+
         for chapter_id in &payload.chapter_ids {
             let chapter = db
                 .chapters()
@@ -175,7 +177,7 @@ pub fn enqueue_transformation_chapters(
                     tn.data_asset_id
                 ));
             }
-            let mode = TransformMode::from(prompt.kind);
+            let mode = prompt.kind;
             let id = db
                 .transformation_chapters()
                 .insert(&NewTransformationChapter {
@@ -187,11 +189,17 @@ pub fn enqueue_transformation_chapters(
                     ctx_prev_original: payload.ctx_prev_original,
                     ctx_prev_transformed: payload.ctx_prev_transformed,
                     ctx_next_original: payload.ctx_next_original,
+                    batch_id: None,            // 既有 enqueue 路径不接 batch
+                    style_ref_chapter_id: None,
                 })
                 .map_err(|e| e.to_string())?;
             ids.push(id);
+            let tc_for_tn = db.transformation_chapters().get(id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("tc {id} missing"))?;
             jobs.push(JobSpec {
-                transformation_id: id,
+                tc_id: id,
+                tn_id: tc_for_tn.transformation_novel_id,
                 mode,
                 chapter,
                 prompt: prompt.clone(),
@@ -213,12 +221,12 @@ pub fn enqueue_transformation_chapters(
 /// 落库 + 入队流程)。返回新 `transformation_chapter.id` 列表(按 idx 顺序)。
 #[tauri::command]
 pub fn enqueue_all_chapters(
-    db: State<'_, Arc<Mutex<Db>>>,
+    db: State<'_, Arc<Db>>,
     queue: State<'_, Arc<JobQueue>>,
     payload: EnqueueAllPayload,
 ) -> Result<Vec<i64>, String> {
     let chapter_ids: Vec<i64> = {
-        let db = db.lock().map_err(|e| e.to_string())?;
+
         let tn = db
             .transformation_novels()
             .get(payload.transformation_novel_id)
@@ -253,4 +261,28 @@ pub fn enqueue_all_chapters(
 #[tauri::command]
 pub fn get_queue_snapshot(queue: State<'_, Arc<JobQueue>>) -> Result<QueueSnapshot, String> {
     Ok(queue.snapshot())
+}
+
+#[derive(Debug, Serialize)]
+pub struct AppendChaptersResult {
+    pub batch_id: i64,
+    pub added_tc_ids: Vec<i64>,
+}
+
+/// 把 chapter_ids 追加到 stopped batch(spec §3.4 / Task 3-4)。
+/// 薄层委派给 BatchScheduler::append_chapters_to_batch —— 不在此层
+/// 手撸事务、校验或入队,所有逻辑都跟 create_workflow 路径共用。
+#[tauri::command]
+pub fn append_chapters_to_batch(
+    scheduler: State<'_, Arc<BatchScheduler>>,
+    batch_id: i64,
+    chapter_ids: Vec<i64>,
+) -> Result<AppendChaptersResult, String> {
+    let tc_ids = scheduler
+        .append_chapters_to_batch(batch_id, chapter_ids)
+        .map_err(|e| e.to_string())?;
+    Ok(AppendChaptersResult {
+        batch_id,
+        added_tc_ids: tc_ids,
+    })
 }

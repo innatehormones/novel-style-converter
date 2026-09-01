@@ -1,67 +1,183 @@
 <template>
   <section class="data-asset">
-    <header class="header">
-      <h2>{{ store.title || '加载中...' }}</h2>
-      <span class="badge" :class="{ locked: !!store.lockedAt }">
-        {{ store.lockedAt ? '已锁定' : '已解析' }}
-      </span>
-      <span v-if="store.parsedAt" class="src">{{ store.parsedAt }}</span>
-      <Button
-        class="del-btn"
-        kind="danger"
-        :disabled="!!store.lockedAt"
-        :title="store.lockedAt ? 'data_asset 已锁定,无法删除' : ''"
-        @click="onDelete"
-      >删除 data_asset</Button>
-    </header>
+    <PageHeader :title="store.title || '加载中...'" size="small">
+      <template #back>
+        <Button aria-label="返回" @click="onBack">
+          <IconArrowLeft :size="16" :stroke-width="1.5" />
+        </Button>
+      </template>
+      <template #actions>
+        <Button
+          kind="danger"
+          :disabled="store.tnCount > 0"
+          :title="store.tnCount > 0 ? `有 ${store.tnCount} 个工程引用,请先删除工程` : ''"
+          @click="onDelete"
+        >删除资产</Button>
+      </template>
+    </PageHeader>
 
     <div v-if="store.error" class="alert">{{ store.error }}</div>
 
+    <div class="meta-strip">
+      <div class="tags">
+        <span v-if="store.kind === 'promoted'" class="badge derived">派生资产</span>
+        <span v-else class="badge">源资产</span>
+        <span v-if="store.tnCount > 0" class="badge locked">有 {{ store.tnCount }} 个工程</span>
+        <span v-else-if="store.kind === 'source'" class="badge">已解析</span>
+      </div>
+      <div class="meta-text">
+        <span v-if="store.parsedAt">{{ formatTime(store.parsedAt) }}</span>
+        <span v-if="store.sourceWorkflowId !== null" class="src">来自工作流 #{{ store.sourceWorkflowId }}</span>
+        <span v-else-if="store.kind === 'promoted' && store.uploadId !== null" class="src" title="原派生自工作流,工作流已删除,数据资产本身保留">来自上传文件 #{{ store.uploadId }}</span>
+      </div>
+    </div>
+
+    <ConfirmDialog
+      v-model:open="confirmOpen"
+      title="删除数据资产"
+      :message="confirmMessage"
+      kind="danger"
+      confirm-text="删除"
+      @confirm="doDelete"
+    />
+
+    <AlertDialog
+      v-model:open="alertOpen"
+      title="提示"
+      :message="alertMessage"
+    />
+
+    <ConfirmDialog
+      v-model:open="dirtyGuardOpen"
+      title="未保存的修改"
+      message="当前章节有未保存的修改,切换会丢弃。继续?"
+      confirm-text="丢弃修改"
+      kind="danger"
+      @confirm="onConfirmDiscard"
+      @cancel="onCancelDiscard"
+    />
+
     <div class="panes">
       <div class="pane">
-        <div class="pane-title">章节 ({{ store.chapters.length }})</div>
+        <div class="pane-header">
+          <div class="pane-title">章节 ({{ store.chapters.length }})</div>
+        </div>
         <RecycleScroller
           v-if="store.chapters.length > 0"
           class="scroller"
-          :items="store.chapters"
+          :items="chaptersWithIdx"
           :item-size="40"
-          key-field="byte_start"
+          :key-field="'idx'"
         >
           <template #default="{ item, index }">
             <div
               class="chap-row"
               :class="{ active: store.selectedIdx === index }"
-              @click="store.selectChapter(index)"
+              @click="onChapterClick(index)"
             >
               <span class="idx">{{ index + 1 }}</span>
               <span class="title">{{ item.title }}</span>
+              <span v-if="store.sourceKinds[index] === 'transformed'" class="kind-tag transformed" title="来自工作流转换结果">转换</span>
+              <span v-else class="kind-tag original" title="原文(派生 da 失败章节)">原文</span>
+              <span v-if="store.editedAts[index]" class="kind-tag edited" title="用户编辑过">已编辑</span>
               <span class="size">{{ item.word_count }} 字</span>
-              <Button size="small" class="open-tn" @click.stop="openTransform(item.id)">▶ 转换结果</Button>
             </div>
           </template>
         </RecycleScroller>
         <div v-else class="empty">暂无章节</div>
       </div>
       <div class="pane">
-        <div class="pane-title">原文</div>
-        <pre class="content">{{ store.selectedContent }}</pre>
+        <div class="pane-header">
+          <div class="pane-title">原文</div>
+          <span v-if="!store.editing && selectedEditedAt" class="edited-meta">
+            上次编辑 {{ formatTime(selectedEditedAt) }}
+          </span>
+          <div class="pane-actions">
+            <template v-if="store.editing">
+              <span class="editing-tag">编辑中</span>
+              <span class="editing-draft-meta">{{ store.draftContent.length }} 字</span>
+              <Button size="small" :disabled="store.saving" @click="onCancelEdit">取消</Button>
+              <Button
+                size="small"
+                kind="primary"
+                :disabled="!store.editingDirty || store.saving"
+                :loading="store.saving"
+                @click="onSave"
+              >保存</Button>
+            </template>
+            <Button
+              v-else
+              size="small"
+              :disabled="!canEdit"
+              :title="editButtonTitle"
+              @click="onEnterEdit"
+            >编辑</Button>
+          </div>
+        </div>
+        <textarea
+          v-if="store.editing"
+          :value="store.draftContent"
+          class="content content-edit"
+          spellcheck="false"
+          @input="onDraftInput($event)"
+        />
+        <pre v-else class="content">{{ store.selectedContent }}</pre>
       </div>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+/// 给章节加 idx 当唯一 key; ChapterSegment 没有 id, content/title 可能重复
 import { useRoute, useRouter } from 'vue-router';
 import { RecycleScroller } from 'vue-virtual-scroller';
 import Button from '../components/ui/Button.vue';
+import PageHeader from '../components/ui/PageHeader.vue';
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
+import AlertDialog from '../components/ui/AlertDialog.vue';
+import IconArrowLeft from '~icons/lucide/arrow-left';
 import { useDataAssetStore } from '../stores/dataAsset';
 import { useLibraryStore } from '../stores/library';
+import { formatTime } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
 const store = useDataAssetStore();
 const library = useLibraryStore();
+
+const confirmOpen = ref(false);
+const confirmMessage = computed(() => `确认删除数据资产 "${store.title}"？解析出的章节将一并删除，删除后可重新解析。`);
+const alertOpen = ref(false);
+const alertMessage = ref('');
+
+/// dirty 守卫:章节编辑后切换章节/返回前的拦截
+const dirtyGuardOpen = ref(false);
+const pendingSelectIdx = ref<number | null>(null);
+let pendingNavigation: (() => void) | null = null;
+/// 返回按钮触发的导航,在 beforeRouteLeave 里拦;路由组件卸载前如果 dirty 则走弹窗。
+
+const chaptersWithIdx = computed(() =>
+  store.chapters.map((s, idx) => ({ ...s, idx })),
+);
+
+/// 编辑按钮 title:派生资产 / 无章节两种状态
+/// 编辑按钮可点状态:仅看是否已选章节(任意 kind 都能编辑——数据资产是独立数据)
+const canEdit = computed(() => store.selectedIdx !== null);
+
+/// 编辑按钮 title:不可编辑原因(只剩两种)
+const editButtonTitle = computed(() => {
+  if (store.chapters.length === 0) return '暂无章节';
+  if (store.selectedIdx === null) return '请先选中章节';
+  return '';
+});
+
+/// 当前选中章节的 edited_at:给右侧面板头展示用
+const selectedEditedAt = computed(() => {
+  const i = store.selectedIdx;
+  if (i == null) return null;
+  return store.editedAts[i] ?? null;
+});
 
 onMounted(async () => {
   const raw = route.params.dataAssetId;
@@ -74,21 +190,79 @@ onMounted(async () => {
   store.selectFirstIfNone();
 });
 
+/// 离开页面前的全局守卫:有 dirty 编辑 → 弹 dirtyGuard,用户确认丢弃才放行
+function tryLeave(next: () => void): boolean {
+  if (!store.editing || !store.editingDirty) return true;
+  pendingNavigation = next;
+  dirtyGuardOpen.value = true;
+  return false;
+}
+
+function onBack() {
+  if (!tryLeave(() => void router.push('/data-assets'))) return;
+  void router.push('/data-assets');
+}
+
 async function onDelete() {
-  if (store.lockedAt) return;
-  if (!confirm(`确认删除数据资产 "${store.title}"?解析出的章节将一并删除,删除后可重新解析。`)) return;
+  if (store.tnCount > 0) return;
+  confirmOpen.value = true;
+}
+
+async function doDelete() {
   const id = store.dataAssetId;
   if (id == null) return;
+  if (!tryLeave(() => void doDeleteActual(id))) return;
+  await doDeleteActual(id);
+}
+
+async function doDeleteActual(id: number) {
   try {
     await library.removeDataAsset(id);
     void router.push('/data-assets');
   } catch (e: unknown) {
-    alert(e instanceof Error ? e.message : String(e));
+    alertMessage.value = e instanceof Error ? e.message : String(e);
+    alertOpen.value = true;
   }
 }
 
-function openTransform(chapterId: number) {
-  void router.push(`/library/transform/${chapterId}`);
+function onEnterEdit() { store.enterEdit(); }
+function onCancelEdit() { store.cancelEdit(); }
+async function onSave() { await store.saveEdit(); }
+function onDraftInput(e: Event) {
+  const t = (e.target as HTMLTextAreaElement).value;
+  store.onDraftInput(t);
+}
+
+function onChapterClick(idx: number) {
+  if (store.editing && store.editingDirty) {
+    pendingSelectIdx.value = idx;
+    dirtyGuardOpen.value = true;
+    return;
+  }
+  if (store.editing) store.cancelEdit();
+  store.selectChapter(idx);
+}
+
+function onConfirmDiscard() {
+  dirtyGuardOpen.value = false;
+  if (pendingSelectIdx.value !== null) {
+    store.cancelEdit();
+    store.selectChapter(pendingSelectIdx.value);
+    pendingSelectIdx.value = null;
+    return;
+  }
+  if (pendingNavigation) {
+    const nav = pendingNavigation;
+    pendingNavigation = null;
+    store.cancelEdit();
+    nav();
+  }
+}
+
+function onCancelDiscard() {
+  dirtyGuardOpen.value = false;
+  pendingSelectIdx.value = null;
+  pendingNavigation = null;
 }
 </script>
 
@@ -97,19 +271,6 @@ function openTransform(chapterId: number) {
   display: flex;
   flex-direction: column;
   height: 100%;
-}
-.header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-color);
-}
-.header h2 {
-  margin: 0;
-  flex: 1;
-  font-size: 16px;
-  font-weight: var(--font-weight-medium);
 }
 .badge {
   padding: 2px 8px;
@@ -126,8 +287,27 @@ function openTransform(chapterId: number) {
   font-size: 12px;
   color: var(--text-secondary);
 }
-.del-btn {
-  margin-left: auto;
+.meta-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+}
+.tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.meta-text {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.meta-text span + span::before {
+  content: '·';
+  padding: 0 4px;
 }
 .alert {
   margin-top: 12px;
@@ -144,6 +324,9 @@ function openTransform(chapterId: number) {
   min-height: 0;
   margin-top: 12px;
 }
+.pane:first-child {
+  flex: 0 0 280px;
+}
 .pane {
   flex: 1;
   width: 50%;
@@ -154,12 +337,43 @@ function openTransform(chapterId: number) {
   border-radius: var(--radius-pin);
   overflow: hidden;
 }
-.pane-title {
-  padding: 8px 12px;
+.pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 4px 4px 12px;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+.pane-title {
+  padding: 4px 0;
   font-size: 13px;
   color: var(--text-secondary);
-  flex-shrink: 0;
+}
+.pane-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 8px;
+}
+.editing-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  margin-right: 4px;
+  background: var(--color-cinnabar);
+  color: #faf6ee;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.02em;
+}
+.editing-draft-meta {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-right: 4px;
+  font-variant-numeric: tabular-nums;
 }
 .scroller {
   flex: 1;
@@ -209,6 +423,13 @@ function openTransform(chapterId: number) {
   word-break: break-word;
   overflow-y: auto;
   color: var(--text-primary);
+  background: var(--color-sheet);
+}
+.content-edit {
+  border: 1px solid var(--color-cinnabar);
+  outline: none;
+  resize: none;
+  border-radius: 4px;
 }
 .empty {
   flex: 1;
@@ -218,5 +439,37 @@ function openTransform(chapterId: number) {
   color: var(--text-secondary);
   font-size: 13px;
 }
-.open-tn { margin-left: auto; }
+.badge.derived {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-color: #c8e6c9;
+}
+.kind-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+.kind-tag.transformed {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+.kind-tag.original {
+  background: #f5f5f5;
+  color: #757575;
+}
+.kind-tag.edited {
+  background: #fff3e0;
+  color: #e65100;
+}
+.edited-meta {
+  flex: 1;
+  margin-left: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 </style>

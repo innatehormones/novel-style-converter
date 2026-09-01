@@ -40,7 +40,7 @@ export const useLibraryStore = defineStore('library', () => {
     }
   }
 
-  async function upload(input: { filename: string; bytes: number[] }): Promise<UploadSummary> {
+  async function upload(input: { file_path: string; filename: string }): Promise<UploadSummary> {
     uploading.value = true;
     try {
       const result = await ipcUploadFile(input);

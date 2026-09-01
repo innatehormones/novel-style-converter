@@ -1,172 +1,84 @@
+use std::sync::MutexGuard;
 use rusqlite::{params, Connection, Row};
 
 use crate::error::Result;
 use crate::models::{Chapter, NewChapter};
 
-pub struct ChapterRepo<'a> { pub(crate) conn: &'a Connection }
+pub struct ChapterRepo<'a> { pub(crate) conn: MutexGuard<'a, Connection> }
 
-/// 给章节解析页 UI 用的章节段(byte_start/end 允许 NULL 表示老数据)。
-#[derive(Debug, Clone)]
-pub struct ChapterSegmentRow {
-    pub id: i64,
-    pub idx: i32,
-    pub title: String,
-    pub byte_start: Option<i64>,
-    pub byte_end: Option<i64>,
-    pub word_count: i32,
-}
-
-fn segment_from_row(row: &Row<'_>) -> rusqlite::Result<ChapterSegmentRow> {
-    Ok(ChapterSegmentRow {
+fn chapter_from_row(row: &Row<'_>) -> rusqlite::Result<Chapter> {
+    Ok(Chapter {
         id: row.get(0)?,
-        idx: row.get(1)?,
-        title: row.get(2)?,
-        byte_start: row.get(3)?,
-        byte_end: row.get(4)?,
+        data_asset_id: row.get(1)?,
+        idx: row.get(2)?,
+        title: row.get(3)?,
+        body: row.get(4)?,
         word_count: row.get(5)?,
+        source_chapter_id: row.get(6)?,
+        source_kind: row.get(7)?,
+        edited_at: row.get(8)?,
+        title_line: row.get(9)?,
     })
 }
 
 impl<'a> ChapterRepo<'a> {
     pub fn insert(&self, c: &NewChapter) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO chapters (data_asset_id, idx, title, byte_start, byte_end, word_count) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![c.data_asset_id, c.idx, c.title, c.byte_start, c.byte_end, c.word_count],
+            "INSERT INTO chapters (data_asset_id, idx, title, body, word_count, source_kind, source_chapter_id, title_line) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![c.data_asset_id, c.idx, c.title, c.body, c.word_count, c.source_kind.clone(), c.source_chapter_id, c.title_line],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn insert_batch(&self, items: &[NewChapter]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        let mut stmt = tx.prepare(
-            "INSERT INTO chapters (data_asset_id, idx, title, byte_start, byte_end, word_count) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        )?;
-        for c in items {
-            stmt.execute(params![c.data_asset_id, c.idx, c.title, c.byte_start, c.byte_end, c.word_count])?;
-        }
-        drop(stmt);
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// 一次性插入一批章节(同一 data_asset)。data_asset_id 由调用方提供,
-    /// NewChapter 字段里不带 data_asset_id(便于直接用 splitter 输出的字节偏移)。
     pub fn insert_many(&self, data_asset_id: i64, items: &[NewChapter]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO chapters (data_asset_id, idx, title, byte_start, byte_end, word_count) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO chapters (data_asset_id, idx, title, body, word_count, title_line) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
             for c in items {
-                stmt.execute(params![data_asset_id, c.idx, c.title, c.byte_start, c.byte_end, c.word_count])?;
+                stmt.execute(params![data_asset_id, c.idx, c.title, c.body, c.word_count, c.title_line])?;
             }
         }
         tx.commit()?;
         Ok(())
     }
 
-    /// 从 chapters 表读已提交章节,按 idx ASC。
-    pub fn list_segments_by_data_asset(&self, data_asset_id: i64) -> Result<Vec<ChapterSegmentRow>> {
+    pub fn list_by_data_asset(&self, data_asset_id: i64) -> Result<Vec<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, idx, title, byte_start, byte_end, word_count \
-             FROM chapters WHERE data_asset_id = ?1 ORDER BY idx ASC",
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind, edited_at, title_line FROM chapters WHERE data_asset_id = ?1 ORDER BY idx ASC",
         )?;
-        let rows = stmt.query_map(params![data_asset_id], segment_from_row)?;
+        let rows = stmt.query_map(params![data_asset_id], chapter_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
-    pub fn list_by_data_asset(&self, data_asset_id: i64) -> Result<Vec<Chapter>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, byte_start, byte_end, word_count \
-             FROM chapters WHERE data_asset_id = ?1 ORDER BY idx ASC"
+    /// 编辑单章正文:更新 body 并按统一口径(word::count)重算 word_count。
+    /// 不动 idx / title / source_kind / source_chapter_id —— 这些是结构字段。
+    pub fn update_body(&self, id: i64, new_body: &str) -> Result<()> {
+        let wc = crate::text::word_count(new_body) as i64;
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE chapters SET body = ?2, word_count = ?3, edited_at = ?4 WHERE id = ?1",
+            params![id, new_body, wc, now],
         )?;
-        let rows = stmt.query_map(params![data_asset_id], |row| {
-            Ok(Chapter {
-                id: row.get(0)?,
-                data_asset_id: row.get(1)?,
-                idx: row.get(2)?,
-                title: row.get(3)?,
-                byte_start: row.get(4)?,
-                byte_end: row.get(5)?,
-                word_count: row.get(6)?,
-            })
-        })?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        Ok(())
     }
 
     pub fn get(&self, id: i64) -> Result<Option<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, byte_start, byte_end, word_count \
-             FROM chapters WHERE id = ?1"
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind, edited_at, title_line FROM chapters WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
-            Ok(Some(Chapter {
-                id: row.get(0)?,
-                data_asset_id: row.get(1)?,
-                idx: row.get(2)?,
-                title: row.get(3)?,
-                byte_start: row.get(4)?,
-                byte_end: row.get(5)?,
-                word_count: row.get(6)?,
-            }))
+            Ok(Some(chapter_from_row(row)?))
         } else { Ok(None) }
-    }
-
-    /// 单事务内 delete + insert + renumber。失败回滚,旧章节完整保留。
-    /// 解析章节时调用:data_asset 还未锁死时(chapters 可被替换),否则应拒绝。
-    pub fn replace_all_for_data_asset(&self, data_asset_id: i64, items: &[NewChapter]) -> Result<usize> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM chapters WHERE data_asset_id = ?1", params![data_asset_id])?;
-        {
-            let mut stmt = tx.prepare(
-                "INSERT INTO chapters (data_asset_id, idx, title, byte_start, byte_end, word_count) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            )?;
-            for c in items {
-                stmt.execute(params![c.data_asset_id, c.idx, c.title, c.byte_start, c.byte_end, c.word_count])?;
-            }
-        }
-        // renumber 在同一事务内:按 idx ASC, id ASC 把当前(新插入)的章节 idx 拍成 1..N
-        {
-            let mut select_stmt = tx.prepare(
-                "SELECT id FROM chapters WHERE data_asset_id = ?1 \
-                 ORDER BY idx ASC, id ASC",
-            )?;
-            let ids: Vec<i64> = select_stmt
-                .query_map(params![data_asset_id], |row| row.get(0))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            drop(select_stmt);
-            let mut update_stmt =
-                tx.prepare("UPDATE chapters SET idx = ?2 WHERE id = ?1")?;
-            for (i, id) in ids.iter().enumerate() {
-                update_stmt.execute(params![id, (i + 1) as i32])?;
-            }
-        }
-        tx.commit()?;
-        Ok(items.len())
     }
 
     pub fn prev_n(&self, data_asset_id: i64, before_idx: i32, n: i32) -> Result<Vec<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, byte_start, byte_end, word_count \
-             FROM chapters WHERE data_asset_id = ?1 AND idx < ?2 \
-             ORDER BY idx DESC LIMIT ?3"
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind, edited_at, title_line FROM chapters WHERE data_asset_id = ?1 AND idx < ?2              ORDER BY idx DESC LIMIT ?3",
         )?;
-        let rows = stmt.query_map(params![data_asset_id, before_idx, n], |row| {
-            Ok(Chapter {
-                id: row.get(0)?,
-                data_asset_id: row.get(1)?,
-                idx: row.get(2)?,
-                title: row.get(3)?,
-                byte_start: row.get(4)?,
-                byte_end: row.get(5)?,
-                word_count: row.get(6)?,
-            })
-        })?;
+        let rows = stmt.query_map(params![data_asset_id, before_idx, n], chapter_from_row)?;
         let mut v: Vec<Chapter> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
         v.reverse();
         Ok(v)
@@ -174,21 +86,95 @@ impl<'a> ChapterRepo<'a> {
 
     pub fn next_n(&self, data_asset_id: i64, after_idx: i32, n: i32) -> Result<Vec<Chapter>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, data_asset_id, idx, title, byte_start, byte_end, word_count \
-             FROM chapters WHERE data_asset_id = ?1 AND idx > ?2 \
-             ORDER BY idx ASC LIMIT ?3"
+            "SELECT id, data_asset_id, idx, title, body, word_count, source_chapter_id, source_kind, edited_at, title_line FROM chapters WHERE data_asset_id = ?1 AND idx > ?2              ORDER BY idx ASC LIMIT ?3",
         )?;
-        let rows = stmt.query_map(params![data_asset_id, after_idx, n], |row| {
-            Ok(Chapter {
-                id: row.get(0)?,
-                data_asset_id: row.get(1)?,
-                idx: row.get(2)?,
-                title: row.get(3)?,
-                byte_start: row.get(4)?,
-                byte_end: row.get(5)?,
-                word_count: row.get(6)?,
-            })
-        })?;
+        let rows = stmt.query_map(params![data_asset_id, after_idx, n], chapter_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// 重新计算所有 chapter 的 word_count(不再过滤 word_count = 0)。
+    /// 字数定义改了(包含标点)后用这个一次性同步;幂等,Db::open 跑一次就行。
+    pub fn recompute_all_word_count(&self) -> Result<usize> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, body FROM chapters              WHERE length(body) > 0",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut updated = 0;
+        for row in rows {
+            let (id, text) = row?;
+            let wc = crate::text::word_count(&text) as i64;
+            self.conn.execute(
+                "UPDATE chapters SET word_count = ?2 WHERE id = ?1",
+                params![id, wc],
+            )?;
+            updated += 1;
+        }
+        Ok(updated)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Db;
+    use crate::models::{NewDataAsset, NewUpload};
+
+    #[test]
+    fn title_line_round_trips_through_db() {
+        let db = Db::open_in_memory().unwrap();
+        let upload_id = db.uploads().insert(&NewUpload {
+            sha256: "abc".into(),
+            filename: "t.txt".into(),
+            byte_size: 0,
+            file_path: String::new(),
+            original_text: String::new(),
+            word_count: 0,
+        }).unwrap();
+        let da_id = db.data_assets().insert(&NewDataAsset {
+            upload_id,
+            title: "DA".into(),
+            source_filename: "t.txt".into(),
+            ..Default::default()
+        }).unwrap();
+        let id = db.chapters().insert(&NewChapter {
+            data_asset_id: da_id,
+            title: "Chapter 1".into(),
+            body: "body".into(),
+            word_count: 1,
+            title_line: Some(42),
+            ..Default::default()
+        }).unwrap();
+        let got = db.chapters().get(id).unwrap().unwrap();
+        assert_eq!(got.title_line, Some(42), "title_line 没被写入第 9 列或读出列序错位");
+    }
+
+    #[test]
+    fn title_line_null_round_trips_through_db() {
+        let db = Db::open_in_memory().unwrap();
+        let upload_id = db.uploads().insert(&NewUpload {
+            sha256: "def".into(),
+            filename: "u.txt".into(),
+            byte_size: 0,
+            file_path: String::new(),
+            original_text: String::new(),
+            word_count: 0,
+        }).unwrap();
+        let da_id = db.data_assets().insert(&NewDataAsset {
+            upload_id,
+            title: "DA".into(),
+            source_filename: "u.txt".into(),
+            ..Default::default()
+        }).unwrap();
+        let id = db.chapters().insert(&NewChapter {
+            data_asset_id: da_id,
+            title: "Promoted".into(),
+            body: "x".into(),
+            word_count: 1,
+            ..Default::default() // title_line: None
+        }).unwrap();
+        let got = db.chapters().get(id).unwrap().unwrap();
+        assert_eq!(got.title_line, None, "title_line: None 应存为 NULL 并读回 None");
     }
 }

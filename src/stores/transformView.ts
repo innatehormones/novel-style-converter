@@ -3,7 +3,6 @@ import { computed, ref } from 'vue';
 import {
   getChapter as ipcGetChapter,
   listChapters as ipcListChapters,
-  getDataAssetContent as ipcGetDataAssetContent,
   listTransformationChaptersForChapter as ipcListTnForChapter,
 } from '../ipc/commands';
 import type { Chapter, ChapterMeta, TransformationChapterRow } from '../ipc/types';
@@ -13,7 +12,6 @@ export const useTransformViewStore = defineStore('transformView', () => {
   const dataAssetId = ref<number | null>(null);
   const chapter = ref<Chapter | null>(null);
   const allChapters = ref<ChapterMeta[]>([]);
-  const originalText = ref<string>('');
   const transformations = ref<TransformationChapterRow[]>([]);
   const selectedTransformationId = ref<number | null>(null);
   const loading = ref(false);
@@ -25,7 +23,6 @@ export const useTransformViewStore = defineStore('transformView', () => {
     chapterId.value = id;
     chapter.value = null;
     allChapters.value = [];
-    originalText.value = '';
     transformations.value = [];
     selectedTransformationId.value = null;
     loading.value = true;
@@ -35,22 +32,19 @@ export const useTransformViewStore = defineStore('transformView', () => {
     try {
       const ch = await ipcGetChapter(id);
       dataAssetId.value = ch.data_asset_id;
-      const [chs, content, tns] = await Promise.all([
+      const [chs, tns] = await Promise.all([
         ipcListChapters(ch.data_asset_id),
-        ipcGetDataAssetContent(ch.data_asset_id),
         ipcListTnForChapter(id),
       ]);
       if (token !== requestToken) return;
       chapter.value = ch;
       allChapters.value = chs;
-      originalText.value = content;
       transformations.value = tns;
       selectedTransformationId.value = tns[0]?.id ?? null;
     } catch (e: unknown) {
       if (token === requestToken) {
         chapter.value = null;
         allChapters.value = [];
-        originalText.value = '';
         transformations.value = [];
         selectedTransformationId.value = null;
         error.value = e instanceof Error ? e.message : String(e);
@@ -88,11 +82,7 @@ export const useTransformViewStore = defineStore('transformView', () => {
     transformations.value.find((t) => t.id === selectedTransformationId.value) ?? null,
   );
 
-  const originalContent = computed(() => {
-    const ch = chapter.value;
-    if (!ch) return '';
-    return originalText.value.slice(ch.byte_start, ch.byte_end);
-  });
+  const originalContent = computed(() => chapter.value?.body ?? '');
 
   const canGoPrev = computed(() => currentIndex.value > 0);
   const canGoNext = computed(() => {
@@ -101,7 +91,7 @@ export const useTransformViewStore = defineStore('transformView', () => {
   });
 
   return {
-    chapterId, dataAssetId, chapter, allChapters, originalText,
+    chapterId, dataAssetId, chapter, allChapters,
     transformations, selectedTransformationId, selectedTransformation,
     loading, error, originalContent, canGoPrev, canGoNext,
     load, refresh, selectTransformation, gotoChapter,

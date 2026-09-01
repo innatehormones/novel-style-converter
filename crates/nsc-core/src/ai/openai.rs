@@ -21,6 +21,15 @@ struct WireUsage {
     #[serde(default)] completion_tokens: i32,
 }
 
+/// wire 格式:`{"type": "..."}` —— Anthropic Messages API 风格思考控制字段。
+/// OpenAI Chat Completions 协议服务端会忽略未知字段,MiniMax 等 Anthropic 风格
+/// provider 会接受并据此开关 thinking 输出。
+#[derive(Debug, serde::Serialize)]
+struct ThinkingWire<'a> {
+    #[serde(rename = "type")]
+    t: &'a str,
+}
+
 #[derive(Debug, serde::Serialize)]
 struct WireRequest<'a> {
     model: &'a str,
@@ -29,6 +38,10 @@ struct WireRequest<'a> {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<ThinkingWire<'a>>,
 }
 #[derive(Debug, serde::Serialize)]
 struct WireOutMsg<'a> { role: &'a str, content: &'a str }
@@ -66,6 +79,8 @@ impl AiProvider for OpenAiProvider {
             messages: out,
             temperature: req.temperature,
             max_tokens: req.max_tokens,
+            reasoning_effort: req.reasoning_effort.as_deref(),
+            thinking: req.thinking.as_deref().map(|t| ThinkingWire { t }),
         };
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -75,7 +90,7 @@ impl AiProvider for OpenAiProvider {
         let resp = self.client.post(&url).headers(headers).json(&body).send().await?;
         let status = resp.status();
         if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = resp.text().await?;
             return Err(Error::Ai(format!("http {status}: {text}")));
         }
         let wire: WireResponse = resp.json().await?;
@@ -84,7 +99,7 @@ impl AiProvider for OpenAiProvider {
             .message.content;
         let (in_t, out_t) = wire.usage
             .map(|u| (u.prompt_tokens, u.completion_tokens))
-            .unwrap_or((0, 0));
+            .ok_or_else(|| Error::Ai("usage field missing in response".into()))?;
         Ok(ChatResponse {
             content,
             tokens_in: in_t,

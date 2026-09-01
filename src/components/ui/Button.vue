@@ -1,10 +1,11 @@
 <template>
   <button
     class="btn"
-    :class="[kind, size]"
+    :class="[kind, size, { loading }]"
     :disabled="disabled || loading"
     @click="emit('click', $event)"
   >
+    <span v-if="loading" class="btn-spinner" />
     <slot />
   </button>
 </template>
@@ -68,6 +69,19 @@ const emit = defineEmits<{ click: [MouseEvent] }>();
   border-color: var(--color-cinnabar-deep);
   color: var(--color-cinnabar-deep);
 }
+.btn.loading { cursor: progress; }
+.btn-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 0.7s linear infinite;
+  vertical-align: middle;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
 .btn.danger:hover:not(:disabled) {
   background: var(--color-cinnabar-deep);
   color: #faf6ee;

@@ -4,5 +4,5 @@
   "description": "Default capability for the main window",
   "local": true,
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }

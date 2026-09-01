@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm dev",
     "beforeBuildCommand": "pnpm build",
-    "devUrl": "http://localhost:43801",
+    "devUrl": "http://127.0.0.1:43801",
     "frontendDist": "../dist"
   },
   "bundle": {
@@ -17,17 +17,22 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "resources": [
+      "resources/models.dev/api.json"
     ]
   },
   "app": {
     "windows": [
       {
-        "title": "novel-style-converter",
+        "title": "小说风格转换器",
         "width": 1024,
         "height": 720,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "dragDropEnabled": false
       }
     ],
     "security": {

@@ -6,12 +6,12 @@
     </div>
     <div class="row">
       <label>标题 *</label>
-      <Input v-model="title" placeholder="如:斗破_热血版" />
+      <Input v-model="title" placeholder="如:斗破_热血版" class="title-input" />
     </div>
     <div v-if="error" class="error">{{ error }}</div>
     <template #footer>
       <Button @click="open = false">取消</Button>
-      <Button kind="primary" :disabled="title.trim() === '' || submitting" @click="onSubmit">创建</Button>
+      <Button kind="primary" class="submit" :disabled="title.trim() === '' || submitting" @click="onSubmit">创建</Button>
     </template>
   </Dialog>
 </template>
@@ -24,25 +24,32 @@ import Input from './ui/Input.vue';
 
 const props = defineProps<{ dataAssetId: number }>();
 const open = defineModel<boolean>('open', { required: true });
-const emit = defineEmits<{ submit: [{ data_asset_id: number; title: string }] }>();
+const emit = defineEmits<{
+  submit: [{
+    data_asset_id: number;
+    title: string;
+  }];
+}>();
 
 const title = ref('');
-const error = ref<string | null>(null);
 const submitting = ref(false);
+const error = ref<string | null>(null);
 
 watch(open, (v) => {
-  if (v) {
-    title.value = '';
-    error.value = null;
-    submitting.value = false;
-  }
+  if (!v) return;
+  title.value = '';
+  error.value = null;
+  submitting.value = false;
 });
 
 async function onSubmit() {
   error.value = null;
   submitting.value = true;
   try {
-    emit('submit', { data_asset_id: props.dataAssetId, title: title.value.trim() });
+    emit('submit', {
+      data_asset_id: props.dataAssetId,
+      title: title.value.trim(),
+    });
     open.value = false;
   } finally {
     submitting.value = false;
@@ -62,6 +69,19 @@ async function onSubmit() {
   font-size: 14px;
   color: var(--text-secondary);
   flex-shrink: 0;
+}
+.row select {
+  flex: 1;
+  height: 34px;
+  padding: 6px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+  box-sizing: border-box;
 }
 .hint { font-size: 13px; color: var(--text-muted); }
 .error { color: var(--danger); font-size: 12px; }

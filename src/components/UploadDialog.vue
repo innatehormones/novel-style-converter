@@ -1,11 +1,27 @@
 <template>
-  <Dialog v-model:open="open" title="上传 .txt 文件" :width="480">
-    <div class="row">
-      <label>文本文件 *</label>
-      <input ref="fileInput" type="file" accept=".txt" @change="onFile" />
-    </div>
-    <div v-if="fileInfo" class="file-info">
-      {{ fileInfo.name }} · {{ (fileInfo.size / 1024).toFixed(1) }} KB
+  <Dialog v-model:open="open" title="上传 .txt 文件" :width="500">
+    <div
+      class="file-slot"
+      :class="{ filled: !!fileInfo }"
+      role="button"
+      tabindex="0"
+      @click="onPick"
+      @keydown.enter.prevent="onPick"
+      @keydown.space.prevent="onPick"
+    >
+      <template v-if="!fileInfo">
+        <IconFileText :size="36" :stroke-width="1.5" class="slot-icon" />
+        <div class="slot-title">点击选择 .txt 文件</div>
+        <div class="slot-sub">导入后可解析为章节、生成数据资产</div>
+      </template>
+      <template v-else>
+        <IconFileCheck2 :size="28" :stroke-width="1.6" class="slot-icon filled" />
+        <div class="slot-info">
+          <div class="slot-name">{{ filename }}</div>
+          <div class="slot-path" :title="filePath">{{ filePath }}</div>
+        </div>
+        <button type="button" class="slot-replace" @click.stop="onPick">更换</button>
+      </template>
     </div>
     <div v-if="error" class="error">{{ error }}</div>
     <template #footer>
@@ -17,60 +33,62 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import IconFileText from '~icons/lucide/file-text';
+import IconFileCheck2 from '~icons/lucide/file-check-2';
 import Dialog from './ui/Dialog.vue';
 import Button from './ui/Button.vue';
 
 const open = defineModel<boolean>('open', { required: true });
-const emit = defineEmits<{ submit: [{ filename: string; bytes: number[] }] }>();
+const emit = defineEmits<{ submit: [{ filePath: string; filename: string }] }>();
 
+const filePath = ref('');
 const filename = ref('');
-const fileSize = ref(0);
-const bytes = ref<number[] | null>(null);
 const error = ref<string | null>(null);
 const submitting = ref(false);
-const fileInput = ref<HTMLInputElement | null>(null);
+const picking = ref(false);
 
-const fileInfo = computed(() =>
-  filename.value ? { name: filename.value, size: fileSize.value } : null,
-);
-
-const canSubmit = computed(() => bytes.value !== null);
+const fileInfo = computed(() => (filePath.value ? { name: filename.value, path: filePath.value } : null));
+const canSubmit = computed(() => filePath.value !== '');
 
 watch(open, (v) => {
   if (v) {
+    filePath.value = '';
     filename.value = '';
-    fileSize.value = 0;
-    bytes.value = null;
     error.value = null;
     submitting.value = false;
-    if (fileInput.value) fileInput.value.value = '';
+    picking.value = false;
   }
 });
 
-function onFile(e: Event) {
-  const f = (e.target as HTMLInputElement).files?.[0];
-  if (!f) return;
-  filename.value = f.name;
-  fileSize.value = f.size;
-  const reader = new FileReader();
-  reader.onload = () => {
-    const buf = reader.result;
-    if (buf instanceof ArrayBuffer) {
-      bytes.value = Array.from(new Uint8Array(buf));
-    } else {
-      error.value = '读文件失败';
+async function onPick() {
+  if (picking.value) return;
+  error.value = null;
+  picking.value = true;
+  try {
+    const selected = await openDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'Text', extensions: ['txt'] }],
+    });
+    if (typeof selected === 'string') {
+      filePath.value = selected;
+      const segs = selected.split(/[\\/]/);
+      filename.value = segs[segs.length - 1] || 'uploaded.txt';
     }
-  };
-  reader.onerror = () => { error.value = '读文件失败'; };
-  reader.readAsArrayBuffer(f);
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    picking.value = false;
+  }
 }
 
-async function onSubmit() {
-  if (bytes.value === null) return;
+function onSubmit() {
+  if (!canSubmit.value) return;
   error.value = null;
   submitting.value = true;
   try {
-    emit('submit', { filename: filename.value, bytes: bytes.value });
+    emit('submit', { filePath: filePath.value, filename: filename.value });
     open.value = false;
   } finally {
     submitting.value = false;
@@ -79,29 +97,90 @@ async function onSubmit() {
 </script>
 
 <style scoped>
-.row {
+.file-slot {
+  border: 1.5px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--bg-hover);
+  padding: 32px 20px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  margin-bottom: 12px;
-  gap: 12px;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+  user-select: none;
+  outline: none;
 }
-.row label {
-  width: 90px;
-  font-size: 14px;
+.file-slot:hover,
+.file-slot:focus-visible {
+  border-color: var(--border-color);
+}
+.file-slot.filled {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  cursor: default;
+}
+.slot-icon {
   color: var(--text-secondary);
   flex-shrink: 0;
 }
-.row input[type=file] {
-  flex: 1;
+.slot-icon.filled {
+  color: var(--accent);
 }
-.file-info {
+.slot-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.slot-sub {
   font-size: 12px;
   color: var(--text-muted);
-  margin-bottom: 12px;
+}
+.slot-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.slot-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-replace {
+  background: none;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pin);
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 4px 10px;
+  font-family: inherit;
+  flex-shrink: 0;
+  transition: background 120ms ease, color 120ms ease;
+}
+.slot-replace:hover {
+  background: var(--accent);
+  color: #fff;
 }
 .error {
+  margin-top: 10px;
   color: var(--danger);
   font-size: 12px;
-  margin-bottom: 8px;
 }
 </style>

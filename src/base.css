@@ -3,7 +3,7 @@
     subject = 中文长篇小说处理工具. 视觉语言搬自手稿编辑:浅米纸底,
     红线 hairline 替代灰,主色 = 朱砂红 (single committed accent).
     字体 = 思源宋体(标题) + 思源黑体(正文) + Mono(id/计数).
-    装饰集中在 "做标记" 这一处:MarkerButton = 朱红印章 "章".
+    装饰集中在 "做标记" 这一处:CM6 gutter 章 stamp (parse.vue .cm-marker-stamp) = 朱红印章 "章".
 */
 
 :root,
@@ -28,6 +28,7 @@
   /* Accent — 朱砂红 */
   --color-cinnabar: #c73a1d;         /* 主朱(印章/border/primary) */
   --color-cinnabar-deep: #8a2715;    /* 深朱(active/hover) */
+  --color-cinnabar-darker: #5e1a0d;   /* 更深朱(危险/destructive) */
   --color-cinnabar-light: #f5e4dc;   /* 极浅朱(soft bg/active) */
 
   /* Status tints — 弱化,围绕朱红家族 */
@@ -86,6 +87,15 @@
   --bg-section: var(--color-paper);
   --bg-active: var(--color-cinnabar-light);
 
+  /* Scrollbar — 细墨线,透明 track,克制 */
+  --scrollbar-width: 8px;
+  --scrollbar-thumb: var(--color-fog);
+  --scrollbar-thumb-hover: var(--color-graphite);
+  --scrollbar-track: transparent;
+
+  /* Overlay —— 弹窗/loading 遮罩背景,纸色 + alpha */
+  --overlay-bg: rgba(250, 246, 238, 0.85);
+
   --text-primary: var(--color-ink);
   --text-secondary: var(--color-graphite);
   --text-muted: var(--color-fog);
@@ -113,9 +123,10 @@
 }
 
 :root[data-theme='dark'] {
-  --color-paper: #181613;
-  --color-sheet: #221f1b;
-  --color-paper-mist: #1f1c18;
+  /* 暗色 —— 暖暗纸,非 OLED 纯黑;抬一档亮度保证层级/线条/激活态可读 */
+  --color-paper: #1d1a16;
+  --color-sheet: #292420;
+  --color-paper-mist: #221e19;
 
   --color-ink: #efeae0;
   --color-graphite: #d8d2c8;
@@ -123,24 +134,29 @@
   --color-fog: #847c70;
   --color-silver: #5c564f;
 
-  --color-rule-soft: #2a2622;
-  --color-rule: #3a3530;
-  --color-rule-rouge: #4a2a22;
+  --color-rule-soft: #3a342c;
+  --color-rule: #4d4338;
+  --color-rule-rouge: #5e3424;
 
   --color-cinnabar: #e36b50;
   --color-cinnabar-deep: #c4533a;
-  --color-cinnabar-light: #3a1f17;
+  --color-cinnabar-light: #4d2a20;
 
-  --color-soft-mint: #1a2a1e;
+  --color-soft-mint: #233d2a;
   --color-vivid-green: #6fa874;
-  --color-soft-yellow: #3a2e15;
+  --color-soft-yellow: #4a3a18;
   --color-tangerine: #d68840;
-  --color-soft-red: #3a1f17;
+  --color-soft-red: #4a2820;
 
   --bg-app: var(--color-paper);
   --bg-card: var(--color-sheet);
   --bg-sidebar: var(--color-paper-mist);
   --bg-hover: var(--color-sheet);
+
+  --scrollbar-thumb: var(--color-slate);
+  --scrollbar-thumb-hover: var(--color-graphite);
+  --scrollbar-track: transparent;
+  --overlay-bg: rgba(29, 26, 22, 0.85);
   --bg-section: var(--color-paper);
 
   --text-primary: var(--color-ink);
@@ -184,6 +200,71 @@ input,
 select,
 textarea {
   font-family: inherit;
+}
+
+/* 滚动条 —— 全局统一,WebView2/Chromium + Firefox 双兜底 */
+::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+  height: var(--scrollbar-width);
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 120ms ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+/* 行内文本链按钮 — 表格操作列专用,无边框/无背景的浅色下划线链 */
+.row-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-slate);
+  cursor: pointer;
+  text-decoration: underline transparent;
+  text-underline-offset: 3px;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+.row-link:disabled,
+.row-link[disabled] {
+  cursor: not-allowed;
+  opacity: 0.45;
+  color: var(--text-muted);
+}
+.row-link:disabled:hover,
+.row-link[disabled]:hover {
+  color: var(--text-muted);
+  text-decoration-color: transparent;
+}
+.row-link:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+.row-link.danger:hover {
+  color: var(--color-cinnabar-darker);
+  text-decoration-color: currentColor;
+}
+.row-sep {
+  display: inline-block;
+  margin: 0 8px;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 h2 {
   margin: 0;

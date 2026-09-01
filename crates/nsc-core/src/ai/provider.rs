@@ -16,6 +16,14 @@ pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<i32>,
+    /// OpenAI o1/o3/o4-mini 风格的努力等级 —— None = 不传该字段。
+    /// 由 OpenAiProvider 在请求体里塞 `reasoning_effort`: <value>。
+    /// 非 OpenAI 兼容协议的模型(如 Anthropic 原生)忽略该字段。
+    pub reasoning_effort: Option<String>,
+    /// Anthropic Messages API 风格的思考控制字段 —— 发到 wire 时变成 `thinking: {\"type\": ...}`。
+    /// 当前只为 MiniMax 模型自动填 \"disabled\"(其协议上正确的字段名),
+    /// OpenAI Chat Completions 协议的服务端会忽略未知字段。
+    pub thinking: Option<String>,
 }
 
 #[derive(Debug, Clone)]
